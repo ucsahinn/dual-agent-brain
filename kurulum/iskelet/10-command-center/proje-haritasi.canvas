@@ -1,0 +1,47 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "text",
+      "text": "## Proje haritasi\n\nBos iskelet. Projelerini ve\naralarindaki iliskileri buraya ciz.",
+      "x": -400,
+      "y": -120,
+      "width": 300,
+      "height": 120
+    },
+    {
+      "id": "n2",
+      "type": "text",
+      "text": "Proje notlari:\n`30-projects/`",
+      "x": -40,
+      "y": 80,
+      "width": 220,
+      "height": 120
+    },
+    {
+      "id": "n3",
+      "type": "text",
+      "text": "Acik isler:\n`80-memory/active-threads.md`",
+      "x": 240,
+      "y": -120,
+      "width": 240,
+      "height": 120
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "fromNode": "n1",
+      "fromSide": "right",
+      "toNode": "n2",
+      "toSide": "left"
+    },
+    {
+      "id": "e2",
+      "fromNode": "n2",
+      "fromSide": "right",
+      "toNode": "n3",
+      "toSide": "left"
+    }
+  ]
+}

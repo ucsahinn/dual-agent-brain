@@ -1,0 +1,46 @@
+# Beyin motor deposu - BURAYA NOT GIRMEZ.
+#
+# Bu depo yalnizca motoru, kurulumu ve BOS vault iskeletini tasir. Kisisel
+# notlar, gunluk loglar ve derlenmis kavramlar bilerek DISARIDA birakilmistir:
+# beynin icerigi kullanicinin makinesinde kalir.
+#
+# Asagidaki desenler, bu depo bir vault olarak kullanilirsa (klonla + kur.ps1)
+# uretilen icerigin yanlislikla geri commit edilmesini engeller.
+
+# Makine bolgeleri - motor uretir
+85-daylogs/*
+!85-daylogs/.gitkeep
+86-compiled/*
+!86-compiled/.gitkeep
+90-archive/*
+!90-archive/.gitkeep
+
+# Kuratorlu bolgeler - kullanicinin kendi icerigi
+00-inbox/*
+!00-inbox/.gitkeep
+20-goals/*
+!20-goals/.gitkeep
+30-projects/*
+!30-projects/.gitkeep
+40-knowledge/*
+!40-knowledge/.gitkeep
+50-research/*
+!50-research/.gitkeep
+60-decisions/*
+!60-decisions/.gitkeep
+70-personal/*
+!70-personal/.gitkeep
+80-memory/*
+!80-memory/.gitkeep
+10-command-center/*
+!10-command-center/.gitkeep
+
+# Motor durumu, yedekler, gecici dosyalar
+motor/scripts/.state/
+motor/hooks/.state/
+.brain/
+.obsidian/workspace*.json
+.obsidian/cache/
+*.tmp-*
+*.yedek-*
+.beyin-yayin

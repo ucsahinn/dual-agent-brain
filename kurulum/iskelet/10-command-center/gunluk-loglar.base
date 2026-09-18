@@ -1,0 +1,44 @@
+filters:
+  and:
+    - file.inFolder("85-daylogs")
+    # Gunluk loglarin frontmatter'i type: "session-summary" tasir (flush.ps1
+    # sema uyumu icin boyle uretir) - 'daylog' DEGIL. README notu 'knowledge'
+    # oldugu icin kendiliginden disarida kalir.
+    - 'type == "session-summary"'
+formulas:
+  ay: 'file.name.slice(0, 7)'
+  gun_once: '((now() - file.ctime) / 86400000).round(0)'
+properties:
+  title:
+    displayName: "Baslik"
+  formula.ay:
+    displayName: "Ay"
+  formula.gun_once:
+    displayName: "Kac gun once"
+  file.name:
+    displayName: "Tarih"
+  file.mtime:
+    displayName: "Son degisiklik"
+views:
+  - type: table
+    name: "Tum loglar"
+    order:
+      - file.name
+      - note.title
+      - formula.gun_once
+      - file.mtime
+    sort:
+      - property: file.name
+        direction: DESC
+    limit: 200
+  - type: table
+    name: "Aya gore"
+    groupBy:
+      property: formula.ay
+      direction: DESC
+    order:
+      - file.name
+      - note.title
+    sort:
+      - property: file.name
+        direction: DESC

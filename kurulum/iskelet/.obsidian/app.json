@@ -1,0 +1,12 @@
+{
+  "newFileLocation": "folder",
+  "newFileFolderPath": "00-inbox",
+  "newLinkFormat": "relative",
+  "useMarkdownLinks": false,
+  "userIgnoreFilters": [
+    ".brain/",
+    "kurulum/",
+    "90-archive/",
+    "motor/"
+  ]
+}

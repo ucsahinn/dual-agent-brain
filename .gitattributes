@@ -1,0 +1,41 @@
+# Satir sonu politikasi - ACIKCA yaziliyor, kullanicinin core.autocrlf
+# ayarina birakilmiyor.
+#
+# NEDEN VAR: iki ayri ajan (Claude Code / Codex) ayni kasaya yazarken karisik
+# satir sonlari her commit'te "LF will be replaced by CRLF" uyarisi ve hayalet
+# diff uretir. Politika burada ACIKCA yaziliyor ki kullanicinin core.autocrlf
+# ayarina bagli kalmasin.
+
+* text=auto
+
+# Vault icerigi - LF
+*.md      text eol=lf
+*.canvas  text eol=lf
+*.base    text eol=lf
+*.json    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.css     text eol=lf
+*.txt     text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# Kabuk betikleri - LF ZORUNLU: CRLF shebang'i bozar ("env: 'bash\r'").
+*.sh      text eol=lf
+
+# PowerShell - Windows'a ozgu, CRLF konvansiyonel.
+# NOT: bu betikler UTF-8 BOM ile baslamak ZORUNDA (PS 5.1 BOM'suz .ps1'i
+# ANSI okur ve ASCII-disi karakterde parse hatasi verir). Satir sonu
+# donusumu BOM'u etkilemez; doktor'un 'betik BOM' kontrolu ayrica bakiyor.
+*.ps1     text eol=crlf
+*.psm1    text eol=crlf
+*.psd1    text eol=crlf
+
+# Ikili varliklar - dokunma
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.pdf     binary
+*.zip     binary
+*.exe     binary

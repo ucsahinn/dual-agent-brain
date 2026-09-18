@@ -1,0 +1,68 @@
+/* beyin-bolgeler.css
+   Dosya gezgininde makine-sahipli ve kuratorlu bolgeleri gorsel olarak ayirir.
+   Amac: "elle duzenleme" kuralini goz hizasinda tutmak.
+
+   Acmak icin: Obsidian -> Settings -> Appearance -> CSS snippets -> yenile -> anahtari ac
+*/
+
+/* --- Makine-sahipli: motor yazar, elle duzenlenmez --- */
+.nav-folder-title[data-path^="85-daylogs"],
+.nav-folder-title[data-path^="86-compiled"] {
+  color: #e08a3c;
+  font-style: italic;
+}
+
+.nav-folder-title[data-path^="85-daylogs"] .nav-folder-title-content::after,
+.nav-folder-title[data-path^="86-compiled"] .nav-folder-title-content::after {
+  content: " makine";
+  font-size: 0.7em;
+  opacity: 0.55;
+  font-style: normal;
+  letter-spacing: 0.04em;
+}
+
+/* --- Sureklilik bellegi: kuratorlu, onizleme ile guncellenir --- */
+.nav-folder-title[data-path^="80-memory"] {
+  color: #4caf50;
+}
+
+/* --- Kanonik bilgi ve kararlar --- */
+.nav-folder-title[data-path^="40-knowledge"],
+.nav-folder-title[data-path^="60-decisions"] {
+  color: #4c8dda;
+  font-weight: 600;
+}
+
+/* --- Arsiv: soluk --- */
+.nav-folder-title[data-path^="90-archive"] {
+  opacity: 0.6;
+}
+
+/* --- Makine bolgesindeki bir not acikken baslikta uyari serididi --- */
+.workspace-leaf-content[data-type="markdown"] .view-header-title-container:has(
+  .view-header-breadcrumb[aria-label*="85-daylogs"]
+)::after,
+.workspace-leaf-content[data-type="markdown"] .view-header-title-container:has(
+  .view-header-breadcrumb[aria-label*="86-compiled"]
+)::after {
+  content: "makine-sahipli - elle duzenleme";
+  font-size: 0.72em;
+  color: #e08a3c;
+  opacity: 0.8;
+  margin-left: 0.75em;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Obsidian'in kendi '.mod-fade:not(.mod-at-end):after' kurali ayni     */
+/* pseudo-elementi kullaniyor (position:absolute; width:30px). Uzun     */
+/* baslikli bir makine notu acildiginda uyari seridi 30px'e kirpilip    */
+/* kaydirma gradyanini yok eder. Asagidaki sifirlama cakismayi keser.   */
+.workspace-leaf-content[data-type="markdown"] .view-header-title-container::after {
+  position: static;
+  width: auto;
+  height: auto;
+  background: none;
+  inset: auto;
+  pointer-events: none;
+}

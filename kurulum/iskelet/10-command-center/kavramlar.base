@@ -1,0 +1,36 @@
+filters:
+  and:
+    - file.inFolder("86-compiled/concepts")
+    # Motorun gercekten yazdigi etiket 'derlenmis' (tags dizisi);
+    # compile.ps1 'generated_by' alanini HIC yazmaz - ona gore filtreleme.
+    - 'tags.contains("derlenmis")'
+formulas:
+  ilgili: 'file.links.join(", ")'
+  guncellendi: 'file.mtime.format("YYYY-MM-DD")'
+properties:
+  title:
+    displayName: "Kavram"
+  formula.ilgili:
+    displayName: "Ilgili notlar"
+  formula.guncellendi:
+    displayName: "Guncellendi"
+  file.name:
+    displayName: "Dosya"
+views:
+  - type: table
+    name: "Kavramlar"
+    order:
+      - note.title
+      - formula.ilgili
+      - formula.guncellendi
+    sort:
+      - property: note.title
+        direction: ASC
+  - type: cards
+    name: "Kart gorunumu"
+    order:
+      - note.title
+      - formula.guncellendi
+    sort:
+      - property: file.mtime
+        direction: DESC

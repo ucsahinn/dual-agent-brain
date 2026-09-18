@@ -1,0 +1,63 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "text",
+      "text": "## Oturum akisi\n\nOturum acilir ->\nhafiza enjekte edilir",
+      "x": -400,
+      "y": -120,
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "n2",
+      "type": "text",
+      "text": "Konusma surer\nilgili kavramlar yuzeye cikar\n(UserPromptSubmit)",
+      "x": -80,
+      "y": 80,
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "n3",
+      "type": "text",
+      "text": "Oturum kapanir ->\ntranskript ozetlenir ->\n`85-daylogs/`",
+      "x": 240,
+      "y": -120,
+      "width": 260,
+      "height": 120
+    },
+    {
+      "id": "n4",
+      "type": "text",
+      "text": "Gece derleyicisi ->\nkavram notlari ->\n`86-compiled/concepts/`",
+      "x": 560,
+      "y": 80,
+      "width": 260,
+      "height": 120
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "fromNode": "n1",
+      "fromSide": "right",
+      "toNode": "n2",
+      "toSide": "left"
+    },
+    {
+      "id": "e2",
+      "fromNode": "n2",
+      "fromSide": "right",
+      "toNode": "n3",
+      "toSide": "left"
+    },
+    {
+      "id": "e3",
+      "fromNode": "n3",
+      "fromSide": "right",
+      "toNode": "n4",
+      "toSide": "left"
+    }
+  ]
+}

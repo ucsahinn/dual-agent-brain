@@ -1,0 +1,57 @@
+{
+ "nodes": [
+  {
+   "id": "n1",
+   "type": "text",
+   "text": "## Sistem haritasi\n\nBu bos bir iskelet. Kendi sistemini buraya ciz:\nhangi parca nerede, neye baglı.",
+   "x": -400,
+   "y": -120,
+   "width": 300,
+   "height": 120
+  },
+  {
+   "id": "n2",
+   "type": "text",
+   "text": "### Beyin\n`80-memory/` kuratorlu\n`85-daylogs/` makine\n`86-compiled/` makine",
+   "x": -40,
+   "y": 80,
+   "width": 260,
+   "height": 120
+  },
+  {
+   "id": "n3",
+   "type": "text",
+   "text": "### Motor\n`motor/hooks` kancalar\n`motor/scripts` isler",
+   "x": 280,
+   "y": -120,
+   "width": 260,
+   "height": 120
+  },
+  {
+   "id": "motor",
+   "type": "text",
+   "x": -350,
+   "y": 120,
+   "width": 300,
+   "height": 260,
+   "color": "4",
+   "text": "# Hafıza motoru\nİki ajanda aynı kancalar: açılışta enjeksiyon (kurallar, bağlam, **niyet**, projenin son blokları), her mesajda **vektör + kelime** geri getirme, kapanışta özet.\n\nHer koşu **makbuz** bırakır → bahçıvan hangi kavramın kullanıldığını ölçer. Gece görevleri (8): derle, gom, bagla, topla, yedek, çöpçü, bahçıvan, denetle.\n\n`beyin canli` · `beyin durum`"
+  }
+ ],
+ "edges": [
+  {
+   "id": "e1",
+   "fromNode": "n1",
+   "fromSide": "right",
+   "toNode": "n2",
+   "toSide": "left"
+  },
+  {
+   "id": "e2",
+   "fromNode": "n2",
+   "fromSide": "right",
+   "toNode": "n3",
+   "toSide": "left"
+  }
+ ]
+}

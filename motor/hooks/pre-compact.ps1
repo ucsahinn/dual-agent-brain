@@ -62,9 +62,13 @@ if (-not $pcAtla -and $hook.transcript_path) {
         # Sayaci SIMDI artir: flush ayri bir surecte basliyor, sonucu
         # beklenmiyor. Fazla saymak (flush duserse) payi biraz erken
         # doldurur; eksik saymak payi tamamen etkisiz kilardi.
-        $st.pcSayi = $pcSayac + 1
-        $st.pcGun  = $pcBugun
-        Set-BeyinSessionState -Paths $p -State $st
+        $pcYeniSayi = $pcSayac + 1
+        $pcYeniGun  = $pcBugun
+        $st.pcSayi = $pcYeniSayi
+        $st.pcGun  = $pcYeniGun
+        # Kilit altinda, yalniz bu iki alan (2026-10-05): kilitsiz tam yazim
+        # es zamanli prompt-counter artisini eziyordu.
+        Update-BeyinSessionState -Paths $p -SessionId $hook.session_id -Degistir { param($s); $s.pcSayi = $pcYeniSayi; $s.pcGun = $pcYeniGun; return $s } | Out-Null
     }
 }
 

@@ -104,7 +104,24 @@ Her anlamli oturum iz birakir: ya bir not, ya bir karar, ya guncellenmis bir dos
 - Motor 2.2 komutlari (iki ajanda da ayni): `niyet "..."` ileriye donuk hedefi
   kaydeder (7 gun boyunca acilista enjekte edilir; `[Hafiza: Niyet]` blogu),
   `canli` su an ne oluyor, `makbuz` motor ne yazdi, `bahcivan` hangi kavram
-  kullaniliyor, `copcu` disk raporu, `gom` vektor gomme, `zamanla` gece gorevleri.
+  kullaniliyor, `copcu` disk raporu, `gom` vektor gomme, `zamanla` gece gorevleri,
+  `aktar "soru" -Kime claude|codex` ajanlar arasi soru/handoff kanali (hedef ajanin
+  yeni oturumunda `[Hafiza: Aktarim]` blogu; `-Tamam <id>` kapatir), `bekci` kaynak
+  bekcisi (commit/RAM, bosta oturumlar, yetim doktor, Codex MCP birikimi; YALNIZ
+  gosterir, kapatma komutlarini panoya kopyalar), `pano <komut>` ortak gorev panosu
+  (AgentChef coordination-board sema v3/v4 sarmalayicisi; tek state `.state/board.json`;
+  yazma kapsami iceren her delegasyondan ONCE kart acilir, `todo -> in_progress` icin
+  brief + canli kira gerekir; acilista `Pano: N acik, M bu projede` ve bu repoya yazan
+  kartlar icin `[Hafiza] UYARI pano:`; gorunum `10-command-center/pano.md`),
+  `kullanim [gun]` enjekte edilen kavram notu sonradan gercekten acildi mi (retrieval
+  makbuzu x Claude transkripti; "baglama geldi != kullanildi"), `geri-getirme-olc`
+  geri getirme regresyon kapisi (dondurulmus holdout, vektor/kelime rank-1; `-Dondur`
+  fixture uretir), `kirp` 80-memory'yi kayipsiz arsivler (eski tarihli bolum/satirlar
+  `80-memory/arsiv/`; VARSAYILAN KURU, `-Uygula` kullanicinin karari).
+  **Claude Code acilis baglami 10.000 karakterde kesilir** (asan kisim dosyaya atilir,
+  modele 2 KB onizleme kalir); motor bu yuzden acilisi `BEYIN_CLAUDE_TAVAN` (9500) ile
+  kirpar ve dusen bloklari `[Hafiza] ... dusuruldu/kirpildi` satiriyla bildirir -
+  o satiri gorursen ihtiyacin olan dosyayi kendin oku.
   Kullanici bir niyet soylerse `beyin niyet` ile kaydetmeyi ONER (kuratorlu alan
   degildir, onay gerekmez ama kullanicinin cumlesi oldugu gibi yazilir).
 - `beyin yedek` tam vault yedegi alir (`.brain/backups/`). Tamamlanma isareti

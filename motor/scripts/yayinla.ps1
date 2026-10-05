@@ -46,6 +46,8 @@ $vaultOk = $false
 try { $vaultOk = [bool]($Vault -and (Test-Path -LiteralPath $Vault -PathType Container) -and (Test-Path -LiteralPath (Join-Path $Vault 'motor\hooks\lib.ps1') -PathType Leaf)) } catch { }
 if (-not $vaultOk) { Write-Output "HATA: vault degil (motor\hooks\lib.ps1 yok): '$Vault'  - konumsal arguman -Vault'a baglanir; yayin klasoru icin -Hedef <yol> kullan"; exit 2 }
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
+# NORMALIZE (2026-10-05): goreli/cift ayracli BEYIN_VAULT ile Substring($Vault.Length) bozuluyordu.
+try { $Vault = [IO.Path]::GetFullPath($Vault).TrimEnd('\', '/') } catch { }
 $p = Get-BeyinPaths -Vault $Vault
 
 if (-not $Hedef) { $Hedef = Join-Path (Split-Path $Vault -Parent) ((Split-Path -Leaf $Vault) + '-motor') }   # <yaprak>-motor (doktor da boyle arar)
@@ -83,7 +85,10 @@ $ISKELET = @(
     '86-compiled', '90-archive'
 )
 # Izinli klasorlerin icinde bile ASLA gitmeyecekler
-$ASLA = @('.state', 'node_modules', '.git', '.brain')
+# 'fixtures' (2026-10-05): geri-getirme-olc'nin dondurulmus holdout'u BU vault'un
+# not metinlerini tasir; kisisel icerik yayinlanmaz. Kuran kisi kendi fixture'ini
+# 'beyin geri-getirme-olc -Dondur' ile uretir (betik fixture yoksa ornek kosar).
+$ASLA = @('.state', 'node_modules', '.git', '.brain', 'fixtures')
 
 # ===========================================================================
 # TARAMA: sizinti olan hicbir sey gitmesin

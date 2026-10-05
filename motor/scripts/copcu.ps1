@@ -350,7 +350,12 @@ $artiklar = @(Get-ChildItem -LiteralPath $p.ScrState -File -Recurse -ErrorAction
 
 $toplamMB = [math]::Round((($adaylar | Measure-Object -Property MB -Sum).Sum), 1)
 $silinebilirMB = [math]::Round((($adaylar | Where-Object { $_.silinebilir } | Measure-Object -Property MB -Sum).Sum), 1)
-$surucu = try { (Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':')) -ErrorAction Stop) } catch { $null }
+# OLCUM SURUCUSU (2026-10-05): -Kok D:\... verilirse bos alan O surucuden olculur;
+# eskiden hep sistem surucusu olculuyor ve 'bos alan beklendigi kadar artmadi'
+# yanlis uyarisi cikiyordu.
+$olcSurucu = $env:SystemDrive.TrimEnd(':')
+try { if ($Kok -and $Kok.Count -gt 0) { $r0 = [IO.Path]::GetPathRoot([string]$Kok[0]); if ($r0 -and $r0.Length -ge 2 -and $r0[1] -eq ':') { $olcSurucu = [string]$r0[0] } } } catch { }
+$surucu = try { (Get-PSDrive -Name $olcSurucu -ErrorAction Stop) } catch { $null }
 $bosGBonce = if ($surucu) { [math]::Round($surucu.Free / 1GB, 1) } else { -1 }
 
 # --- 4) UYGULA -------------------------------------------------------------------
@@ -454,7 +459,7 @@ if ($Uygula) {
         }
     }
 }
-$bosGBsonra = if ($Uygula -and $surucu) { try { [math]::Round((Get-PSDrive -Name ($env:SystemDrive.TrimEnd(':'))).Free / 1GB, 1) } catch { -1 } } else { $bosGBonce }
+$bosGBsonra = if ($Uygula -and $surucu) { try { [math]::Round((Get-PSDrive -Name $olcSurucu).Free / 1GB, 1) } catch { -1 } } else { $bosGBonce }
 
 # --- 5) Kayit: copcu-son.json + makbuz ---------------------------------------------
 $silinenMB = [math]::Round((($silinen | ForEach-Object { $_.b } | Measure-Object -Sum).Sum / 1MB), 1)

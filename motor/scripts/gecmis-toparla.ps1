@@ -80,6 +80,12 @@ foreach ($root in $roots) {
 
         if ($f.LastWriteTime -gt $aktifS) { Say 'hala-aktif'; continue }
         if ($f.Name -like 'agent-*')      { Say 'alt-ajan'; continue }
+        # MOTORUN KENDI OZETLEYICI TRANSKRIPTLERI DIZIN ADINDAN ELENIR (2026-10-04, olculdu).
+        # Claude, projeler klasorunu cwd'den turetir: ...\projects\C--Users-<ad>-AppData-Local-beyin-engine-cwd\.
+        # Orada 2006 dosya vardi; 7 gunluk pencerede 966 tanesi asagidaki 40 satirlik okumaya
+        # giriyor ve doktorun yetim satiri 10-16 sn suruyordu. Ayni karar (motor-kendi-cwd)
+        # Get-BeyinProjectFromTranscript icinde zaten veriliyor; burada dosya acilmadan verilir.
+        if ($f.DirectoryName -like '*beyin-engine-cwd*') { Say 'motor-kendi-cwd'; continue }
         # 'Isaret var mi' KAPISI KALDIRILDI (2026-09-10, bagimsiz denetim).
         #
         # Burada 'Get-BeyinWatermark > 0 ise islenmis' yaziyordu ve bu, KURTARMA

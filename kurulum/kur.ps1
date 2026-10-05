@@ -837,7 +837,7 @@ foreach ($hk in $skillHedefler) {
             # junction'lar olu kaliyordu ve kur.ps1 'zaten baglanti' deyip geciyordu (olculdu).
             $eskiHedef = ''
             try { $eskiHedef = [string](@($it.Target) | Select-Object -First 1) } catch { }
-            $ayni = $bagli -and $eskiHedef -and ($eskiHedef.TrimEnd('') -eq $kaynak.TrimEnd(''))
+            $ayni = $bagli -and $eskiHedef -and ($eskiHedef.TrimEnd('\') -eq $kaynak.TrimEnd('\'))
             if (-not $bagli -or $ayni -or $KuruCalisma) {
                 Adim "$($hk.Ad)\$s" 'zaten' $(if (-not $bagli) { 'gercek klasor - dokunulmadi' } elseif ($ayni) { 'baglanti' } else { "baglanti ESKI hedefe bakiyor ($eskiHedef) - kuru calisma" })
                 continue

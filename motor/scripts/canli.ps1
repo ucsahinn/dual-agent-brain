@@ -78,7 +78,10 @@ foreach ($f in @(Get-ChildItem -LiteralPath $p.Queue -Filter '*.json' -File -Err
 $calisan = New-Object System.Collections.Generic.List[object]
 foreach ($f in @(Get-ChildItem -LiteralPath $p.Slots -Filter '*.lock' -File -ErrorAction SilentlyContinue)) {
     $mesgul = $false
-    try { $h = [System.IO.File]::Open($f.FullName, 'Open', 'ReadWrite', 'None'); $h.Close(); $h.Dispose() } catch { $mesgul = $true }
+    # 'Open'+Read+paylasimli (2026-10-05): eski 'OpenOrCreate'+'None' bos slotu bir anligina
+    # kapatip o anda gelen flush'i kuyruga dusuruyordu ve olmayan lock dosyasi yaratiyordu.
+    # Slot sahibi FileShare.None ile tutar; mesgulse bu acilis zaten firlar.
+    try { $h = [System.IO.File]::Open($f.FullName, 'Open', 'Read', 'ReadWrite'); $h.Close(); $h.Dispose() } catch { $mesgul = $true }
     if ($mesgul) {
         $tur = if ($f.BaseName -like 'compile*') { 'derleyici' } else { 'flush' }
         $calisan.Add([pscustomobject]@{ slot = $f.BaseName; is = $tur; basladi = (Yas $f.LastWriteTime) })

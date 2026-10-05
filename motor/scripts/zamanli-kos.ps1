@@ -75,10 +75,16 @@ if ($modelGerekir -contains $Komut.ToLowerInvariant()) {
 
 $cikti = ''
 $kod = 0
+# STDERR (2026-10-05): SilentlyContinue altinda '2>&1' hata kayitlarini
+# yutuyordu (pano.ps1'de olculmus ayni tuzak); cocuk PowerShell hatasiyla
+# dusunce makbuz/log sebebi tasimiyordu. Cagri suresince Continue.
+$zkEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 try {
     $cikti = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dispatcher $Komut @Arg 2>&1 | Out-String)
     $kod = $LASTEXITCODE
 } catch { $cikti = $_.Exception.Message; $kod = 1 }
+$ErrorActionPreference = $zkEap
 if ($null -eq $kod) { $kod = 1 }
 $kod = [int]$kod
 # NEDEN: sarmalayici son bos-olmayan satiri aliyordu; gecmis-toparla 'Sonuc: ...' satirindan SONRA

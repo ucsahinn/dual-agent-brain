@@ -47,7 +47,15 @@ $dosya = Join-Path $p.ScrState 'niyet.json'
 
 if ($Temizle) {
     if (Test-Path -LiteralPath $dosya) {
-        Remove-Item -LiteralPath $dosya -Force
+        Remove-Item -LiteralPath $dosya -Force -ErrorAction SilentlyContinue
+        # SILME DOGRULANIR (2026-10-05): asagidaki 'yazim asla varsayilmaz'
+        # doktrini silmeye uygulanmamisti; dosya kilitliyse 'temizlendi' deyip
+        # makbuz yaziliyordu.
+        if (Test-Path -LiteralPath $dosya) {
+            Write-BeyinMakbuz -Paths $p -Script 'niyet' -Outcome 'NIYET_SILINEMEDI'
+            Write-Output "NIYET_SILINEMEDI dosya hala duruyor: $dosya"
+            exit 3
+        }
         Write-BeyinLog -Vault $Vault -Message 'niyet: temizlendi'
         Write-BeyinMakbuz -Paths $p -Script 'niyet' -Outcome 'NIYET_TEMIZLENDI'
         'Niyet temizlendi.'

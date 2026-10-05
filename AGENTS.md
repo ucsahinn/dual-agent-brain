@@ -90,7 +90,25 @@ only in `CLAUDE.md`.
   `[Hafiza: Niyet]` block), `canli` shows what is happening now, `makbuz` lists
   engine receipts, `bahcivan` reports concept usage, `copcu` is the disk janitor
   report, `gom` embeds concepts for vector retrieval, `zamanla` registers the
-  nightly tasks. When the user states a goal, OFFER to record it with
+  nightly tasks, `aktar "question" -Kime claude|codex`
+  cross-agent question/handoff channel (shows as a `[Hafiza: Aktarim]` block in the
+  target agent's next session; `-Tamam <id>` closes it), `bekci` resource watchdog
+  (commit/RAM, idle sessions, orphan doctor processes, Codex MCP build-up; REPORT
+  ONLY, copies kill commands to the clipboard), `pano <command>` shared task board
+  (wrapper over AgentChef coordination-board schema v3/v4; single state
+  `.state/board.json`; open a card BEFORE any delegation that writes files;
+  `todo -> in_progress` needs a brief and a live lease; session start shows
+  `Pano: N open, M in this project` and `[Hafiza] UYARI pano:` for open cards
+  writing into this repo; view `10-command-center/pano.md`), `kullanim [gun]` did an
+  injected concept note actually get opened afterwards (retrieval receipt x Claude
+  transcript; "reached context != used"), `geri-getirme-olc` retrieval regression gate
+  (frozen holdout, vector/keyword rank-1; `-Dondur` regenerates the fixture), `kirp`
+  lossless archiving of 80-memory (old dated sections/rows move to `80-memory/arsiv/`;
+  DRY by default, `-Uygula` is the user's call). **Claude Code truncates hook context at
+  10,000 characters** (the rest is written to a file, the model sees a 2 KB preview), so
+  the engine caps the opening at `BEYIN_CLAUDE_TAVAN` (9500) and reports dropped blocks in
+  a `[Hafiza] ... dusuruldu/kirpildi` line - when you see it, read the file you need yourself.
+  When the user states a goal, OFFER to record it with
   `beyin niyet` (not a curated region; the user's own sentence is stored verbatim).
 - **`beyin yedek`** takes a full vault backup into `.brain/backups/`. It writes
   a `TAMAM.txt` completion marker; a folder without that marker is a HALF backup

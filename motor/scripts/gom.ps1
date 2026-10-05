@@ -42,11 +42,15 @@ $bin = Join-Path $p.ScrState 'kavram-vektor.bin'
 $datOnce = Measure-BeyinDosya -Path $dat
 $binOnce = Measure-BeyinDosya -Path $bin
 
-function Bitir([string]$Kod, [string]$Log, [object[]]$Files = @()) {
+# CIKIS KODU (2026-10-05, kod incelemesi): her GOM_HATA_* 0 ile cikiyordu;
+# zamanli-kos cocugun kodunu aynen dondurdugu icin makbuz ZAMANLI_OK, Gorev
+# Zamanlayici 0x0, doktor yesil kaliyordu - gece gomme sessizce olup bagla
+# bayat indeksle calisiyordu. bagla/denetle gibi hata -> sifir disi (5).
+function Bitir([string]$Kod, [string]$Log, [object[]]$Files = @(), [int]$Cikis = 0) {
     if ($Log) { Write-BeyinLog -Vault $Vault -Message "gom: $Log" }
     Write-BeyinMakbuz -Paths $p -Script 'gom' -Outcome ($Kod -split ' ')[0] -Model $model -Files $Files -DurationMs $sw.ElapsedMilliseconds -Note $Log
     Write-Output $Kod
-    exit 0
+    exit $Cikis
 }
 
 # --- 1) Ollama + model ------------------------------------------------------------
@@ -121,11 +125,11 @@ $gomulen = 0
 for ($i = 0; $i -lt $yeni.Count; $i += $Parti) {
     $parca = @($yeni | Select-Object -Skip $i -First $Parti)
     $emb = Invoke-BeyinOllamaEmbed -Texts @($parca | ForEach-Object { $_.metin }) -TimeoutMs 180000
-    if (-not $emb.Ok) { Bitir "GOM_HATA_EMBED" "parti $([int]($i / $Parti) + 1) gomulemedi ($($parca.Count) not); eski indeks korundu" }
+    if (-not $emb.Ok) { Bitir "GOM_HATA_EMBED" "parti $([int]($i / $Parti) + 1) gomulemedi ($($parca.Count) not); eski indeks korundu" -Cikis 5 }
     for ($j = 0; $j -lt $parca.Count; $j++) {
         $u = ConvertTo-BeyinUnitVector ([float[]]$emb.Vectors[$j])
         if ($dim -eq 0) { $dim = $u.Length }
-        if ($u.Length -ne $dim) { Bitir 'GOM_HATA_BOYUT' "boyut uyusmazligi ($($u.Length) != $dim); -Zorla ile yeniden gom" }
+        if ($u.Length -ne $dim) { Bitir 'GOM_HATA_BOYUT' "boyut uyusmazligi ($($u.Length) != $dim); -Zorla ile yeniden gom" -Cikis 5 }
         $parca[$j].vec = $u; $gomulen++
     }
 }
@@ -137,7 +141,7 @@ $all = New-Object float[] ($n * $dim)
 $items = New-Object System.Collections.Generic.List[object]
 for ($i = 0; $i -lt $n; $i++) {
     $k = $kayitlar[$i]
-    if (-not $k.vec) { Bitir 'GOM_HATA_EKSIK' "'$($k.slug)' icin vektor yok; eski indeks korundu" }
+    if (-not $k.vec) { Bitir 'GOM_HATA_EKSIK' "'$($k.slug)' icin vektor yok; eski indeks korundu" -Cikis 5 }
     [Array]::Copy([float[]]$k.vec, 0, $all, $i * $dim, $dim)
     $items.Add(@{ slug = $k.slug; hash = $k.hash })
 }

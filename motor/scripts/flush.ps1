@@ -34,6 +34,11 @@ param(
 )
 
 if (-not $TranscriptPath) { Write-Output 'Kullanim: flush.ps1 -TranscriptPath <yol> [-Vault] [-Reason] [-ProjectPath] [-Agent]'; exit 1 }
+# VAULT KAPISI (2026-10-05): yanlis -Vault'ta lib yuklenmiyor, Enter-BeyinClaim tanimsiz
+# kaliyor ve betik FLUSH_MESGUL ile sessizce exit 0 veriyordu. Diger betiklerdeki kapi.
+$vaultOk = $false
+try { $vaultOk = [bool]($Vault -and (Test-Path -LiteralPath $Vault -PathType Container) -and (Test-Path -LiteralPath (Join-Path $Vault 'motor\hooks\lib.ps1') -PathType Leaf)) } catch { }
+if (-not $vaultOk) { Write-Output "FLUSH_HATA_VAULT vault degil (motor\hooks\lib.ps1 yok): '$Vault'"; exit 2 }
 $ErrorActionPreference = 'SilentlyContinue'
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
 $p = Get-BeyinPaths -Vault $Vault

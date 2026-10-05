@@ -936,7 +936,8 @@ $doktor = Join-Path $Vault 'motor\scripts\doktor.ps1'
 $dokCikti = @()
 $dokKod = 0
 try {
-    $dokCikti = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $doktor -Vault $Vault -Ozet)
+    # -SureSiniri: guncelleme icindeki dogrulama agir kontrollerde takilip kalmasin (2026-10-03, yetim doktor olcumu)
+    $dokCikti = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $doktor -Vault $Vault -Ozet -SureSiniri 20)
     $dokKod = $LASTEXITCODE
 } catch {
     $dokKod = 1

@@ -33,6 +33,9 @@ $vaultOk = $false
 try { $vaultOk = [bool]($Vault -and (Test-Path -LiteralPath $Vault -PathType Container) -and (Test-Path -LiteralPath (Join-Path $Vault 'motor\hooks\lib.ps1') -PathType Leaf)) } catch { }
 if (-not $vaultOk) { Write-Output "HATA: vault degil (motor\hooks\lib.ps1 yok): '$Vault'"; exit 2 }
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
+# NORMALIZE (2026-10-05): goreli/cift ayracli BEYIN_VAULT ile Substring($Vault.Length) bozuluyor,
+# Test-Haric '.git'i kaciriyordu (guncelle.ps1 kalibi).
+try { $Vault = [IO.Path]::GetFullPath($Vault).TrimEnd('\', '/') } catch { }
 $p = Get-BeyinPaths -Vault $Vault
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $inv = [Globalization.CultureInfo]::InvariantCulture

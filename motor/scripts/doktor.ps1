@@ -20,7 +20,12 @@ param(
     # kontrollerin hepsi kosar (maliyet ayni, model cagrisi yok) ama cikti
     # 51 satirlik tablo yerine 8-10 satirlik durum olur: tani, butce, kuyruk,
     # kuratorlu gecikme, son derleme ve proje basina devam noktalari.
-    [switch]$Ozet
+    [switch]$Ozet,
+    # -SureSiniri <sn>: agir kontroller icin ust sure. 0 = sinirsiz. Verilmezse
+    # -Ozet 20 sn (BEYIN_DOKTOR_SURE ile degistirilebilir), tam tarama sinirsiz.
+    # Butce dolunca kalan AGIR kontroller 'ATLANDI' olarak raporlanir; tam
+    # tarama onlari her zaman kosar.
+    [int]$SureSiniri = -1
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -73,8 +78,61 @@ if (-not (Get-Command Get-BeyinPaths -ErrorAction SilentlyContinue)) {
 $p = Get-BeyinPaths -Vault $Vault
 
 $rows = New-Object System.Collections.Generic.List[object]
+
+# ----------------------------------------------------------------------------
+# TEK KOPYA + SURE BUTCESI + EBEVEYN IZLEME (2026-10-03, olculdu)
+#
+# Bes ebeveynsiz 'doktor -Ozet' ayni anda calisiyordu: her biri ~200 MB,
+# her birinin altinda 972 ayri 'git show' cocugu (arsivdeki her not icin bir
+# tane; bkz. 'git gecmisi'). Baslatan ajanin arac zaman asimi ebeveyni
+# oldurunce Windows alt PowerShell'i oldurmuyor -> yetim. Uc kapi:
+#   1. ayni vault icin tek doktor sureci (named mutex; bekleme yok, cikis 3)
+#   2. agir kontroller icin sure butcesi (-Ozet 20 sn; dolunca ATLANDI)
+#   3. ebeveyn surec olduyse cik (her Add-Row'da ucuz kontrol; cikis 4)
+# ----------------------------------------------------------------------------
+$script:DoktorSaat = [Diagnostics.Stopwatch]::StartNew()
+$script:DoktorSure = 0
+if ($Ozet) { $script:DoktorSure = 20 }
+if ($env:BEYIN_DOKTOR_SURE -match '^\d+$') { $script:DoktorSure = [int]$env:BEYIN_DOKTOR_SURE }
+if ($SureSiniri -ge 0) { $script:DoktorSure = $SureSiniri }
+$script:DoktorAtlanan = New-Object System.Collections.Generic.List[string]
+$script:DoktorOzetDisi = New-Object System.Collections.Generic.List[string]   # -Ozet'te hic kosmayan kontroller (tam taramada kosar)
+function Butce-Var {
+    param([string]$Kontrol)
+    if ($script:DoktorSure -le 0) { return $true }
+    if ($script:DoktorSaat.Elapsed.TotalSeconds -lt $script:DoktorSure) { return $true }
+    $script:DoktorAtlanan.Add($Kontrol)
+    $rows.Add([pscustomobject]@{
+        Kontrol  = $Kontrol
+        Durum    = 'ATLANDI'
+        Detay    = "sure butcesi ($($script:DoktorSure) sn) doldu; tam taramada (-Ozet olmadan) kosar"
+        Duzeltme = ''
+    })
+    return $false
+}
+
+$mtxAd = 'Global\BeyinDoktor-' + (([BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Vault.ToLowerInvariant()))) -replace '-', '').Substring(0, 12))
+$script:DoktorMutex = New-Object System.Threading.Mutex($false, $mtxAd)
+$mtxAlindi = $false
+try { $mtxAlindi = $script:DoktorMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $mtxAlindi = $true }
+if (-not $mtxAlindi) {
+    Write-Host "DOKTOR ZATEN CALISIYOR: bu vault icin baska bir doktor sureci aktif. Bekleme yok, cikiliyor (kod 3)." -ForegroundColor Yellow
+    Write-Host "  Yetim kaldigini dusunuyorsan: Get-Process powershell | Where-Object { `$_.CommandLine -like '*doktor.ps1*' }"
+    exit 3
+}
+
+$script:DoktorEbeveyn = 0
+try { $script:DoktorEbeveyn = [int](Get-CimInstance Win32_Process -Filter "ProcessId = $PID" -ErrorAction Stop).ParentProcessId } catch { }
+function Test-Ebeveyn {
+    if ($script:DoktorEbeveyn -le 0) { return }
+    if (Get-Process -Id $script:DoktorEbeveyn -ErrorAction SilentlyContinue) { return }
+    try { Write-BeyinLog -Vault $Vault -Message "doktor: ebeveyn surec ($($script:DoktorEbeveyn)) oldu, $([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn sonra cikildi (yetim onlendi)" } catch { }
+    exit 4
+}
+
 function Add-Row {
     param([string]$Kontrol, [bool]$Ok, [string]$Detay, [string]$Duzeltme = '')
+    Test-Ebeveyn
     $rows.Add([pscustomobject]@{
         Kontrol  = $Kontrol
         Durum    = $(if ($Ok) { 'OK' } else { 'SORUN' })
@@ -538,6 +596,20 @@ Add-Row 'yansima kuyrugu' ($reflects.Count -le 10) "$($reflects.Count) bekleyen 
 $leakFiles = New-Object System.Collections.Generic.List[string]
 $desenDusen = 0
 $sirHedef = @($dayFiles + $scanFiles) | Where-Object { $_ }
+# -Ozet'te yalniz SON 7 GUNUN GUNLUK LOGLARI + 80-memory (olculdu: 972 dosya
+# 10,9 sn; "son 7 gunde degisen" suzgeci ise ise yaramadi - gece 'bagla' her
+# kavram notunun '## Ilgili notlar' bolumunu yeniden yazdigi icin 86-compiled
+# her gun 'yeni' gorunuyor, 6,3 sn). Sizinti motora gunluk logdan girer;
+# kavram notlari o loglardan turetilir. Tam tarama ('beyin doktor') hepsini okur.
+$sirNot = ''
+if ($Ozet -and $sirHedef.Count -gt 0) {
+    $sirEsik = (Get-Date).AddDays(-7)
+    $sirHedef = @($dayFiles | Where-Object { $_.LastWriteTime -gt $sirEsik }) +
+                @($scanFiles | Where-Object { $_.DirectoryName -eq $p.Memory })
+    $sirNot = '; -Ozet: son 7 gunun loglari + 80-memory'
+}
+$yolHedef = $sirHedef
+if (-not (Butce-Var 'sir taramasi')) { $sirHedef = @() }
 foreach ($f in $sirHedef) {
     $c = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8
     if (-not $c) { continue }
@@ -549,11 +621,13 @@ foreach ($f in $sirHedef) {
     $already = ([regex]::Matches($c, '\[REDAKTE:[a-z\-]+\]', $script:BeyinRxCI)).Count
     if ($r.Redactions -gt $already) { $leakFiles.Add($f.Name) }
 }
+if ($script:DoktorAtlanan -notcontains 'sir taramasi') {
 Add-Row 'sir taramasi' (($leakFiles.Count -eq 0) -and ($desenDusen -eq 0)) `
     $(if ($leakFiles.Count) { "$($leakFiles.Count) dosyada maskelenmemis sir: $($leakFiles -join ', ')" }
       elseif ($desenDusen -gt 0) { "$($sirHedef.Count) dosya tarandi AMA $desenDusen desen uygulanamadi - tarama EKSIK" }
-      else { "$($sirHedef.Count) dosya tarandi (gunluk log + 86-compiled + 80-memory + 90-archive), temiz" }) `
+      else { "$($sirHedef.Count) dosya tarandi (gunluk log + 86-compiled + 80-memory + 90-archive$sirNot), temiz" }) `
     'sizan degeri ROTASYONA al; dosyayi temizlemek yetmez, git gecmisine girmis olabilir'
+}
 
 # Mutlak yol sizintisi
 $pathLeak = @()
@@ -561,7 +635,8 @@ $pathLeak = @()
 # 'C:/Users/...' yaziyor ve eski desen bunu goremiyordu (85-daylogs'ta
 # commit edilmis gercek ornek bulundu). /home/<kullanici>/ da eklendi.
 $yolRx = '(?:[A-Za-z]:[\\/]Users[\\/][^\\/\s]+[\\/]|/(?:home|Users)/[^/\s]+/)'
-foreach ($f in @($dayFiles + $scanFiles) | Where-Object { $_ }) {
+# Ayni dosya kumesi sir taramasiyla paylasilir (-Ozet'te daraltilmis; olculdu 2,4 sn).
+foreach ($f in @($yolHedef) | Where-Object { $_ }) {
     $c = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8
     if ($c -and [regex]::IsMatch($c, $yolRx)) { $pathLeak += $f.BaseName }
 }
@@ -795,7 +870,10 @@ if (Test-Path -LiteralPath $topla) {
         # 'Toplam aday 8 / Pencere disi 0', -EnFazla 1000 -> '37 / 23'; satir
         # 23 oturum kaybolmusken YESIL basiyordu. Bu satir yalniz SAYAR (kuru
         # calisma, -Uygula yok), o yuzden tavan fiilen kaldirildi (+1.3 sn olculdu).
-        $tOut = @(& $topla -Vault $Vault -Gun 7 -EnFazla 1000 2>$null | Out-String -Stream)
+        # Sure butcesi dolduysa tarayici kosmaz; satir asagida ATLANDI olarak
+        # zaten eklendi ve ikinci bir satir yazilmaz.
+        $tOut = @()
+        if (Butce-Var 'yetim adaylari (7 gun)') { $tOut = @(& $topla -Vault $Vault -Gun 7 -EnFazla 1000 2>$null | Out-String -Stream) }
         $toplamAday = -1
         foreach ($l in $tOut) {
             if ($l -match '^Toplam aday\s*:\s*(\d+)') { $toplamAday = [int]$Matches[1] }
@@ -835,6 +913,7 @@ try {
     } catch { }
 }
 $tazeVault = (($dayFiles.Count -eq 0) -and ($kurulumGun -le 7))
+if ($script:DoktorAtlanan -notcontains 'yetim adaylari (7 gun)') {
 Add-Row 'yetim adaylari (7 gun)' (($adaySay -le 0) -or $tazeVault) `
     $(if ($tazeVault -and $adaySay -gt 0) { "taze kurulum ($kurulumGun gun): gunluk log yok, makinedeki $adaySay eski oturum beyin kurulmadan onceye ait (on tarih, kayip degil)" }
       elseif ($adaySay -lt 0) { 'kontrol edilemedi (gecmis-toparla calismadi) - sorun degil' }
@@ -842,6 +921,7 @@ Add-Row 'yetim adaylari (7 gun)' (($adaySay -le 0) -or $tazeVault) `
       else { "$adaySay oturum 72 saatlik yetim penceresinden dustu, hic ozetlenmedi ($adayDetay)" }) `
     $(if ($tazeVault) { 'Eski oturumlari yine de almak istersen: beyin ice-aktar (dis gecmis) ya da beyin topla-uygula 7' }
       else { 'motor\scripts\gecmis-toparla.ps1 -Gun 7 -Uygula' })
+}
 
 # 3) Codex SessionEnd: codex bloklari var ama session-end tetigi hic yoksa kanca olu demektir
 $codexSe = @(Get-DoktorLogSince -Lines $engAll -Since $sonYedi -Pattern 'session-end: .*ajan=codex')
@@ -939,17 +1019,36 @@ try {
 # calistiktan sonra uc gunluk logda 8 mutlak yol HEAD'de duruyordu ve hicbir
 # kontrol commit'lere bakmiyordu. Depo su an yerel (uzak yok), yani acil bir
 # sizinti degil; ama paylasim/uzak ekleme kararindan ONCE bilinmeli.
+# TEK GIT CAGRISI (2026-10-03, olculdu): onceki surum taranan HER dosya icin
+# ayri bir 'git show HEAD:<yol>' baslatiyordu - 972 dosya, 219 sn, -Ozet'in
+# toplam suresinin %82'si; yetim kalan doktorlarin altinda yuzlerce git
+# cocugu birikiyordu. 'git grep' HEAD agacini tek surecte tarar (~1 sn).
+# PCRE2 (-P) yoksa ERE'ye (-E) duser; ikisi de yoksa kontrol 'kontrol
+# edilemedi' der, YESIL basmaz.
+# -Ozet bu satiri hic gostermez (yalniz tam tabloda var); orada kosturmak
+# butceyi bosa yer. Tam taramada her zaman kosar.
 try {
-    if (Get-Command git -ErrorAction SilentlyContinue) {
-        $gecmisYol = @()
-        foreach ($f in @($dayFiles + $scanFiles) | Where-Object { $_ }) {
-            $rel = $f.FullName.Substring($Vault.Length).TrimStart('\', '/') -replace '\\', '/'
-            $head = (& git -C $Vault show ("HEAD:" + $rel) 2>$null | Out-String)
-            if ($head -and [regex]::IsMatch($head, $yolRx)) { $gecmisYol += $f.BaseName }
+    if ($Ozet) { $script:DoktorOzetDisi.Add('git gecmisi (mutlak yol)') }
+    if ((-not $Ozet) -and (Get-Command git -ErrorAction SilentlyContinue) -and (Butce-Var 'git gecmisi (mutlak yol)')) {
+        $gecmisKok = @(@($dayFiles + $scanFiles) | Where-Object { $_ } |
+            ForEach-Object { ($_.DirectoryName.Substring($Vault.Length).TrimStart('\', '/') -replace '\\', '/') -split '/' | Select-Object -First 1 } |
+            Where-Object { $_ } | Sort-Object -Unique)
+        $gecmisYol = @(); $gecmisHata = ''
+        if ($gecmisKok.Count -gt 0) {
+            $gOut = @(& git -C $Vault grep -I -l -P -e $yolRx HEAD -- @gecmisKok 2>&1)
+            $gExit = $LASTEXITCODE
+            if ($gExit -ge 2) {
+                # -P desteklenmiyor olabilir: ERE icin (?: -> (
+                $gOut = @(& git -C $Vault grep -I -l -E -e ($yolRx -replace '\(\?:', '(') HEAD -- @gecmisKok 2>&1)
+                $gExit = $LASTEXITCODE
+            }
+            if ($gExit -ge 2) { $gecmisHata = (($gOut | Select-Object -First 1) | Out-String).Trim() }
+            else { $gecmisYol = @($gOut | Where-Object { "$_" -match '^HEAD:' } | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension(("$_" -replace '^HEAD:', '')) } | Sort-Object -Unique) }
         }
-        $gecmisYol = @($gecmisYol | Sort-Object -Unique)
-        Add-Row 'git gecmisi (mutlak yol)' ($gecmisYol.Count -eq 0) `
-            $(if ($gecmisYol.Count) { "$($gecmisYol.Count) dosyada HEAD icinde tam kullanici yolu var: $(($gecmisYol | Select-Object -First 6) -join ', ')" } else { 'HEAD temiz' }) `
+        Add-Row 'git gecmisi (mutlak yol)' (($gecmisYol.Count -eq 0) -and -not $gecmisHata) `
+            $(if ($gecmisHata) { "kontrol edilemedi: git grep hatasi ($gecmisHata)" }
+              elseif ($gecmisYol.Count) { "$($gecmisYol.Count) dosyada HEAD icinde tam kullanici yolu var: $(($gecmisYol | Select-Object -First 6) -join ', ')" }
+              else { 'HEAD temiz' }) `
             'depo YEREL kaldigi surece kabul edilebilir; uzak depo/paylasim dusunuluyorsa once git-filter-repo ile gecmisi temizle veya bu kabulu ADR olarak yaz'
     }
 } catch { }
@@ -1225,6 +1324,8 @@ try {
 
 # ============================================================================
 # CAPRAZ BAGLANTI  (2.3, 2026-09-17; dedektor ayni gun denetimde DEGISTIRILDI)
+# -Ozet DISI (2026-10-04, orkestrator karari): tam taramada kosar; -Ozet raporu sonunda 'Atlanan' satirinda anilir.
+if (-not $Ozet) {
 # ----------------------------------------------------------------------------
 # OLCUM: 132 kavram notunun 91'i 86-compiled/index.md DISINDA hicbir yerden
 # gelen baglanti almiyordu. Bir wiki'nin degeri notlarin sayisinda degil
@@ -1306,6 +1407,7 @@ try {
             'bagla, kavram notlarinin gerisinde kaldi: elle bir kez kosturup (beyin bagla-uygula) gece gorevini kontrol et (kurulum\zamanla.ps1 -Liste; beyin-bagla 03:15). Gorev kirmizi donuyorsa engine.log [zamanlayici] satirlarina bak; vektor indeksi eskiyse once beyin gom. Kapsam dusukse esik dar olabilir: beyin bagla -MinCos 0.50'
     }
 } catch { }
+} else { $script:DoktorOzetDisi.Add('capraz baglanti') }
 
 # ============================================================================
 # NOT GUNCELLIGI  (2.3, 2026-09-17; dedektor ayni gun denetimde DEGISTIRILDI)
@@ -1529,12 +1631,10 @@ try {
     $mk7  = @(Read-BeyinMakbuz -Paths $p -Gun 7)
     $mkDizinVar = [bool]($p.Makbuz -and (Test-Path -LiteralPath $p.Makbuz))
     # engine.log'daki gercek basarilar (son 24 saat): makbuz da olmali
-    $engSatir = @()
-    try {
-        foreach ($lf in @((Join-Path $p.ScrState 'engine.log'), (Join-Path $p.ScrState 'engine.1.log'))) {
-            if (Test-Path -LiteralPath $lf) { $engSatir += @(Get-Content -LiteralPath $lf -Encoding UTF8 -ErrorAction SilentlyContinue) }
-        }
-    } catch { }
+    # engine.log IKINCI KEZ ve TAVANSIZ okunuyordu (2026-10-05): yukaridaki 4 MB
+    # bayt tavani burada deliniyordu; sismis logda 'beyin durum' yine donuyordu.
+    # Zaten tavanli okunmus $engAll kullanilir.
+    $engSatir = @($engAll)
     function MkBasariSay([datetime]$Baslangic) {
         $n = 0
         foreach ($ln in $engSatir) {
@@ -1609,7 +1709,44 @@ try {
 } catch { }
 
 # ============================================================================
+# KAYNAK + AKTARIM  (2026-10-04, plan #15)
+# ============================================================================
+# kaynak: bekcinin ucuz katmani (onbellekli, ~3 ms). Esik asildiysa SORUN degil
+# UYARI niteliginde - makinenin durumu motorun hatasi degil; satir yine de
+# kirmizi gosterilir ki 'beynim iyi' derken PC bogulmasin. Yetim doktor
+# sayisi buraya alinmaz (bekci listeler); ebeveyn izleme bunu kaynaginda kesti.
+try {
+    $kyEsik = 85; $kyBosta = 120
+    try { $kyEsik = [int](Get-BeyinAyar 'BEYIN_BEKCI_COMMIT' '85') } catch { }
+    try { $kyBosta = [int](Get-BeyinAyar 'BEYIN_BEKCI_BOSTA_DK' '120') } catch { }
+    $ky = Get-BeyinKaynakOzeti -Paths $p -CommitEsik $kyEsik -BostaDk $kyBosta
+    if ($ky.Ok) {
+        Add-Row 'kaynak' (-not $ky.Esik) `
+            ("commit %$($ky.CommitYuzde) ($($ky.CommitGB)/$($ky.CommitTavanGB) GB, esik %$kyEsik)" +
+             $(if ($ky.OlcumYasiDk -gt 0) { ", olcum $($ky.OlcumYasiDk) dk once" } else { '' }) +
+             " · son 24 saatte acilmis oturum: $($ky.AktifOturum) aktif, $($ky.BostaOturum) sessiz ($kyBosta+ dk)") `
+            'beyin bekci: bosta oturumlar, yetim doktor, Codex MCP birikimi ve kapatma komutlari (yalniz gosterir, panoya kopyalar). Esik: beyin ayar BEYIN_BEKCI_COMMIT <50-99>'
+    } else {
+        Add-Row 'kaynak' $true 'olculemedi (Win32_OperatingSystem yanit vermedi) - bilgi' ''
+    }
+} catch { }
+# aktarim: diger ajana acik soru/handoff. 3 gunden eski acik aktarim SORUN:
+# hedef ajan oturum acmiyor ya da blogu gormezden geliyor demektir.
+try {
+    $akListe = @(Get-BeyinHandoffListe -Paths $p)
+    $akEski = @($akListe | Where-Object { try { ((Get-Date) - [datetime]::Parse([string]$_.ts, [Globalization.CultureInfo]::InvariantCulture)).TotalDays -gt 3 } catch { $false } })
+    $akClaude = @($akListe | Where-Object { $_.to -eq 'claude' }).Count
+    $akCodex  = @($akListe | Where-Object { $_.to -eq 'codex' }).Count
+    Add-Row 'aktarim' ($akEski.Count -eq 0) `
+        $(if ($akListe.Count -eq 0) { 'acik aktarim yok' }
+          else { "$($akListe.Count) acik (claude'a $akClaude, codex'e $akCodex)$(if ($akEski.Count) { " · $($akEski.Count) tanesi 3 gunden eski: $(($akEski | Select-Object -First 3 | ForEach-Object { $_.id }) -join ', ')" })" }) `
+        'beyin aktar (liste) · kapat: beyin aktar -Tamam <id> · gorunum: 10-command-center/aktarimlar.md'
+} catch { }
+
+# ============================================================================
 # OLU KAVRAM  (Faz 2C, 2026-09-15)  -  bahcivan.ps1'in kavram bolumu
+# -Ozet DISI (2026-10-04, orkestrator karari): tam taramada kosar; -Ozet raporu sonunda 'Atlanan' satirinda anilir.
+if (-not $Ozet) {
 # ============================================================================
 try {
     $bhOut = & (Join-Path $p.Scripts 'bahcivan.ps1') -Vault $Vault -Bolum kavram -Json 2>$null
@@ -1625,6 +1762,7 @@ try {
         }
     }
 } catch { }
+} else { $script:DoktorOzetDisi.Add('olu kavram') }
 
 # ============================================================================
 # DISK  (Faz 3E, 2026-09-15)  -  bos alan + copcu'nun son olcumu
@@ -1689,7 +1827,30 @@ try {
 } catch { }
 
 # ============================================================================
+# GERI GETIRME OLCUMU (2026-10-05): 'beyin geri-getirme-olc' son sonucu. Olcum
+# model cagirmaz ama 40 vaka x vektor aramasi ~20-30 sn surer; doktor onu
+# KOSMAZ, yalniz .state/geri-getirme-olc.json'u okur. 14 gunden eski ya da
+# dusmus sonuc kirmizi.
+# ============================================================================
+if (-not $Ozet) {
+try {
+    $ggF = Join-Path $p.ScrState 'geri-getirme-olc.json'
+    if (-not (Test-Path -LiteralPath $ggF)) {
+        Add-Row 'geri getirme olcumu' $true 'hic olculmedi' 'beyin geri-getirme-olc  (ilk kez -Dondur ile fixture uret; sonra her motor degisikliginde kos)'
+    } else {
+        $gg = Get-Content -LiteralPath $ggF -Raw -Encoding UTF8 | ConvertFrom-Json
+        $ggYas = [int]((Get-Date) - [datetime]::Parse([string]$gg.ts, [Globalization.CultureInfo]::InvariantCulture)).TotalDays
+        $ggOk = ([bool]$gg.gecti -and $ggYas -le 14)
+        Add-Row 'geri getirme olcumu' $ggOk "vektor rank-1 $($gg.vektor.rank1) / ilk-2 $($gg.vektor.rank2) / bos $($gg.vektor.bos) - kelime rank-1 $($gg.kelime.rank1) ($($gg.vaka) vaka, $ggYas gun once)$(if (-not [bool]$gg.gecti) { ' - DUSTU' })" `
+            $(if ($ggYas -gt 14) { 'bayat: beyin geri-getirme-olc' } else { 'beyin geri-getirme-olc  (esik: -Esik; vaka hatalari raporda)' })
+    }
+} catch { }
+} else { $script:DoktorOzetDisi.Add('geri getirme olcumu') }
+
+# ============================================================================
 # ZAMANLANMIS GOREVLER  (Faz 5D, 2026-09-15)
+# -Ozet DISI (2026-10-04, orkestrator karari): tam taramada kosar; -Ozet raporu sonunda 'Atlanan' satirinda anilir.
+if (-not $Ozet) {
 # ============================================================================
 try {
     $zg = @(Get-ScheduledTask -TaskPath '\Beyin\' -ErrorAction SilentlyContinue)
@@ -1800,6 +1961,7 @@ try {
         Add-Row 'zamanlanmis gorevler' $false "kontrol hatasi: $($_.Exception.Message)" 'Get-ScheduledTask / Get-ScheduledTaskInfo / Read-BeyinMakbuz basarisiz; beyin zamanla -Liste ile elle bak'
     }
 }
+} else { $script:DoktorOzetDisi.Add('zamanlanmis gorevler') }
 
 # ============================================================================
 # KURTARMA (2026-09-10)
@@ -1815,7 +1977,13 @@ try {
 # Onizlemeyi yedek sanmak, olmayan bir agin ustunde yurumektir.
 try {
     $yedekKok = Join-Path $Vault '.brain\backups'
-    $yedekler = @(Get-ChildItem -LiteralPath $yedekKok -Directory -Filter 'backup-*' -ErrorAction SilentlyContinue |
+    # IKI YEDEK BICIMI (2026-10-05, kod incelemesi): brain-cli 'backup-<damga>',
+    # yerli beyin yedek 'beyin-<damga>' + TAMAM.txt. Eskiden yalniz ilki
+    # sayiliyordu; brain-cli olmayan her makinede satir kalici kirmiziydi.
+    # TAMAM.txt'siz 'beyin-*' klasoru YARIM yedektir, sayilmaz.
+    $yedekler = @(Get-ChildItem -LiteralPath $yedekKok -Directory -ErrorAction SilentlyContinue |
+                  Where-Object { ($_.Name -like 'backup-*') -or
+                                 ($_.Name -like 'beyin-*' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'TAMAM.txt'))) } |
                   Sort-Object LastWriteTime -Descending)
     if ($yedekler.Count -eq 0) {
         # TAZE KURULUM ISTISNASI (2026-09-17, olculdu): yeni kurulmus bir
@@ -1829,16 +1997,20 @@ try {
             $(if ($korunacakVar -and (($dayFiles.Count -gt 0) -or ($conFiles.Count -gt 0))) { "hic yedek yok ($($dayFiles.Count) gunluk log + $($conFiles.Count) kavram notu korumasiz)" }
               elseif ($korunacakVar) { "hic yedek yok (kurulum $kurulumGun gun once; icerik arsivlenmis ya da tasinmis olabilir)" }
               else { "taze kurulum ($kurulumGun gun): henuz yedeklenecek icerik yok (0 gunluk log, 0 kavram notu)" }) `
-            'yedek al: brain-cli backup --target "<vault>" --apply  (--apply YOKSA yalniz onizleme uretir, hicbir sey yazilmaz)'
+            'yedek al: beyin yedek  (brain-cli varsa dagitici onu tercih eder; --apply YOKSA brain-cli yalniz onizleme uretir)'
     } else {
         $sonY  = $yedekler[0]
         $yas   = [int]((Get-Date) - $sonY.LastWriteTime).TotalDays
-        $boyut = 0
-        try { $boyut = [math]::Round((Get-ChildItem -LiteralPath $yedekKok -Recurse -File -ErrorAction SilentlyContinue |
-                                      Measure-Object -Property Length -Sum).Sum / 1MB) } catch { }
+        # Toplam boyut 34 bin dosyayi gezer (olculdu: 4,9 sn); tazelik karari
+        # icin gerekmez. -Ozet'te atlanir, tam tarama gosterir.
+        $boyutNot = 'boyut: tam taramada'
+        if (-not $Ozet) {
+            try { $boyutNot = "toplam $([math]::Round((Get-ChildItem -LiteralPath $yedekKok -Recurse -File -ErrorAction SilentlyContinue |
+                                      Measure-Object -Property Length -Sum).Sum / 1MB)) MB" } catch { }
+        }
         Add-Row 'yedek tazeligi' ($yas -le 7) `
-            "$($yedekler.Count) yedek · en yenisi $yas gun once ($($sonY.Name)) · toplam $boyut MB" `
-            'yedek al: brain-cli backup --target "<vault>" --apply'
+            "$($yedekler.Count) yedek · en yenisi $yas gun once ($($sonY.Name)) · $boyutNot" `
+            'yedek al: beyin yedek'
     }
 
     # Tek nokta arizasi: yedekler vault'un ICINDE. Vault dizini giderse yedekler
@@ -1991,8 +2163,13 @@ try {
                 # curl.exe: Windows 10+ ile gelir. Inline PowerShell + WebClient
                 # KULLANILMAZ - o kombinasyonu bazi guvenlik urunleri
                 # kotucul bir kalip sayip engelliyor (olculdu).
-                & curl.exe -fsSL --max-time 3 -o $guTmp $guUrl 2>$null | Out-Null
-                $guCurlKod = $LASTEXITCODE
+                # BAYAT $LASTEXITCODE (2026-10-05): curl.exe yoksa '&' CommandNotFound yutulur ve
+                # onceki native cagrinin (git grep) kodu okunurdu. Once sifirla, curl yoksa 127.
+                $global:LASTEXITCODE = 0
+                if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+                    & curl.exe -fsSL --max-time 3 -o $guTmp $guUrl 2>$null | Out-Null
+                    $guCurlKod = $LASTEXITCODE
+                } else { $guCurlKod = 127 }
                 if ($guCurlKod -eq 0 -and (Test-Path -LiteralPath $guTmp)) {
                     $t = (Get-Content -LiteralPath $guTmp -Raw -Encoding UTF8).Trim()
                     if ($t -match '^\d+\.\d+') {
@@ -2241,10 +2418,11 @@ if ($Derin) {
 if ($Ozet) {
     # "Beynim ne durumda?" - tek komut, 8-12 satir, model cagrisi yok.
     $bad = @($rows | Where-Object { $_.Durum -eq 'SORUN' })
-    function Detay([string]$ad) { $x = @($rows | Where-Object { $_.Kontrol -eq $ad }); if ($x.Count) { return $x[0].Detay } return '-' }
+    function Detay([string]$ad) { $x = @($rows | Where-Object { $_.Kontrol -eq $ad }); if ($x.Count) { return $x[0].Detay }; if ($script:DoktorOzetDisi -contains $ad) { return '-Ozet''te kosmaz (tam tarama)' }; return '-' }
     "BEYIN DURUMU  ($((Get-Date).ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)))  ·  motor v$(Get-BeyinVersion -Vault $Vault)"
-    if ($bad.Count -eq 0) { "  Saglik      : temiz ($($rows.Count) kontrol)" }
-    else { "  Saglik      : $($bad.Count) sorun / $($rows.Count) kontrol -> " + (($bad | ForEach-Object { $_.Kontrol }) -join ', ') }
+    $atlNot = $(if ($script:DoktorAtlanan.Count) { " · ATLANDI $($script:DoktorAtlanan.Count): $($script:DoktorAtlanan -join ', ') (sure butcesi $($script:DoktorSure) sn; tam tarama kosar)" } else { '' })
+    if ($bad.Count -eq 0) { "  Saglik      : temiz ($($rows.Count) kontrol, $([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn)$atlNot" }
+    else { "  Saglik      : $($bad.Count) sorun / $($rows.Count) kontrol ($([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn) -> " + (($bad | ForEach-Object { $_.Kontrol }) -join ', ') + $atlNot }
     "  Butce       : $(Detay 'gunluk butce')"
     "  Is kuyrugu  : $(Detay 'is kuyrugu') · derleme: $(Detay 'derleme kuyrugu')"
     "  Makine      : $(Detay '85-daylogs') · $(Detay '86-compiled')"
@@ -2254,6 +2432,8 @@ if ($Ozet) {
     "  Ajan esligi : $(Detay 'ajan esligi')"
     "  Makbuz      : $(Detay 'makbuz (24 saat)') · $(Detay 'sifir bayt yazimi')"
     "  Niyet       : $(Detay 'niyet')"
+    "  Aktarim     : $(Detay 'aktarim')"
+    "  Kaynak      : $(Detay 'kaynak')"
     "  Bahcivan    : $(Detay 'olu kavram')"
     "  Disk        : $(Detay 'disk')"
     "  Zamanlayici : $(Detay 'zamanlanmis gorevler')"
@@ -2285,6 +2465,7 @@ if ($Ozet) {
         foreach ($b in $bad) { "  - $($b.Kontrol): $($b.Detay)$(if ($b.Duzeltme) { "  ->  $($b.Duzeltme)" })" }
     }
     ''
+    if ($script:DoktorOzetDisi.Count) { "Atlanan (-Ozet'te kosmaz): $($script:DoktorOzetDisi -join ', ')  (tam tarama: -Ozet'siz, hepsini kosar)" }
     'Tam tablo icin: -Ozet olmadan calistir.'
     exit 0
 }
@@ -2293,9 +2474,9 @@ $rows | Format-Table -AutoSize -Wrap
 ''
 $bad = @($rows | Where-Object { $_.Durum -eq 'SORUN' })
 if ($bad.Count -eq 0) {
-    "TANI: saglikli ($($rows.Count) kontrol)"
+    "TANI: saglikli ($($rows.Count) kontrol, $([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn)$(if ($script:DoktorAtlanan.Count) { " - $($script:DoktorAtlanan.Count) kontrol sure butcesinde ATLANDI" })"
 } else {
-    "TANI: $($bad.Count) sorun / $($rows.Count) kontrol"
+    "TANI: $($bad.Count) sorun / $($rows.Count) kontrol ($([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn)$(if ($script:DoktorAtlanan.Count) { " - $($script:DoktorAtlanan.Count) kontrol sure butcesinde ATLANDI" })"
     ''
     'Sorunlu kontroller:'
     foreach ($b in $bad) { "  - $($b.Kontrol): $($b.Detay)$(if ($b.Duzeltme) { "  ->  $($b.Duzeltme)" })" }

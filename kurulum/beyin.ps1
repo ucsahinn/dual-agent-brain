@@ -96,13 +96,25 @@ beyin - Beyin ikinci beyin yoneticisi
 
 TANI
   durum            Kisa saglik ozeti (8-12 satir, model cagirmaz)   << en sik kullanilan
+                   Agir kontroller 20 sn butcesine tabidir (-SureSiniri <sn>, 0 = sinirsiz);
+                   ayni vault icin ikinci doktor baslamaz (cikis 3), ebeveyni olen doktor cikar (cikis 4)
   doktor           Tam kontrol tablosu (sayi surumle degisir; TANI satiri gercek sayiyi basar)
   derin            Tam kontrol + canli 'claude -p' duman testi (gunluk butceden 1 harcar)
   makbuz [gun] [betik]  Motor kosu makbuzlari: ne yazildi, kac bayt, kac butce (varsayilan 1 gun)
   canli [dk]       Su an ne oluyor: aktif oturumlar, kuyruk, calisan is, butce, niyet (yazmaz)
+  kullanim [gun]   Enjekte edilen kavram notu sonradan ACILDI mi? (retrieval makbuzu x Claude transkripti; -Json)
+  geri-getirme-olc Geri getirme holdout olcumu: vektor/kelime rank-1, bos donus; -Dondur fixture uretir, -Esik 0.8
+  bekci            Kaynak bekcisi: commit/RAM, bosta oturumlar, yetim doktor, Codex MCP birikimi, disk raporu;
+                   YALNIZ GOSTERIR, kapatma komutlarini panoya kopyalar (-BostaDk n, -Json, -PanoyaKopyalama)
 
 BAKIM
   niyet [metin]    Ileriye donuk hedefi kaydet/goster (iki ajana enjekte edilir); -Proje x; -Temizle siler
+  kirp             80-memory'yi kayipsiz arsivle: -Gun'den eski tarihli bolum/satirlar 80-memory/arsiv'e; VARSAYILAN KURU, -Uygula yazar
+  pano <komut>     Ortak gorev panosu (AgentChef coordination-board sarmalayicisi, tek state: .state\board.json):
+                   init | create | brief | brief-check | assign | renew-lease | transition | add-evidence | handoff |
+                   resolve-handoff | handoff-check | attach-report | show   (AgentChef 1.3.3: sema v4, blocked/cancelled)
+  aktar [metin]    Ajanlar arasi aktarim: -Kime claude|codex ile soru/handoff kaydet (hedef ajanin yeni
+                   oturumunda [Hafiza: Aktarim] blogu); argumansiz liste; -Tamam <id> kapatir; -Hepsi kapalilar
   topla [gun]      Pencereden dusmus oturumlari topla (varsayilan kuru calisma, 3 gun)
   topla-uygula     Ayni, ama gercekten isle
   derle            Gunluk loglardan kavram notu uret
@@ -260,8 +272,7 @@ function Ayristir {
                 Write-Host "HATA: '$KomutAdi' icin verilen '$x' degeri bir PARAMETRE ADI biciminde." -ForegroundColor Red
                 Write-Host '  powershell -File onu deger degil anahtar sayar; hedef betik "Missing an argument" ile duser.' -ForegroundColor Yellow
                 Write-Host '  Cozum: degeri dogrudan betige ver (ornek: niyet icin)' -ForegroundColor Yellow
-                Write-Host ("    powershell -NoProfile -ExecutionPolicy Bypass -File ""<vault>\motor\scripts
-iyet.ps1"" -Metin '$x'") -ForegroundColor DarkGray
+                Write-Host ("    powershell -NoProfile -ExecutionPolicy Bypass -File ""<vault>\motor\scripts\niyet.ps1"" -Metin '$x'") -ForegroundColor DarkGray
                 exit 2
             }
             $konum.Add($x); $i++; continue
@@ -417,15 +428,15 @@ $PA = @($Parca.ToArray())
 switch ($KomutN) {
 
     { $_ -in @('durum', 'ozet', 'status') } {
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault') -Bayrak @('-derin', '-ozet') -Slot 0 -Ekle @('-ozet')
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri') -Bayrak @('-derin', '-ozet') -Slot 0 -Ekle @('-ozet')
         Cagir 'doktor.ps1' @($a.Gecen)
     }
     { $_ -in @('doktor', 'doctor', 'tam') } {
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault') -Bayrak @('-derin', '-ozet') -Slot 0
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri') -Bayrak @('-derin', '-ozet') -Slot 0
         Cagir 'doktor.ps1' @($a.Gecen)
     }
     { $_ -in @('derin', 'deep') } {
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault') -Bayrak @('-derin', '-ozet') -Slot 0 -Ekle @('-derin')
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri') -Bayrak @('-derin', '-ozet') -Slot 0 -Ekle @('-derin')
         Cagir 'doktor.ps1' @($a.Gecen)
     }
     { $_ -in @('canli', 'live') } {
@@ -445,6 +456,18 @@ switch ($KomutN) {
         $s = Sayi-Konum '-Gun' $a.Konum
         Konum-Reddet $Komut $s.Konum 'Gun sayisi bekleniyordu:  beyin bahcivan-uygula 30'
         Cagir 'bahcivan.ps1' (@($s.Gecen) + @($a.Gecen))
+    }
+    { $_ -in @('pano', 'board') } {
+        # HAM GECIS (zamanli gibi): komut ve --bayraklar AgentChef coordination-board.mjs'e
+        # aynen gider; dogrulamayi orasi yapar. --state/--json pano.ps1 ekler.
+        $pnArg = @()
+        foreach ($x in $PA) { $pnArg += [string]$x.T }
+        Cagir 'pano.ps1' $pnArg
+    }
+    { $_ -in @('bekci', 'watchdog') } {
+        # beyin bekci [-BostaDk n] [-Json] [-PanoyaKopyalama]  - yalniz gosterir, hicbir sureci kapatmaz
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-bostadk') -Bayrak @('-json', '-panoyakopyalama') -Slot 0
+        Cagir 'bekci.ps1' @($a.Gecen)
     }
     { $_ -in @('copcu', 'janitor') } {
         # -Kok: copcu.ps1'in gercek parametresi (copcu.ps1 param blogu), ama
@@ -491,6 +514,20 @@ switch ($KomutN) {
         if ($za.Count) { $zArg = @('-Arg') + $za }
         Cagir 'zamanli-kos.ps1' (@('-Komut', $zk) + $zArg)
     }
+    { $_ -in @('kullanim', 'usage') } {
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-gun') -Bayrak @('-json') -Slot 1
+        $s = Sayi-Konum '-Gun' $a.Konum
+        Konum-Reddet $Komut $s.Konum 'Kullanim: beyin kullanim [gun] [-Json]'
+        Cagir 'kullanim.ps1' (@($s.Gecen) + @($a.Gecen))
+    }
+    { $_ -in @('geri-getirme-olc', 'olc', 'retrieval-eval') } {
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-vaka', '-esik') -Bayrak @('-dondur', '-json') -Slot 0
+        Cagir 'geri-getirme-olc.ps1' @($a.Gecen)
+    }
+    { $_ -in @('kirp', 'trim') } {
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-gun') -Bayrak @('-uygula', '-json') -Slot 0
+        Cagir 'kirp.ps1' @($a.Gecen)
+    }
     { $_ -in @('makbuz', 'receipt') } {
         # beyin makbuz [gun] [betik]: ondeki sayi -Gun, ardindan gelen parca -Betik.
         # NEDEN: `beyin makbuz 7 flush` 'flush'u konumsal birakiyor, makbuz.ps1'de
@@ -531,6 +568,18 @@ switch ($KomutN) {
         # niyet.ps1 '-Metin' anahtarini degersiz gorup baglama hatasi verirdi.
         if ($metin -and -not $metinVar) { $nArgs = @('-Metin', $metin) + $nArgs }
         Cagir 'niyet.ps1' $nArgs
+    }
+    { $_ -in @('aktar', 'handoff') } {
+        # beyin aktar "soru" -Kime claude|codex [-Kanit ..] [-Kapsam ..] [-Risk ..] [-Sonraki ..] [-Proje x]
+        # beyin aktar [-Hepsi]  |  beyin aktar -Tamam <id>
+        # niyet rotasiyla ayni kural: adli degerler disindaki TUM konumsal parcalar metindir.
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam') -Bayrak @('-hepsi') -SinirsizSlot
+        $hArgs = @($a.Gecen)
+        $hMetin = ((@($a.Konum)) -join ' ').Trim()
+        $hMetinVar = $false
+        foreach ($g in $hArgs) { if ((Kucult ([string]$g)) -eq '-metin') { $hMetinVar = $true } }
+        if ($hMetin -and -not $hMetinVar) { $hArgs = @('-Metin', $hMetin) + $hArgs }
+        Cagir 'aktar.ps1' $hArgs
     }
     { $_ -in @('derle', 'compile') } {
         $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-maxdays', '-maxnewconcepts', '-maxupdates') -Bayrak @('-force') -Slot 0

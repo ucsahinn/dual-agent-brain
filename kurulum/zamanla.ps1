@@ -116,7 +116,10 @@ $GOREVLER = @(
     # arsivlenmez ve hicbir aday isaretlenmez. Olu adaylari gercekten tasiyan
     # 'bahcivan-uygula' ZAMANLANMIS BIR GOREV DEGILDIR, elle kosulur.
     # (Hakemlik isteyen kullanici elle kosar: beyin denetle -Derin, 1 butce.)
-    @{ Ad = 'denetle';      Saat = '05:00'; Gun = 'Sunday'; Aciklama = 'Kavram notlari semantik denetimi (yakin-ikiz / celiski)' }
+    @{ Ad = 'denetle';      Saat = '05:00'; Gun = 'Sunday'; Aciklama = 'Kavram notlari semantik denetimi (yakin-ikiz / celiski)' },
+    # GERI GETIRME KAPISI (2026-10-05, avenoxbeyin CI kapisi fikri): dondurulmus
+    # holdout her Pazar kosar; dusunce exit 5 -> makbuz ZAMANLI_HATA, doktor kirmizi.
+    @{ Ad = 'geri-getirme-olc'; Saat = '05:20'; Gun = 'Sunday'; Aciklama = 'Geri getirme regresyon kapisi (dondurulmus holdout; model cagirmaz)' }
 )
 
 function Test-GorevBizim {

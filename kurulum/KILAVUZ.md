@@ -155,6 +155,13 @@ calisir:
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.beyin\beyin.ps1" durum
 ```
 
+`beyin durum` agir kontroller icin **20 saniyelik sure butcesi** kullanir
+(`-SureSiniri <sn>` ya da `BEYIN_DOKTOR_SURE`; `0` = sinirsiz). Butce dolunca
+kalan agir kontroller `ATLANDI` olarak gorunur; `beyin doktor` (tam tarama)
+onlari her zaman kosar. Ayni vault icin ikinci bir doktor baslatilirsa bekleme
+yapmadan "ZATEN CALISIYOR" der ve 3 ile cikar; onu baslatan surec olmusse doktor
+kendini kapatir (cikis 4) - boylece arac zaman asimlari yetim doktor birakmaz.
+
 ### 3.6 Kurulumdan sonra ne nerede olusur
 
 **Ev dizininde:**
@@ -293,6 +300,8 @@ Asagidaki liste `kurulum\beyin.ps1` icindeki `Yaz-Yardim` fonksiyonunun tamamidi
 | `doktor` (`doctor`, `tam`) | Tam kontrol tablosu. Bir sey ters gittiginde ilk basvuru. Kontrol sayisi surumle degisir; `TANI` satiri o kosudaki gercek sayiyi basar. | Hayir |
 | `derin` (`deep`) | Tam kontrol + canli model duman testi (`claude -p`, claude yoksa `codex exec`) + varsa `brain-cli` sema/denetim kontrolu. Bir model arka ucu varsa **gunluk butceden 1 harcar**; hicbiri yoksa duman testi atlanir. | Hayir |
 | `makbuz [gun] [betik]` | Motor kosu makbuzlari: ne yazildi, kac bayt, kac butce. Varsayilan 1 gun. `makbuz 7 flush` gibi ikinci parca betik adidir. | Hayir |
+| `kullanim [gun]` | Enjekte edilen kavram notlari sonradan Read/Grep ile ACILDI mi, yoksa yalniz cevapta mi anildi? Retrieval makbuzlarini ayni oturumun Claude transkriptiyle eslestirir; Codex oturumlari 'transkript yok' sayilir. Varsayilan 7 gun; `-Json`. Rapor `.state/kullanim-son.json`. | Hayir (makbuz haric) |
+| `geri-getirme-olc` | Geri getirme regresyon kapisi: kavram notlarindan uretilen sorgularla vektor (bge-m3) ve kelime yolunun rank-1 / ilk-2 / bos donus oranlari. `-Dondur` fixture'i (`motor/scripts/fixtures/geri-getirme-holdout.json`, SHA-256'li) yeniden uretir - bilerek yapilir; `-Esik 0.8` altinda cikis 5. Doktor tam taramada son sonucu gosterir. | Yalniz `.state` ve -Dondur ile fixture |
 | `canli [dk]` | Su an ne oluyor: aktif oturumlar, kuyruk, calisan is, butce, niyet. Varsayilan pencere 30 dakika. | Hayir |
 
 ```powershell
@@ -320,6 +329,10 @@ BEYIN DURUMU  (2026-01-15 09:12)  ·  motor v1.0.0
 
 | Komut | Ne yapar / ne zaman | Yazar mi? |
 | --- | --- | --- |
+| `pano <komut>` | Ortak gorev panosu: AgentChef `coordination-board.mjs` (sema v3/v4: sahip, yazma kapsami, kira, brief, kanit; 1.3.3 ile `blocked`/`cancelled` durumlari, `assign`, `resolve-handoff`, `handoff-check`, `show --status open --owner x`, done icin `--verified-by` sahipten farkli biri, geri hareketlerde `--reason`) icin sarmalayici. Tek ortak state `motor\scripts\.state\board.json`; komut ve `--bayraklar` AgentChef'inkiyle birebir, `--state` ve `--json` otomatik eklenir. Komutlar: `init`, `create --id TASK-012 --title ... [--owner-agent codex --owner-session x] [--write-repo Beyin --write-paths a,b]` (koordinator zorunlu: `--owner-coordinator` verilmezse `-Koordinator qa` ya da ayar `BEYIN_PANO_KOORDINATOR`, varsayilan `leadership_coordinator`), `brief --task id --brief-file brief.md` (7 alan: Hedef, Kanit, Yazma kapsami, Sinirlar, Bitti kriteri, Donus bicimi, Kullanicinin ozgun cumlesi), `brief-check --brief-file ...`, `renew-lease --task id --minutes 90`, `transition --task id --status in_progress` (brief + canli kira yoksa reddedilir), `add-evidence`, `handoff`, `attach-report`, `show`. Her degisiklikte `10-command-center\pano.md` yeniden yazilir; oturum acilisinda isletim satirina `Pano: N acik, M bu projede (...)` ve bu repoya yazan acik kartlar icin `[Hafiza] UYARI pano:` satiri eklenir (node baslatilmaz). Ayar: `BEYIN_AGENTCHEF_KOK`. |
+| `bekci` | Kaynak bekcisi (tam katman). Commit/RAM yuzdesi, son 14 gunun oturum dosyalari (ajan, proje, kac dakikadir sessiz, Herdr pane), ebeveyni olmus yetim `doktor.ps1` surecleri, Codex MCP birikimi (AgentChef `codex-process-hygiene.mjs --json`; `BEYIN_AGENTCHEF_KOK` altinda once `plugins\agentchef`, sonra `plugins\agentchef-workflows`; ikisi de yoksa ATLANDI) ve yalniz-rapor disk ozeti (Claude transkriptleri, Codex oturumlari, Codex sqlite). **Hicbir sureci kapatmaz**: `taskkill ... /T /F` ve `herdr pane close <pane>` satirlarini panoya kopyalar, karar sende. `-BostaDk n`, `-Json`, `-PanoyaKopyalama` (panoya yazma). Oturum acilisindaki tek satirlik uyari (`[Hafiza] UYARI kaynak:`) ucuz katmandir: esikler `BEYIN_BEKCI_COMMIT` (vars. 85) ve `BEYIN_BEKCI_BOSTA_DK` (vars. 120). |
+| `aktar [metin]` | Ajanlar arasi aktarim kanali (Codex -> Claude ve tersi). `beyin aktar "soru" -Kime claude` kaydi `motor\scripts\.state\handoff\` altina yazar; hedef ajanin her YENI oturumunda `[Hafiza: Aktarim | N acik]` blogu olarak gorunur (ayni oturumda ikinci acilis tekrar gostermez; vault disinda yalniz o projeye ait olanlar). Istege bagli `-Kanit`, `-Kapsam`, `-Risk`, `-Sonraki`, `-Proje`. Argumansiz: acik liste (`-Hepsi` kapananlar dahil). `-Tamam <id>` kapatir; kapali kayitlar 7 gun sonra `handoff\arsiv`e tasinir. Turetilmis gorunum `10-command-center\aktarimlar.md` her degisiklikte yeniden yazilir. Metinler sir redaksiyonundan gecer (fail-closed). |
+| `kirp [-Gun 30] [-Uygula]` | 80-memory'yi KAYIPSIZ kisaltir: `current-context.md`'de tarihi -Gun'den eski `## YYYY-MM-DD` bolumleri ve `active-threads.md`'de son tarihi eski satirlar `80-memory/arsiv/` altina tasinir (en yeni ustte). Tarihsiz bolum/satira dokunmaz. **Varsayilan KURU**: plan basar, hicbir sey yazmaz; `-Uygula` yazar. Neden: Claude Code kanca baglamini 10.000 karakterde kesiyor; buyuyen dosyalar acilista modele ulasmiyordu. | Yalniz `-Uygula` ile (kuratorlu bolge) |
 | `niyet [metin]` | Ileriye donuk hedefi kaydeder; 7 gun boyunca oturum acilisinda iki ajana enjekte edilir. Argumansiz cagrilirsa kayitli niyeti gosterir. `-Proje x` ile projeye baglar, `-Temizle` siler. | **Evet** (durum dosyasi) |
 | `topla [gun]` | Pencereden dusmus (yetim) oturumlari toplar. **Varsayilan kuru calisma, 3 gun.** | Hayir (kuru) |
 | `topla-uygula` | Ayni, ama gercekten isler. Model cagirir. | **Evet** |
@@ -471,6 +484,7 @@ soyler - "ayari degistirdim ama bir sey degismedi" durumunun tanisi budur
 | `BEYIN_CODEX_MODEL` | Codex arka ucunun model adi. Bos birakilirsa Codex'in kendi varsayilani. | (bos) |
 | `BEYIN_EMBED_MODEL` | Ollama gomme modeli. | `bge-m3` |
 | `BEYIN_OLLAMA_URL` | Ollama adresi. `localhost` **yazma**: IPv6 denemesi yaklasik 2 saniye ekler, IP yaz. | `http://127.0.0.1:11434` |
+| `BEYIN_CLAUDE_TAVAN` | Claude Code acilis baglami toplam tavani, karakter (4000-9800). Claude Code 10.000 karakteri asan kanca ciktisini dosyaya atip modele yalniz ~2 KB onizleme verir ve dosyayi okumasini istemez (resmi belge; 2026-10-05'te 58 KB'lik acilis boyle kayboldu). Codex tavani sabit 7000. | `9500` |
 | `BEYIN_FLUSH_BUTCE` | Gunluk model cagrisi tavani (1-1000). Derleyici rezervi her zaman bunun 10 ustudur. | `200` |
 | `BEYIN_BRAIN_CLI` | `brain-cli.mjs` yolu (istege bagli harici arac). Verilirse `beyin yedek` motorun kendi yedegi yerine onu kullanir; doktor'un `-Derin` sema kontrolu de bunu arar. Yol o an cozulemiyorsa motor bunu **belirsiz** sayar ve zamanlanmis yedek gorevine dokunmaz. | (otomatik arama) |
 | `BEYIN_DEPO` | Motor guncelleme deposu. Motoru fork ettiysen kendi adresini yaz. Hem `beyin guncelle` hem doktor'un `motor guncelligi` satiri bunu okur. Sondaki `/` ve `.git` kirpilir. GitHub disi bir adres **uyari verir ama kabul edilir** (o durumda surum karsilastirmasi yapilamaz, guncelleme yine calisir). Oncelik: `beyin guncelle -Depo <adres>` **>** bu ayar **>** varsayilan. | `https://github.com/ucsahinn/dual-agent-brain` |
@@ -527,6 +541,7 @@ Windows Gorev Zamanlayici'ya `\Beyin\` yolu altinda su gorevleri kaydeder:
 | 04:00 | her gun | `copcu` | Disk copcusu **raporu** - hicbir sey silmez |
 | 04:30 | Pazar | `bahcivan` | Kavram/skill/betik kullanim raporu (kuru; hicbir sey arsivlenmez) |
 | 05:00 | Pazar | `denetle` | Kavram notu semantik denetimi (hizli yol; model cagirmaz, butce harcamaz) |
+| 05:20 | Pazar | `geri-getirme-olc` | Geri getirme regresyon kapisi: dondurulmus holdout, vektor/kelime rank-1; dusunce cikis 5 ve doktor kirmizi (model cagirmaz) |
 
 Komutlar:
 

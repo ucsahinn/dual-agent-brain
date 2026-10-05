@@ -44,19 +44,61 @@ if ($st.prompts % 15 -eq 0) {
 }
 
 # --- 2) Icerik-tabanli geri getirme ---
+# KONU KAPISI (2026-10-05, hafiza-os 'anchor' kurali + avenoxbeyin gate): arama
+# yalniz istemde en az 2 ayirt edici terim varsa kosar (durdurma kelimeleri ve
+# 4 harf alti elenir); yoksa Ollama cagrisi bile yapilmaz. Kapi kapandiginda ya
+# da esik altinda kaldiginda MAKBUZ dusulur (KAPI_KAPALI / ESIK_ALTI / ATLANDI):
+# 'beyin kullanim' ve geri-getirme-olc bunlardan yanlis-negatif orani cikarabilir.
+$enjekte  = $false
+$kapiAcik = $true
+$yol      = ''
+$bulunan  = $null
 try {
     $prompt = ''
     try { $prompt = [string]$hook['prompt'] } catch { }
     if (-not $prompt) { $prompt = [string]$hook['user_prompt'] }
 
+    # SENTETIK TUR FILTRESI (2026-10-05, avenoxbeyin'den alindi): alt-ajan
+    # raporu, gorev bildirimi, komut ciktisi ve sistem hatirlatmasi kullanicinin
+    # yazdigi metin DEGILDIR; icine kavram enjekte etmek bosa Ollama cagrisi ve
+    # gurultu. Bu baslangiclarda arama yapilmaz (sayac yine artar).
+    $sentetik = $false
+    if ($prompt) {
+        $pt = $prompt.TrimStart()
+        foreach ($on in @('<task-notification>', '<agent-message', '<command-name>', '<local-command-stdout>',
+                          '<system-reminder', '[Subagent hand-back]', 'Stop hook feedback:', '[SYSTEM NOTIFICATION')) {
+            if ($pt.StartsWith($on, [System.StringComparison]::OrdinalIgnoreCase)) { $sentetik = $true; break }
+        }
+    }
+
     # Cok kisa mesajlarda ("devam", "evet", "tamam") sinyal yok; arama bile yapma.
-    if ($prompt -and $prompt.Length -ge 24) {
+    if ($prompt -and $prompt.Length -ge 24 -and -not $sentetik) {
 
         # AYNI KAVRAMI TEKRAR BASMA. Bir kavram bir oturumda bir kez hatirlatilir;
         # her mesajda tekrarlanan ayni blok kisa surede gorulmez hale gelir ve
         # baglam butcesini bosa harcar.
-        $gosterilen = @()
-        if ($st.ContainsKey('kavram')) { $gosterilen = @($st['kavram']) }
+        # GUNCELLENEN KAVRAM YENIDEN BASILIR (2026-10-05, hafiza-os paket parmak
+        # izi fikri): kayit 'dosya|mtimeTicks' bicimindedir; not o oturum icinde
+        # guncellendiyse (gece derleyici '## Guncelleme' ekledi) yeniden gosterilir.
+        # Eski bicim (yalniz dosya adi) gosterildi sayilir.
+        $gosterilenHam = @()
+        if ($st.ContainsKey('kavram')) { $gosterilenHam = @($st['kavram']) }
+        $gosterilenMap = @{}
+        foreach ($g in $gosterilenHam) {
+            $gs = [string]$g; $ix = $gs.IndexOf('|')
+            if ($ix -gt 0) { $gosterilenMap[$gs.Substring(0, $ix)] = $gs.Substring($ix + 1) } else { $gosterilenMap[$gs] = '*' }
+        }
+        $conceptDir = Join-Path $p.Compiled 'concepts'
+        function Get-KavramTicks([string]$Dosya) {
+            try { return [string](Get-Item -LiteralPath (Join-Path $conceptDir $Dosya) -ErrorAction Stop).LastWriteTimeUtc.Ticks } catch { return '*' }
+        }
+        function Test-Gosterildi([string]$Dosya) {
+            if (-not $gosterilenMap.ContainsKey($Dosya)) { return $false }
+            $t = [string]$gosterilenMap[$Dosya]
+            if ($t -eq '*') { return $true }
+            return ((Get-KavramTicks $Dosya) -eq $t)
+        }
+        $gosterilen = @($gosterilenHam)
 
         $codexMod = ((Get-BeyinAgent) -eq 'codex')
         # Codex kanca ciktisini ~2500 token'da kesiyor. Tavan KAVRAM
@@ -72,12 +114,14 @@ try {
         # 5 sn (iki ajan); hedef toplam < 2.5 sn.
         $yol = 'kelime'
         $bulunan = $null
-        if ($mkSw.ElapsedMilliseconds -lt 1200 -and (Test-BeyinVectorReady -Paths $p)) {
+        $kapiAcik = (@(Get-BeyinKelimeler -Text $prompt).Count -ge 2)
+        if (-not $kapiAcik) { $yol = 'kapi-kapali' }
+        if ($kapiAcik -and $mkSw.ElapsedMilliseconds -lt 1200 -and (Test-BeyinVectorReady -Paths $p)) {
             $vr = Find-BeyinRelevantConceptsVec -Paths $p -Query $prompt -EnFazla ($enFazla + $gosterilen.Count + 2) -TimeoutMs 800
             if ($vr.Ok) { $bulunan = @($vr.Sonuc); $yol = 'vektor' } else { $yol = 'kelime(vektor-dusme)' }
         }
-        if ($null -eq $bulunan) { $bulunan = @(Find-BeyinRelevantConcepts -Paths $p -Query $prompt -EnFazla ($enFazla + $gosterilen.Count + 2)) }
-        $secilen = @($bulunan | Where-Object { $gosterilen -notcontains $_.Item.dosya } | Select-Object -First $enFazla)
+        if ($null -eq $bulunan) { $bulunan = if ($kapiAcik) { @(Find-BeyinRelevantConcepts -Paths $p -Query $prompt -EnFazla ($enFazla + $gosterilen.Count + 2)) } else { @() } }
+        $secilen = @($bulunan | Where-Object { -not (Test-Gosterildi ([string]$_.Item.dosya)) } | Select-Object -First $enFazla)
 
         if ($secilen.Count -gt 0) {
             $satirlar = New-Object System.Collections.Generic.List[string]
@@ -88,11 +132,15 @@ try {
                 # tamamen dusmesindense kisaltilmis hali daha iyidir.
                 $pay = [math]::Max(120, [int](($icerikTavan - $uzunluk) - 80))
                 if ($ozet.Length -gt $pay) { $ozet = $ozet.Substring(0, $pay).TrimEnd() + '...' }
-                $satir = "`n- **$($r.Item.baslik)** (86-compiled/concepts/$($r.Item.dosya)): $ozet"
+                $tazelik = ''
+                try { if ($r.Item.guncel) { $tazelik = " [guncellendi $($r.Item.guncel)]" } } catch { }
+                $satir = "`n- **$($r.Item.baslik)** (86-compiled/concepts/$($r.Item.dosya))$tazelik`: $ozet"
                 if ($uzunluk -gt 0 -and ($uzunluk + $satir.Length) -gt $icerikTavan) { break }
                 $satirlar.Add($satir)
                 $uzunluk += $satir.Length
-                $gosterilen += $r.Item.dosya
+                $gAd = [string]$r.Item.dosya
+                $gosterilen = @($gosterilen | Where-Object { $gx = [string]$_; ($gx -ne $gAd) -and -not $gx.StartsWith($gAd + '|') })
+                $gosterilen += ($gAd + '|' + (Get-KavramTicks $gAd))
             }
 
             # BOS BLOK BASMA: tek bir kavram bile sigmadiysa hic enjekte etme.
@@ -102,15 +150,30 @@ try {
                         "(confidence: unverified) - dogruymus gibi aktarma, gerekirse notu ac ve kontrol et." +
                         ($satirlar -join '') + "`n[Hafiza blok sonu]"
                 $parcalar.Add($blok)
+                $enjekte = $true
                 # En fazla 40 dosya adi tutulur: oturum durumu kucuk kalmali.
                 $st['kavram'] = @($gosterilen | Select-Object -Last 40)
                 # MAKBUZ (Faz 1A): yalniz gercekten enjeksiyon oldugunda. Bahcivan
                 # 'bu kavram hic kullanildi mi' sorusunu bu satirlardan cevaplar.
+                # Laya golge danismani 2026-10-04'te kaldirildi (gercek vault verisinde %22,8 vs motor %100).
                 Write-BeyinMakbuz -Paths $p -Script 'retrieval' -Outcome 'ENJEKSIYON' -Agent (Get-BeyinAgent) `
                     -Key (Get-BeyinSessionKey -SessionId $hook.session_id) -Reason 'prompt' `
-                    -Concepts @($secilen | ForEach-Object { [string]$_.Item.dosya }) -DurationMs $mkSw.ElapsedMilliseconds -Note "yol=$yol"
+                    -Concepts @($secilen | ForEach-Object { [string]$_.Item.dosya }) -DurationMs $mkSw.ElapsedMilliseconds `
+                    -Note "yol=$yol"
             }
         }
+    }
+} catch { }
+
+# KAPI MAKBUZU: enjeksiyon olmadiysa neden olmadigi kayda gecer (yalniz arama
+# adayi olan istemlerde; 24 karakter alti sinyal sayilmaz, makbuz da yazilmaz).
+try {
+    if ($prompt -and $prompt.Length -ge 24 -and -not $enjekte) {
+        $kapiSonuc = if ($sentetik) { 'ATLANDI' } elseif (-not $kapiAcik) { 'KAPI_KAPALI' } else { 'ESIK_ALTI' }
+        $kapiNeden = if ($sentetik) { 'sentetik' } elseif (-not $kapiAcik) { 'konu-kapisi' } else { 'esik' }
+        Write-BeyinMakbuz -Paths $p -Script 'retrieval' -Outcome $kapiSonuc -Agent (Get-BeyinAgent) `
+            -Key (Get-BeyinSessionKey -SessionId $hook.session_id) -Reason $kapiNeden -DurationMs $mkSw.ElapsedMilliseconds `
+            -Note "yol=$yol; aday=$(@($bulunan).Count)"
     }
 } catch { }
 
@@ -123,12 +186,25 @@ try {
 # prompts ve pcSayi BILEREK tasinmaz: onlar baska sureclerce ilerletilmis
 # olabilir; buradaki kopya bayattir. Yalniz bu kancanin gercekten urettigi
 # alanlar tasinir.
+#
+# KAPSAM TUZAGI (2026-10-05, kod incelemesinde dogrulandi): PowerShell
+# scriptblock'u closure DEGILDIR; icindeki '$st' cagrildigi yerden yukari dogru
+# cozulur. Update-BeyinSessionState kendi icinde '$st = Get-BeyinSessionState'
+# yapip bloga onu veriyordu; yani buradaki '$st' bloga giren '$s'nin KENDISIYDI
+# ve her atama no-op'tu. Sonuc: 'kavram' listesi hic diske gitmedi (ayni kavram
+# bir oturumda 5 kez enjekte edildi - makbuzlarda olculdu), 'start' hep 0 kaldi
+# (yansima notu kapisi hic acilmadi). Degerler FARKLI adlarla kopyalanir; dinamik
+# arama artik dis kapsamdaki bu adlari bulur.
+$pcCwd    = [string]$st.cwd
+$pcStart  = [long]$st.start
+$pcAgent  = [string]$st.agent
+$pcKavram = if ($st.ContainsKey('kavram')) { @($st['kavram']) } else { $null }
 Update-BeyinSessionState -Paths $p -SessionId $hook.session_id -Degistir {
     param($s)
-    if ($st.cwd)   { $s.cwd = $st.cwd }
-    if ($st.start) { $s.start = $st.start }
-    if ($st.agent) { $s.agent = $st.agent }
-    if ($st.ContainsKey('kavram')) { $s['kavram'] = @($st['kavram']) }
+    if ($pcCwd)   { $s.cwd = $pcCwd }
+    if ($pcStart) { $s.start = $pcStart }
+    if ($pcAgent) { $s.agent = $pcAgent }
+    if ($null -ne $pcKavram) { $s['kavram'] = @($pcKavram) }
     return $s
 } | Out-Null
 

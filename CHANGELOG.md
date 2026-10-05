@@ -21,6 +21,63 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.1.0 - acilis tavani, ajanlar arasi kanal, olcum komutlari
+
+**Duzelen (sessizce yanlis davraniyordu):**
+
+- **Claude Code acilis hafizasi modele ulasmiyordu.** Claude Code kanca baglamini
+  10.000 karakterde keser; asan kismi dosyaya atip 2 KB onizleme verir (resmi
+  belge). Vault ici acilis 58 KB'ti: model yalniz saglik satirini ve kurallarin
+  yarisini goruyordu. Artik toplam tavan `BEYIN_CLAUDE_TAVAN` (9500), kural ve
+  guncel-baglam bloklarina karakter tavani, dusen bloklar gorunur bildirilir,
+  acilis makbuzu (`beyin makbuz 1 session-start`) boyutu kaydeder.
+- **"Ayni kavram bir oturumda bir kez" kurali calismiyordu**: prompt kancasinin
+  geri yazimi PowerShell kapsam tuzagi yuzunden diske gitmiyordu; ayni not bes
+  kez enjekte ediliyor, yansima notu hic yazilmiyordu.
+- Oturum durumu yazimlari kilit altinda; engine.log eszamanli yazimda satir
+  dusurmuyor; injection regex'leri zaman asimli; `BEYIN_FLUSH_BUTCE=0` artik tum
+  ozetlemeyi durdurmuyor (1-1000'e sikisir); ozetleyici `claude -p` icin arac
+  yasagi genisledi (Agent/Skill dahil) ve transkript kalicilig kapali.
+- `gom` hata kodunu tasiyor (gece gomme sessizce olmuyor); `doktor` yerli
+  `beyin yedek` klasorlerini sayiyor; `niyet -Temizle` silmeyi dogruluyor;
+  `canli` bos slotu anlik kapatmiyor; `copcu` bos alani `-Kok` surucusunden
+  olcuyor; `derin -SureSiniri` kabul ediyor.
+
+**Yeni komutlar:**
+
+- `beyin aktar` - ajanlar arasi soru/handoff kanali (Codex <-> Claude);
+  hedef ajanin acilisinda `[Hafiza: Aktarim]` blogu.
+- `beyin bekci` - kaynak bekcisi: commit/RAM, bosta oturumlar, yetim doktor,
+  Codex MCP birikimi. YALNIZ gosterir; kapatma komutlarini panoya kopyalar.
+- `beyin pano` - AgentChef coordination-board sarmalayicisi (sema v3/v4).
+- `beyin kullanim` - enjekte edilen kavram notu sonradan gercekten acildi mi
+  ("baglama geldi != kullanildi").
+- `beyin geri-getirme-olc` - geri getirme regresyon kapisi: dondurulmus holdout,
+  vektor/kelime rank-1; Pazar gece gorevi olarak da kayitli.
+- `beyin kirp` - 80-memory'yi kayipsiz arsivler (eski tarihli bolum/satirlar
+  `80-memory/arsiv/`); varsayilan kuru, `-Uygula` yazar.
+
+**Degisen davranis:**
+
+- Prompt kancasi sentetik turlarda (alt-ajan raporu, gorev bildirimi, sistem
+  hatirlatmasi) arama yapmaz; istemde 2+ ayirt edici terim yoksa konu kapisi
+  kapanir ve makbuza ATLANDI / KAPI_KAPALI / ESIK_ALTI yazilir.
+- Kelime yolu hafif Turkce ek soyucu kullanir (sorgu ve indeks ayni fonksiyondan
+  gecer); kavram satiri `[guncellendi YYYY-MM-DD]` tasir; guncellenen not ayni
+  oturumda yeniden basilabilir; Aktif Basliklar'da son 14 gunde tarihli satirlar
+  one gelir; current-context 8+ oturum geride kalinca `[Hafiza] UYARI kurator`.
+- Sir redaksiyonuna Discord bot, Vercel, Stripe webhook ve Turkce etiket
+  ("sifrem:", "parola =", "kurtarma kodu") desenleri eklendi.
+- Acilista `[Hafiza] UYARI kaynak:` (commit/RAM) ve ayni klasorde es zamanli
+  baska oturum uyarisi; `doktor -Ozet` 20 sn butceli, tek doktor kilidi.
+- Laya yerel karar modeli denemesi kaldirildi (gercek vault verisinde sans
+  duzeyi); Control koprusu betikleri kaldirildi.
+
+**Kirici degisiklikler:** yok. `laya-makbuz` komutu ve `BEYIN_LAYA_*` ayarlari
+kalkti (deneysel, hic duyurulmamisti).
+
+---
+
 ## 1.0.0 - ilk kararli genel surum
 
 Motor `2.x` boyunca ic gelistirme surumu olarak yasadi. `1.0.0`, **disaridan

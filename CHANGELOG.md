@@ -21,6 +21,48 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.2.0 - insan onayi, maliyet, surec oldurme korumasi
+
+**Kirici degisiklikler:**
+
+- **Pano karti artik insan onayi olmadan `done` olmaz.** Kullanici sohbete yalniz
+  `onayla TASK-012` satirini yazar (ya da gercek terminalde `beyin pano onayla TASK-012`
+  ekrandaki kodu ister). Onay 7 gun gecerli ve tek kullanimlik. Ajan mesaji, oturumlar
+  arasi mesaj ve cumle icinde gecen ifade onay SAYILMAZ. Eski davranis:
+  `beyin ayar BEYIN_PANO_ONAY kapali`.
+
+**Yeni:**
+
+- `beyin maliyet [gun]`: iki ajanin jeton kullanimi ve API esdegeri maliyet; gun, proje
+  ve oturum dokumu, oturum basi sabit yuk, 200K baglami asan oturumlar. Abonelikte gercek
+  fatura bu degildir. Gece 04:10'da artimli tarar; her gunluk bloga oturumun toplami yazilir.
+- `beyin skill-aday`: tekrar eden yordamsal kavram notlarindan skill adayi listesi
+  (`86-compiled/skill-adaylari.md`, Pazar 05:30). Skill'i insan acar.
+- **Surec oldurme korumasi (istege bagli):** `kur.ps1 -KillGuard` ile kaydedilir.
+  Ajanlari AD ile toptan olduren (`taskkill /IM node.exe`, `Stop-Process -Name claude`...)
+  ve baska bir ajan oturumunun PID'ini hedefleyen komutlari reddeder. Codex icin
+  `-CodexZorla` + `/hooks` onayi. Zararsiz komuta ~250 ms ekler.
+- **Devir blogu:** oturum kapanirken ya da sikistirilmadan once "nerede kaldim / siradaki
+  adim" ayni ajanin ayni projedeki bir sonraki acilisinda bir kez gosterilir.
+- **Kullanim sonmesi** (`BEYIN_SONME`): 14 gunde 5+ kez baglama gelip hic acilmayan
+  kavram notlari siralamada geri duser.
+- **Pano brifingi:** kart incelemeye ya da kilide gecince karsi ajana tek bildirim gider.
+- **Model limitinde erteleme:** limit mesajindaki sifirlanma saatine kadar ozetleme
+  denenmez, butce yakilmaz.
+- Doktor: uc durum (OK / SORUN / OLCULEMEDI), kanca yorumlayicisi, auto-memory, yazma
+  sondasi, ozetleyici bayraklari (model cagirmadan), maliyet ve kill guard satirlari.
+
+**Duzelen (sessizce yanlis davraniyordu):**
+
+- **Model limiti hatalari "genel hata" sayiliyordu.** Ozetleyicinin arac yasagi listesindeki
+  bir ad CLI'da her cagrida uyari basiyordu; uyari stderr'i doldurdugu icin asil limit mesaji
+  (stdout) hic okunmuyor, butce iade edilmiyordu. Ozetleyici artik tum araclari `--tools ""`
+  ile kapatir ve hata ozeti iki akisi da okur.
+- Ajan raporlari ve oturumlar arasi mesajlar kullanici mesaji sanilip kavram enjekte
+  ediliyordu.
+- Okuma yolundaki bloklarda (devam, aktarim, gunluk) sir maskesi yoktu.
+- `kur.ps1 -KuruCalisma` Claude kancalari icin "kuruldu" diyordu (hicbir sey yazilmamisken).
+
 ## 1.1.0 - acilis tavani, ajanlar arasi kanal, olcum komutlari
 
 **Duzelen (sessizce yanlis davraniyordu):**

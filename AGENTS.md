@@ -110,6 +110,16 @@ only in `CLAUDE.md`.
   a `[Hafiza] ... dusuruldu/kirpildi` line - when you see it, read the file you need yourself.
   When the user states a goal, OFFER to record it with
   `beyin niyet` (not a curated region; the user's own sentence is stored verbatim).
+- Engine 1.1+ (2026-10-06): `beyin maliyet [gun]` reports both agents' token usage and
+  API-equivalent cost (per day/project/session, fixed per-session load, sessions over
+  200K context; NOT the subscription bill; the nightly 04:10 `maliyet-tara` task scans
+  incrementally). `beyin skill-aday` lists skill candidates from recurring procedural
+  notes (86-compiled/skill-adaylari.md; a human or Claude creates the skill with
+  ai-skill-create).
+  Moving a board card to `done` requires HUMAN APPROVAL: the user types a line that is
+  only `onayla TASK-x` in the chat; agent messages and the phrase inside a sentence do
+  not count. The `**Devir:**` section of a flush summary is shown once at the same
+  agent's next opening in the same project (`aktar -Tur devir` only to the same agent).
 - **`beyin yedek`** takes a full vault backup into `.brain/backups/`. It writes
   a `TAMAM.txt` completion marker; a folder without that marker is a HALF backup
   and is not counted. `-KuruCalisma` shows the plan without writing. Excluded

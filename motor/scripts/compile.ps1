@@ -807,6 +807,12 @@ $slot = Enter-BeyinSlot -Paths $p -MaxSlots 1 -Prefix 'compile-slot'
 if (-not $slot) {
     Stop-Compile -Code 'COMPILE_SLOT_YOK' -Log 'compile: baska bir DERLEYICI calisiyor, isaretleme yapilmadi'
 }
+# MODEL LIMITI ERTELEMESI (2026-10-06): reset saatinden once derleyici modeli cagirmaz.
+$le = Test-BeyinLimitErtele -Paths $p
+if ($le.Aktif) {
+    Exit-BeyinSlot -Handle $slot
+    Stop-Compile -Code 'COMPILE_ERTELENDI' -Log "compile: model limiti - $($le.Until.ToString('HH:mm'))'e kadar ertelendi ($($le.Kaynak)), isaretleme yapilmadi"
+}
 if (-not (Test-BeyinBudget -Paths $p -MaxPerDay (Get-BeyinCompileBudget))) {
     Exit-BeyinSlot -Handle $slot
     Stop-Compile -Code 'COMPILE_BUTCE' -Log 'compile: gunluk butce doldu, isaretleme yapilmadi'
@@ -914,6 +920,12 @@ $corpus
         $errKisa = Get-BeyinFailDetail -Result $res
         # KOTA/KIMLIK: cagri hizmet almadi, derleyici butcesini iade et (Faz 5D).
         if ($errKisa -and (Test-BeyinMatch -Text $errKisa -Pattern 'KOTA/LIMIT|KIMLIK')) { Restore-BeyinBudget -Paths $p; $script:mkBudget = 0 }
+        if ($errKisa -and (Test-BeyinMatch -Text $errKisa -Pattern 'KOTA/LIMIT')) {
+            $lr = Get-BeyinLimitReset -Text (([string]$res.Err) + ' ' + ([string]$res.Out))
+            if (Set-BeyinLimitErtele -Paths $p -Until $lr.Until -Kaynak $lr.Kaynak -Backend ([string]$res.Backend) -Ornek $errKisa) {
+                Write-BeyinLog -Vault $Vault -Message "limit: derleme $($lr.Until.ToString('yyyy-MM-dd HH:mm'))'e kadar ertelendi (kaynak=$($lr.Kaynak))"
+            }
+        }
         Stop-Compile -Code "COMPILE_HATA_$($res.Reason)" `
                      -Log "compile: BASARISIZ ($($res.Reason), exit=$($res.ExitCode))$errKisa - gunler isaretlenMEDI, sonraki denemede tekrar okunacak"
     }
@@ -1131,6 +1143,7 @@ Her derleme calismasi buraya bir blok ekler. Denetim izidir.
     $mkGuncelSlug = @($updated | ForEach-Object { $_.Slug })
     $script:mkConcepts = @(@($mkYeniSlug) + @($mkGuncelSlug))
     $script:mkNote = "$($logs.Count) gun okundu, $($updated.Count) not guncellendi, $($skipped.Count) mevcut korundu"
+    Clear-BeyinLimitErtele -Paths $p
     Write-CompileMakbuz 'COMPILE_OK'
     # VEKTOR TAZELEME (2026-09-16): yeni kavram notu yazildiysa gom.ps1 ayri surecte
     # kosar; aksi halde indeks gece 03:10'a kadar eksik kaliyordu (doktor: '5 eksik').

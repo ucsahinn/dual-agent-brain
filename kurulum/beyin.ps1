@@ -103,6 +103,10 @@ TANI
   makbuz [gun] [betik]  Motor kosu makbuzlari: ne yazildi, kac bayt, kac butce (varsayilan 1 gun)
   canli [dk]       Su an ne oluyor: aktif oturumlar, kuyruk, calisan is, butce, niyet (yazmaz)
   kullanim [gun]   Enjekte edilen kavram notu sonradan ACILDI mi? (retrieval makbuzu x Claude transkripti; -Json)
+  skill-aday [gun] Tekrar eden yordamsal kavram notlarindan skill adayi listesi (86-compiled/skill-adaylari.md;
+                   3+ oturum, 2+ gun, liste iceren not; skill'i ai-skill-create ile insan/Claude acar; -KuruCalisma)
+  maliyet [gun]    Iki ajanin jeton kullanimi + API esdegeri maliyet: gun/proje/oturum, oturum basi sabit yuk,
+                   200K baglami asan oturumlar (artimli tarama; model cagirmaz; -Json, -YalnizTara)
   geri-getirme-olc Geri getirme holdout olcumu: vektor/kelime rank-1, bos donus; -Dondur fixture uretir, -Esik 0.8
   bekci            Kaynak bekcisi: commit/RAM, bosta oturumlar, yetim doktor, Codex MCP birikimi, disk raporu;
                    YALNIZ GOSTERIR, kapatma komutlarini panoya kopyalar (-BostaDk n, -Json, -PanoyaKopyalama)
@@ -113,8 +117,11 @@ BAKIM
   pano <komut>     Ortak gorev panosu (AgentChef coordination-board sarmalayicisi, tek state: .state\board.json):
                    init | create | brief | brief-check | assign | renew-lease | transition | add-evidence | handoff |
                    resolve-handoff | handoff-check | attach-report | show   (AgentChef 1.3.3: sema v4, blocked/cancelled)
+                   onayla TASK-x : insan onayi (yalniz etkilesimli terminal; sohbetten tek satir 'onayla TASK-x').
+                   'done' gecisi onay ister (ayar BEYIN_PANO_ONAY); review/blocked gecisi koordinatore tek brifing yazar
   aktar [metin]    Ajanlar arasi aktarim: -Kime claude|codex ile soru/handoff kaydet (hedef ajanin yeni
-                   oturumunda [Hafiza: Aktarim] blogu); argumansiz liste; -Tamam <id> kapatir; -Hepsi kapalilar
+                   oturumunda ve oturum icinde bir kez [Hafiza: Aktarim] blogu); -Tur soru|devir; argumansiz liste;
+                   -Tamam <id> kapatir; -Hepsi kapalilar
   topla [gun]      Pencereden dusmus oturumlari topla (varsayilan kuru calisma, 3 gun)
   topla-uygula     Ayni, ama gercekten isle
   derle            Gunluk loglardan kavram notu uret
@@ -520,8 +527,24 @@ switch ($KomutN) {
         Konum-Reddet $Komut $s.Konum 'Kullanim: beyin kullanim [gun] [-Json]'
         Cagir 'kullanim.ps1' (@($s.Gecen) + @($a.Gecen))
     }
+    { $_ -in @('maliyet', 'cost') } {
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-gun') -Bayrak @('-json', '-yalniztara') -Slot 1
+        $s = Sayi-Konum '-Gun' $a.Konum
+        Konum-Reddet $Komut $s.Konum 'Kullanim: beyin maliyet [gun] [-Json] [-YalnizTara]'
+        Cagir 'maliyet.ps1' (@($s.Gecen) + @($a.Gecen))
+    }
+    { $_ -in @('skill-aday', 'skill-adaylari') } {
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-gun') -Bayrak @('-json', '-kurucalisma') -Slot 1
+        $s = Sayi-Konum '-Gun' $a.Konum
+        Konum-Reddet $Komut $s.Konum 'Kullanim: beyin skill-aday [gun] [-Json] [-KuruCalisma]'
+        Cagir 'skill-aday.ps1' (@($s.Gecen) + @($a.Gecen))
+    }
+    'maliyet-tara' {
+        # Gece gorevi rotasi: zamanlayici bayrak gecirmez, bu yuzden ayri ad.
+        Cagir 'maliyet.ps1' @('-YalnizTara')
+    }
     { $_ -in @('geri-getirme-olc', 'olc', 'retrieval-eval') } {
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-vaka', '-esik') -Bayrak @('-dondur', '-json') -Slot 0
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-vaka', '-esik', '-fusion', '-topk') -Bayrak @('-dondur', '-json', '-sonmeyok') -Slot 0
         Cagir 'geri-getirme-olc.ps1' @($a.Gecen)
     }
     { $_ -in @('kirp', 'trim') } {
@@ -573,7 +596,7 @@ switch ($KomutN) {
         # beyin aktar "soru" -Kime claude|codex [-Kanit ..] [-Kapsam ..] [-Risk ..] [-Sonraki ..] [-Proje x]
         # beyin aktar [-Hepsi]  |  beyin aktar -Tamam <id>
         # niyet rotasiyla ayni kural: adli degerler disindaki TUM konumsal parcalar metindir.
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam') -Bayrak @('-hepsi') -SinirsizSlot
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur') -Bayrak @('-hepsi') -SinirsizSlot
         $hArgs = @($a.Gecen)
         $hMetin = ((@($a.Konum)) -join ' ').Trim()
         $hMetinVar = $false

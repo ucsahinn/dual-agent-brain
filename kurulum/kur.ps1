@@ -47,6 +47,12 @@ param(
     # ('atlandi farkli girdiler var, dokunulmadi') - kurulumun onerdigi care bostu.
     [switch]$CodexZorla,
 
+    # SUREC OLDURME KORUMASI (BB5, 2026-10-06): PreToolUse kancasi (matcher 'Bash')
+    # ekler; ajanlari ad ile toptan olduren ve korunan PID hedefleyen komutlari
+    # reddeder. Opt-in: global ayara yazar. Once -KuruCalisma ile onizle. Codex'e
+    # yalniz -CodexZorla ile birlikte yazilir (hash), ardindan /hooks ile onay sart.
+    [switch]$KillGuard,
+
     # YALNIZ VAULT: klasor yapisi + baslangic dosyalari + surum damgasi kurulur;
     # ev dizinine (launcher, dagitici, kanca ayarlari, skill baglantilari)
     # HIC DOKUNULMAZ.
@@ -453,7 +459,9 @@ if ($mevcutKayit -eq $Vault) {
 
 foreach ($d in @(@{ K = 'beyin.ps1'; H = (Join-Path $beyinKok 'beyin.ps1') },
                  @{ K = 'beyin-launcher.ps1';     H = (Join-Path $beyinKok 'beyin-launcher.ps1') },
-                 @{ K = 'beyin-launcher-sim.ps1'; H = (Join-Path $env:USERPROFILE '.claude\hooks\beyin-launcher.ps1') })) {
+                 @{ K = 'beyin-launcher-sim.ps1'; H = (Join-Path $env:USERPROFILE '.claude\hooks\beyin-launcher.ps1') },
+                 # Kill guard node on filtresi (BB5): hooks.json/settings.json bu sabit yola bakar.
+                 @{ K = '..\motor\hooks\kill-guard-on.mjs'; H = (Join-Path $beyinKok 'kill-guard-on.mjs') })) {
     $kaynak = Join-Path $PSScriptRoot $d.K
     if (-not (Test-Path -LiteralPath $kaynak)) { Adim $d.K 'HATA' "kaynak yok: $kaynak"; continue }
     $ayni = $false
@@ -626,6 +634,8 @@ $KANCALAR = @(
     @{ Olay = 'PreCompact';       Hook = 'pre-compact';     Timeout = 15 }
 )
 $CODEX_SESSIONEND_TAVAN = 3
+# Claude Code'da ayrica PowerShell araci var: Stop-Process oradan da gelebilir. Codex'te yalniz Bash.
+if ($KillGuard) { $KANCALAR += @{ Olay = 'PreToolUse'; Hook = 'pre-tool-use'; Timeout = 10; Matcher = 'Bash'; ClaudeMatcher = 'Bash|PowerShell' } }
 
 function Kanca-Timeout($K, [string]$Ajan) {
     if ($Ajan -eq 'codex' -and $K.ContainsKey('CodexTimeout')) { return [int]$K.CodexTimeout }
@@ -633,6 +643,13 @@ function Kanca-Timeout($K, [string]$Ajan) {
 }
 
 function Komut-Metni([string]$Hook, [string]$Ajan) {
+    # KILL GUARD (BB5): PowerShell acilisi (~450 ms) her Bash cagrisinda odenmesin diye
+    # once node on filtresi kosar; desen varsa launcher uzerinden pre-tool-use.ps1'i cagirir.
+    if ($Hook -eq 'pre-tool-use') {
+        $c = "node `"$(Join-Path $env:USERPROFILE '.beyin\kill-guard-on.mjs')`""
+        if ($Ajan -eq 'codex') { $c += ' --codex' }
+        return $c
+    }
     # Codex: SIM yolu (hooks.json hash'i bozulmasin). Claude: gercek launcher.
     $yol = if ($Ajan -eq 'codex') { $simYol } else { $launcherYol }
     $c = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$yol`" -Hook $Hook"
@@ -669,12 +686,25 @@ function Birlestir-Kanca([string]$AyarYol, [string]$Ajan, [bool]$Yaz, [bool]$Yen
         if ($veri.hooks.PSObject.Properties[$olay]) {
             foreach ($grup in @($veri.hooks.$olay)) {
                 foreach ($h in @($grup.hooks)) {
-                    if ($h.command -and $h.command -like '*beyin-launcher*') { $mevcutGiris += $h }
+                    if ($h.command -and ($h.command -like '*beyin-launcher*' -or $h.command -like '*kill-guard-on*')) { $mevcutGiris += $h }
                 }
             }
         }
 
         if ($mevcutGiris.Count -gt 0) {
+            # MATCHER YENILEME (-Yenile): beyin girdisinin grubunun matcher'i beklenenden
+            # farkliysa (ornek: kill guard 'Bash' -> 'Bash|PowerShell') yerinde duzeltilir.
+            $istenenM = $(if ($Ajan -eq 'claude' -and $k.ContainsKey('ClaudeMatcher')) { [string]$k.ClaudeMatcher } elseif ($k.ContainsKey('Matcher')) { [string]$k.Matcher } else { '' })
+            if ($Yenile -and $istenenM) {
+                foreach ($grup in @($veri.hooks.$olay)) {
+                    $beyinli = @($grup.hooks | Where-Object { $_.command -and ($_.command -like '*beyin-launcher*' -or $_.command -like '*kill-guard-on*') }).Count -gt 0
+                    $gm = $(if ($grup.PSObject.Properties['matcher']) { [string]$grup.matcher } else { '' })
+                    if ($beyinli -and $gm -ne $istenenM) {
+                        if ($grup.PSObject.Properties['matcher']) { $grup.matcher = $istenenM } else { $grup | Add-Member -NotePropertyName 'matcher' -NotePropertyValue $istenenM -Force }
+                        $yenilenen++
+                    }
+                }
+            }
             $eslesen = @($mevcutGiris | Where-Object { $_.command -eq $beklenen })
             if (-not $Yenile) {
                 if ($eslesen.Count -gt 0) { continue }              # tipatip ayni: dokunma
@@ -709,16 +739,20 @@ function Birlestir-Kanca([string]$AyarYol, [string]$Ajan, [bool]$Yaz, [bool]$Yen
         # tetiklenmiyor, kur 'kuruldu' diyor, doktor girdiyi sayiyordu. Yalniz
         # matcher'i olmayan / bos / '*' olan gruba eklenir; yoksa kendi '*'
         # grubu acilir. Codex gruplarinda matcher yok -> davranis degismez.
+        # MATCHER'LI KANCA (BB5): PreToolUse yalniz kendi matcher'li grubuna ('Bash') girer;
+        # genis gruba eklenseydi her arac cagrisinda (Read/Edit...) PowerShell acilirdi.
+        $istenen = $(if ($Ajan -eq 'claude' -and $k.ContainsKey('ClaudeMatcher')) { [string]$k.ClaudeMatcher } elseif ($k.ContainsKey('Matcher')) { [string]$k.Matcher } else { '' })
         $genisGrup = $null
         foreach ($g in $gruplar) {
             if (-not $g.PSObject.Properties['hooks']) { continue }
             $m = if ($g.PSObject.Properties['matcher']) { [string]$g.matcher } else { '' }
-            if ($m -eq '' -or $m -eq '*') { $genisGrup = $g; break }
+            if ($istenen) { if ($m -eq $istenen) { $genisGrup = $g; break } }
+            elseif ($m -eq '' -or $m -eq '*') { $genisGrup = $g; break }
         }
         if ($genisGrup) {
             $genisGrup.hooks = @($genisGrup.hooks) + $yeniHook
         } else {
-            $gruplar = @($gruplar) + [pscustomobject]@{ matcher = '*'; hooks = @($yeniHook) }
+            $gruplar = @($gruplar) + [pscustomobject]@{ matcher = $(if ($istenen) { $istenen } else { '*' }); hooks = @($yeniHook) }
         }
         $veri.hooks.$olay = $gruplar
         $eklendi++
@@ -753,11 +787,16 @@ try {
         }
     }
 } catch { Adim 'Claude launcher yolu' 'HATA' $_.Exception.Message }
-$r = Birlestir-Kanca $claudeAyar 'claude' $true
+# -KillGuard: kullanici korumayi istedi; eski bicimde kayitli kill guard girdisi (launcher)
+# yerinde yeni bicime (node on filtresi) cekilir. Diger beyin girdileri zaten eslesir.
+$r = Birlestir-Kanca $claudeAyar 'claude' $true ([bool]$KillGuard)
 # "AYRISTIRILAMADI" ILE "ZATEN YERINDE" AYNI CEVAP DEGILDIR (2026-09-18).
 # Eskiden bozuk JSON'da Birlestir-Kanca sifirli bir sonuc donuyordu ve bu
 # else dali "zaten - 4 girdi yerinde" basiyordu: SIFIR girdi birlestirilmisken.
 if ($r.Hata) { Adim 'Claude kancalari' 'HATA' 'ayar dosyasi ayristirilamadi - kanca durumu BILINMIYOR' }
+elseif ($r.Yenilenen -gt 0 -and $KuruCalisma) { Adim 'Claude kancalari' 'atlandi' "kuru calisma: $($r.Yenilenen) girdi yenilenecek - yazilmadi" }
+elseif ($r.Yenilenen -gt 0) { Adim 'Claude kancalari' 'kuruldu' "$($r.Yeni) girdi eklendi, $($r.Yenilenen) girdi yenilendi" }
+elseif ($r.Yeni -gt 0 -and $KuruCalisma) { Adim 'Claude kancalari' 'atlandi' "kuru calisma: $($r.Yeni) girdi eklenecek - yazilmadi" }
 elseif ($r.Yeni -gt 0) { Adim 'Claude kancalari' 'kuruldu' "$($r.Yeni) girdi eklendi (var olanlar korundu)" }
 elseif ($r.Farkli -gt 0) { Adim 'Claude kancalari' 'atlandi' "$($r.Farkli) girdi farkli - elle bak" }
 else { Adim 'Claude kancalari' 'zaten' '4 girdi yerinde' }

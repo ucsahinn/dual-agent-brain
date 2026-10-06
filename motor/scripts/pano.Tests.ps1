@@ -99,3 +99,52 @@ Describe 'beyin pano sarmalayicisi' {
         $d.Satir | Should Match '^Pano: 2 acik, 1 bu projede \(TASK-A codex/in_progress\)\.$'
     }
 }
+
+Describe 'beyin pano insan onayi kapisi (2026-10-06)' {
+    BeforeEach {
+        $script:kok = Join-Path $TestDrive ('ac-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+        New-SahteAgentChef -Kok $script:kok
+        $script:testVault = Join-Path $TestDrive ('vault-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+        New-Item -ItemType Directory -Force -Path (Join-Path $script:testVault 'motor\hooks'), (Join-Path $script:testVault 'motor\scripts\.state'), (Join-Path $script:testVault '10-command-center') | Out-Null
+        Copy-Item (Join-Path $vault 'motor\hooks\lib.ps1') (Join-Path $script:testVault 'motor\hooks\lib.ps1')
+        Copy-Item $panoScript (Join-Path $script:testVault 'motor\scripts\pano.ps1')
+        Set-Content -Path (Join-Path $script:testVault '.beyin-version') -Value '1.0.0'
+        $env:BEYIN_AGENTCHEF_KOK = $script:kok
+        $env:BEYIN_PANO_ONAY = $null
+    }
+    AfterEach { $env:BEYIN_AGENTCHEF_KOK = $null; $env:BEYIN_PANO_ONAY = $null }
+
+    It 'onaysiz done reddedilir (exit 5, node cagrilmaz); onayla gecer; ikinci kullanim reddedilir' {
+        $ps = Join-Path $script:testVault 'motor\scripts\pano.ps1'
+        $o1 = & $powershell -NoProfile -ExecutionPolicy Bypass -File $ps -Vault $script:testVault transition --task TASK-5 --status done --verified-by qa 2>&1 | Out-String
+        $k1 = $LASTEXITCODE
+        $tp = Get-BeyinPaths -Vault $script:testVault
+        $null = Add-BeyinOnay -Paths $tp -TaskId 'TASK-5' -Kanal 'sohbet'
+        $o2 = & $powershell -NoProfile -ExecutionPolicy Bypass -File $ps -Vault $script:testVault transition --task TASK-5 --status done --verified-by qa 2>&1 | Out-String
+        $k2 = $LASTEXITCODE
+        $o3 = & $powershell -NoProfile -ExecutionPolicy Bypass -File $ps -Vault $script:testVault transition --task TASK-5 --status done --verified-by qa 2>&1 | Out-String
+        $k3 = $LASTEXITCODE
+        $k1 | Should Be 5
+        $o1 | Should Match 'insan onayi yok: TASK-5'
+        ($o1 -match '"echo"') | Should Be $false
+        $k2 | Should Be 0
+        $o2 | Should Match '"echo"'
+        $k3 | Should Be 5
+    }
+    It 'BEYIN_PANO_ONAY=kapali iken eski davranis; review gecisi onay istemez' {
+        $ps = Join-Path $script:testVault 'motor\scripts\pano.ps1'
+        $null = & $powershell -NoProfile -ExecutionPolicy Bypass -File $ps -Vault $script:testVault transition --task TASK-6 --status review 2>&1 | Out-String
+        $k1 = $LASTEXITCODE
+        $env:BEYIN_PANO_ONAY = 'kapali'
+        $null = & $powershell -NoProfile -ExecutionPolicy Bypass -File $ps -Vault $script:testVault transition --task TASK-6 --status done --verified-by qa 2>&1 | Out-String
+        $k2 = $LASTEXITCODE
+        $k1 | Should Be 0
+        $k2 | Should Be 0
+    }
+    It 'terminal kanali etkilesimsiz kabukta reddedilir (exit 5)' {
+        $ps = Join-Path $script:testVault 'motor\scripts\pano.ps1'
+        $o = 'x' | & $powershell -NoProfile -ExecutionPolicy Bypass -File $ps -Vault $script:testVault onayla TASK-7 2>&1 | Out-String
+        $LASTEXITCODE | Should Be 5
+        $o | Should Match 'etkilesimli terminalde'
+    }
+}

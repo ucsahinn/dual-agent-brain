@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "tarih": "2026-09-25",
+  "kaynak": "Anthropic resmi fiyatlari (platform.claude.com/docs/en/about-claude/pricing), claude-api skill onbellegi 2026-09-25. Birim: USD / 1M jeton. Onbellek yazma: 5 dk = girdi x 1.25, 1 saat = girdi x 2. Hizli mod (speed=fast) yalniz Opus 5.5/5/4.8: x2.",
+  "not": "API ESDEGERIDIR: abonelik (Pro/Max) kullaniminda gercek fatura bu degildir; ne kadar is yapildiginin olcusudur. OpenAI/Codex modelleri icin resmi fiyat girilmedi: jetonlar sayilir, dolar karsiligi 'fiyat yok' gosterilir. Rakam eklemek istersen ayni bicimde 'gpt-...' satiri ekle ve 'tarih' alanini guncelle.",
+  "modeller": [
+    { "onek": "claude-fable-5-1",  "girdi": 10.0, "cikti": 50.0, "okuma": 0.25 },
+    { "onek": "claude-mythos-5-1", "girdi": 10.0, "cikti": 50.0, "okuma": 0.25 },
+    { "onek": "claude-fable-5",    "girdi": 10.0, "cikti": 50.0, "okuma": 1.0 },
+    { "onek": "claude-opus-5-5",   "girdi": 4.0,  "cikti": 20.0, "okuma": 0.20, "hizliCarpan": 2.0 },
+    { "onek": "claude-opus-5",     "girdi": 5.0,  "cikti": 25.0, "okuma": 0.50, "hizliCarpan": 2.0 },
+    { "onek": "claude-opus-4-8",   "girdi": 5.0,  "cikti": 25.0, "okuma": 0.50, "hizliCarpan": 2.0 },
+    { "onek": "claude-opus-4-7",   "girdi": 5.0,  "cikti": 25.0, "okuma": 0.50 },
+    { "onek": "claude-opus-4-6",   "girdi": 5.0,  "cikti": 25.0, "okuma": 0.50 },
+    { "onek": "claude-sonnet-5-5", "girdi": 2.0,  "cikti": 10.0, "okuma": 0.20 },
+    { "onek": "claude-sonnet-5",   "girdi": 2.0,  "cikti": 10.0, "okuma": 0.20 },
+    { "onek": "claude-sonnet-4-6", "girdi": 3.0,  "cikti": 15.0, "okuma": 0.30 },
+    { "onek": "claude-haiku-4-5",  "girdi": 1.0,  "cikti": 5.0,  "okuma": 0.10 }
+  ]
+}

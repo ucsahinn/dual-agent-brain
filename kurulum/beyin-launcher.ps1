@@ -28,7 +28,7 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('session-start', 'prompt-counter', 'session-end', 'pre-compact')]
+    [ValidateSet('session-start', 'prompt-counter', 'session-end', 'pre-compact', 'pre-tool-use')]
     [string]$Hook,
 
     [ValidateSet('claude', 'codex')]
@@ -120,4 +120,8 @@ if (-not $env:BEYIN_VAULT) { $env:BEYIN_VAULT = $vault }
 
 # Kancalar stdin'den payload okur; bu surecin stdin'i oldugu gibi devrediliyor.
 & $target
+# CIKIS KODU (2026-10-06): olay kancalari her zaman 0 ile cikar (ajani durdurmamali).
+# TEK ISTISNA kill guard (pre-tool-use): engel sinyali exit 2'dir ve iletilmezse
+# hicbir sey engellenmez (olculdu: launcher uzerinden exit 0 donuyordu).
+if ($Hook -eq 'pre-tool-use' -and $LASTEXITCODE -eq 2) { exit 2 }
 exit 0

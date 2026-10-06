@@ -45,7 +45,7 @@ $args2 = @($Arg | Where-Object { $null -ne $_ })
 if ($args2.Count -eq 0) {
     $d = Get-BeyinPanoDurum -Paths $p
     "PANO  state: $($p.Board)  |  AgentChef: $board $(if (Test-Path -LiteralPath $board) { '' } else { '(YOK - BEYIN_AGENTCHEF_KOK ayarini kontrol et)' })"
-    "  acik kart: $($d.Acik) (todo $($d.Todo), in_progress $($d.Surecte), review $($d.Inceleme)) · toplam $($d.Toplam)"
+    "  acik kart: $($d.Acik) (todo $($d.Todo), in_progress $($d.Surecte), review $($d.Inceleme)) · bekleyen (backlog) $($d.Bekleyen) · toplam $($d.Toplam)"
     foreach ($k in $d.Kartlar) { "  - $($k.id) [$($k.status)] $($k.title)$(if ($k.owner) { " · $($k.owner.agent)" })$(if ($k.writeScope) { " · yazar: $($k.writeScope.repo): $(@($k.writeScope.paths) -join ', ')" })$(if ($k.leaseUntil) { " · kira $($k.leaseUntil)" })" }
     ''
     'Komutlar AgentChef coordination-board ile birebir: init | create | brief | brief-check | assign | renew-lease | transition | add-evidence | handoff | resolve-handoff | handoff-check | attach-report | show'
@@ -56,6 +56,31 @@ if ($args2.Count -eq 0) {
     '  beyin pano renew-lease --task TASK-012 --minutes 90   ·   beyin pano transition --task TASK-012 --status in_progress'
     '  beyin pano attach-report --task TASK-012 --report-id TASK-012-sonuc.md   (review -> done icin rapor zorunlu; kimlik "<TASK>-*.md" biciminde)'
     "Turetilmis gorunum: $(Join-Path (Join-Path $Vault '10-command-center') 'pano.md')"
+    exit 0
+}
+# INSAN ONAYI - TERMINAL KANALI (2026-10-06): 'beyin pano onayla TASK-x'. Ajan kabugu
+# etkilesimsizdir (stdin yonlendirilmis); bu yol yalniz gercek terminalde calisir ve
+# ekrandaki kodun yazilmasini ister. Sohbet kanali: kullanici tek satir 'onayla TASK-x'.
+if ([string]$args2[0] -eq 'onayla') {
+    $onayTid = $(if ($args2.Count -ge 2) { ([string]$args2[1]).ToUpperInvariant() } else { '' })
+    if ($onayTid -cnotmatch '^TASK-\d+$') { Write-Output 'Kullanim: beyin pano onayla TASK-012   (sohbetten: tek satir "onayla TASK-012")'; exit 2 }
+    if ([Console]::IsInputRedirected) {
+        Write-Output "HATA: onay yalniz etkilesimli terminalde verilir (bu kabuk etkilesimsiz). Sohbete tek satir yaz: onayla $onayTid"
+        Write-BeyinMakbuz -Paths $p -Script 'pano' -Outcome 'ONAY_REDDEDILDI' -Note "$onayTid etkilesimsiz stdin"
+        exit 5
+    }
+    $onayKodu = '{0:D4}' -f (Get-Random -Minimum 0 -Maximum 10000)
+    Write-Host "$onayTid icin insan onayi. Onaylamak icin su kodu yaz: $onayKodu" -ForegroundColor Yellow
+    $onayGiris = Read-Host 'Kod'
+    if ([string]$onayGiris -ne $onayKodu) {
+        Write-Output 'Kod eslesmedi, onay verilmedi.'
+        Write-BeyinMakbuz -Paths $p -Script 'pano' -Outcome 'ONAY_REDDEDILDI' -Note "$onayTid kod eslesmedi"
+        exit 5
+    }
+    $onayKayit = Add-BeyinOnay -Paths $p -TaskId $onayTid -Kanal 'terminal' -Ajan 'insan'
+    if (-not $onayKayit.Ok) { Write-Output "HATA: onay yazilamadi - $($onayKayit.Hata)"; exit 3 }
+    Write-BeyinMakbuz -Paths $p -Script 'pano' -Outcome 'ONAY_KAYDEDILDI' -Agent 'insan' -Reason 'terminal' -Note $onayTid
+    "Onay kaydedildi: $onayTid (7 gun gecerli, tek kullanimlik)."
     exit 0
 }
 if (-not $nodeExe) { Write-Output 'HATA: node bulunamadi (PATH). Pano AgentChef coordination-board.mjs ile calisir.'; exit 2 }
@@ -88,6 +113,33 @@ if ($komut -eq 'create' -and -not ($gecilen -contains '--owner-coordinator')) {
     $gecilen += @('--owner-coordinator', $koord)
 }
 
+# INSAN ONAYI KAPISI (2026-10-06, kullanici karari): 'done' gecisi gecerli bir insan
+# onayi ister (ayar BEYIN_PANO_ONAY kapali ise eski davranis). Onay yoksa node HIC
+# cagrilmaz; basarili gecisten sonra onay 'kullanildi' damgalanir (tek kullanimlik).
+$onayGerek = $false; $onayTask = ''
+if ($komut -eq 'transition') {
+    $durumDeger = ''
+    for ($i = 0; $i -lt $gecilen.Count; $i++) {
+        $ga = [string]$gecilen[$i]
+        if ($ga -eq '--status' -and $i + 1 -lt $gecilen.Count) { $durumDeger = [string]$gecilen[$i + 1] }
+        elseif ($ga -like '--status=*') { $durumDeger = $ga.Substring(9) }
+        if ($ga -eq '--task' -and $i + 1 -lt $gecilen.Count) { $onayTask = ([string]$gecilen[$i + 1]).ToUpperInvariant() }
+        elseif ($ga -like '--task=*') { $onayTask = $ga.Substring(7).ToUpperInvariant() }
+    }
+    if ($durumDeger -eq 'done') {
+        $onayAyar = 'zorunlu'
+        try { $onayAyar = [string](Get-BeyinAyar 'BEYIN_PANO_ONAY' (Get-BeyinAyarVars 'BEYIN_PANO_ONAY')) } catch { }
+        if ($onayAyar -ne 'kapali') {
+            if (-not (Get-BeyinOnay -Paths $p -TaskId $onayTask)) {
+                Write-Output "HATA: insan onayi yok: $onayTask 'done' yapilamaz. Kullanici sohbete tek satir 'onayla $onayTask' yazmali (ya da terminalde: beyin pano onayla $onayTask). Kapatmak icin: beyin ayar BEYIN_PANO_ONAY kapali"
+                Write-BeyinMakbuz -Paths $p -Script 'pano' -Outcome 'ONAY_YOK' -Note "$onayTask done reddedildi"
+                exit 5
+            }
+            $onayGerek = $true
+        }
+    }
+}
+
 $sw = [Diagnostics.Stopwatch]::StartNew()
 # stderr'deki {"ok":false,"error":...} satiri KULLANICIYA ulasmali: SilentlyContinue altinda
 # 2>&1 ile gelen hata kayitlari yutuluyordu (olculdu: hata ciktisi bos). Cagri suresince 'Continue'.
@@ -99,6 +151,11 @@ $ErrorActionPreference = $eapEski
 $sw.Stop()
 $metin = ($cikti | ForEach-Object { "$_" }) -join "`n"
 if ($metin) { Write-Output $metin }
+if ($kod -eq 0 -and $onayGerek) {
+    if (Use-BeyinOnay -Paths $p -TaskId $onayTask -Kullanan 'pano') {
+        Write-BeyinMakbuz -Paths $p -Script 'pano' -Outcome 'ONAY_KULLANILDI' -Note "$onayTask done"
+    }
+}
 
 $mutasyon = @('init', 'create', 'transition', 'handoff', 'attach-report', 'brief', 'renew-lease', 'add-evidence')
 $mdNot = ''
@@ -106,6 +163,11 @@ if ($kod -eq 0 -and $mutasyon -contains $komut -and -not $stateVar) {
     $md = Update-BeyinPanoMd -Paths $p
     if ($md.Ok) { $mdNot = "pano.md yenilendi ($($md.Acik) acik)" } else { $mdNot = 'pano.md YENILENEMEDI' }
     Write-Host "[pano] $mdNot" -ForegroundColor DarkGray
+    # BRIFING (2026-10-06): review/blocked gecisi koordinatore tek aktarim olarak gider.
+    try {
+        $bs = Sync-BeyinPanoBrifing -Paths $p -Tetik 'pano'
+        if ($bs.Yeni -gt 0) { $mdNot += "; brifing $($bs.Yeni)"; Write-Host "[pano] koordinatore $($bs.Yeni) brifing aktarimi yazildi (beyin aktar)" -ForegroundColor DarkGray }
+    } catch { }
 }
 Write-BeyinMakbuz -Paths $p -Script 'pano' -Outcome $(if ($kod -eq 0) { 'PANO_OK' } else { 'PANO_HATA' }) -DurationMs $sw.ElapsedMilliseconds -Note "$komut exit=$kod $mdNot"
 exit $kod

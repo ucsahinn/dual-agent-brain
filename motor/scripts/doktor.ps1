@@ -131,11 +131,15 @@ function Test-Ebeveyn {
 }
 
 function Add-Row {
-    param([string]$Kontrol, [bool]$Ok, [string]$Detay, [string]$Duzeltme = '')
+    # UCUNCU DURUM (2026-10-06, AgentSpace firstRunDoctor dersi): 'olcemedim' ile
+    # 'yok' ayni cevap degildir. -Durum 'OLCULEMEDI' verilen satir SORUN sayilmaz
+    # (cikis kodu degismez) ama ozette '?' ile ve ayri sayimla gorunur; eskiden
+    # olcum yapilamayan kontroller ya yesil ya kirmizi basiliyordu.
+    param([string]$Kontrol, [bool]$Ok, [string]$Detay, [string]$Duzeltme = '', [string]$Durum = '')
     Test-Ebeveyn
     $rows.Add([pscustomobject]@{
         Kontrol  = $Kontrol
-        Durum    = $(if ($Ok) { 'OK' } else { 'SORUN' })
+        Durum    = $(if ($Durum) { $Durum } elseif ($Ok) { 'OK' } else { 'SORUN' })
         Detay    = $Detay
         Duzeltme = $Duzeltme
     })
@@ -165,6 +169,85 @@ Add-Row 'ozetleyici (claude/codex)' ([bool]$arkaUc) `
       else { "HICBIRI YOK - hicbir ozet uretilemez; su an $kuyrukSay is kuyrukta bekliyor" }) `
     'Motor iki ajanin oturumunu okur ve claude -p YA DA codex exec ile ozetler. Ikisi de yoksa kancalar calisir, kuyruk buyur, gunluk log YAZILMAZ. Cozum: Claude Code CLI ya da Codex CLI kur.'
 
+# OZETLEYICI BAYRAK SONDASI (2026-10-06): model CAGIRMADAN, butce harcamadan.
+# 'claude -p' Invoke-BeyinClaude'un AYNI bayraklariyla bos stdin'le calisir: CLI
+# bayraklari dogrular, 'Input must be provided' der, API'ye gitmez. Beklenen tek
+# satir budur; baska her satir (taninmayan arac adi uyarisi, bilinmeyen secenek,
+# oturum yok) SORUN'dur. Neden: --disallowed-tools listesindeki 'MultiEdit'
+# uyarisi stderr'i doldurup 36 limit hatasinin asil mesajini gizledi.
+# -Ozet'te kosmaz (claude.exe acilisi 1-3 sn).
+try {
+    if ($Ozet) { $script:DoktorOzetDisi.Add('ozetleyici bayraklari') }
+    elseif (-not $claude) { Add-Row 'ozetleyici bayraklari' $true 'claude CLI yok; sinanmadi' '' -Durum 'OLCULEMEDI' }
+    elseif (Butce-Var 'ozetleyici bayraklari') {
+        $bsPsi = New-Object System.Diagnostics.ProcessStartInfo
+        $bsPsi.FileName = $claude
+        $bsPsi.Arguments = Get-BeyinClaudeArgs -Model 'haiku'
+        $bsPsi.WorkingDirectory = $env:TEMP
+        $bsPsi.UseShellExecute = $false; $bsPsi.CreateNoWindow = $true
+        $bsPsi.RedirectStandardInput = $true; $bsPsi.RedirectStandardOutput = $true; $bsPsi.RedirectStandardError = $true
+        $bsPsi.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
+        $bsPsi.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
+        $bsPsi.EnvironmentVariables['BEYIN_CHILD'] = '1'
+        $bsProc = [System.Diagnostics.Process]::Start($bsPsi)
+        $bsProc.StandardInput.Close()
+        $bsOut = $bsProc.StandardOutput.ReadToEndAsync(); $bsErr = $bsProc.StandardError.ReadToEndAsync()
+        if (-not $bsProc.WaitForExit(30000)) {
+            try { Stop-BeyinProcessTree -ProcessId $bsProc.Id } catch { try { $bsProc.Kill() } catch { } }
+            Add-Row 'ozetleyici bayraklari' $true 'claude 30 sn icinde cikmadi (olculemedi)' '' -Durum 'OLCULEMEDI'
+        } else {
+            $bsSatir = @((([string]$bsOut.Result) + "`n" + ([string]$bsErr.Result)) -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            $bsBek = @($bsSatir | Where-Object { $_ -cmatch 'Input must be provided|Input contained only whitespace' })
+            $bsDiger = @($bsSatir | Where-Object { $_ -cnotmatch 'Input must be provided|Input contained only whitespace' })
+            if ($bsBek.Count -gt 0 -and $bsDiger.Count -eq 0) {
+                Add-Row 'ozetleyici bayraklari' $true 'CLI ozetleyici bayraklarini uyarisiz kabul etti (model cagrilmadi)'
+            } elseif ($bsSatir.Count -eq 0) {
+                Add-Row 'ozetleyici bayraklari' $true 'CLI cikti vermedi (olculemedi)' '' -Durum 'OLCULEMEDI'
+            } else {
+                $bsIlk = [string]($bsDiger | Select-Object -First 1)
+                if ($bsIlk.Length -gt 160) { $bsIlk = $bsIlk.Substring(0, 160) }
+                Add-Row 'ozetleyici bayraklari' $false "CLI uyardi/reddetti: $bsIlk" 'lib.ps1 Get-BeyinClaudeArgs icindeki bayragi bu CLI surumune gore duzelt. Uyari stderr''i doldurur ve asil hata mesajini (limit, kimlik) gizleyebilir.'
+            }
+        }
+    }
+} catch { Add-Row 'ozetleyici bayraklari' $true "olculemedi: $($_.Exception.Message)" '' -Durum 'OLCULEMEDI' }
+
+# MALIYET (BB1, 2026-10-06): son 'beyin maliyet' ozetini okur, tarama YAPMAZ.
+# Fiyat tablosu 90 gunden eskiyse SORUN: API esdegeri rakamlari yanlis olur.
+try {
+    $mlSon = Join-Path $p.ScrState 'maliyet\son.json'
+    $mlFiyat = Join-Path $Vault 'motor\scripts\fiyat.json'
+    $mlTarih = ''
+    try { $mlTarih = [string]((Get-Content -LiteralPath $mlFiyat -Raw -Encoding UTF8 | ConvertFrom-Json).tarih) } catch { }
+    $mlYas = -1
+    if ($mlTarih) { try { $mlYas = [int]((Get-Date) - [datetime]::ParseExact($mlTarih, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)).TotalDays } catch { } }
+    if ($mlYas -gt 90) {
+        Add-Row 'maliyet (7 gun)' $false "fiyat tablosu $mlYas gunluk ($mlTarih)" 'motor\scripts\fiyat.json rakamlarini resmi fiyat sayfasindan guncelle ve tarih alanini degistir.'
+    } elseif (-not (Test-Path -LiteralPath $mlSon)) {
+        Add-Row 'maliyet (7 gun)' $true 'henuz olculmedi: beyin maliyet' '' -Durum 'OLCULEMEDI'
+    } else {
+        $ml = Get-Content -LiteralPath $mlSon -Raw -Encoding UTF8 | ConvertFrom-Json
+        $mlGun = [int]((Get-Date) - [datetimeoffset]::Parse([string]$ml.ts).LocalDateTime).TotalDays
+        $mlD = "son $($ml.gun) gun Claude API esdegeri `$$($ml.claudeUsd) · Codex $([math]::Round([double]$ml.codexJeton / 1e6, 1))M jeton · sabit yuk $([int]([double]$ml.sabitYukJeton / 1000))K · 200K ustu oturum $($ml.buyukBaglamOturum)"
+        if ([int]$ml.taninmayan -gt 0) { $mlD += " · taninmayan $($ml.taninmayan) satir" }
+        if ($mlGun -ge 2) { $mlD += " · olcum $mlGun gun once" }
+        Add-Row 'maliyet (7 gun)' $true $mlD
+    }
+} catch { Add-Row 'maliyet (7 gun)' $true "olculemedi: $($_.Exception.Message)" '' -Durum 'OLCULEMEDI' }
+
+# KILL GUARD (BB5, 2026-10-06): PreToolUse kancasi kayitli mi (iki ajan), son 7 gun
+# kac komut reddedildi. Kayitsizlik SORUN degil (opt-in); bilgi olarak gorunur.
+try {
+    $kgClaude = $false; $kgCodex = $false
+    try { $kgHam = [IO.File]::ReadAllText((Join-Path $env:USERPROFILE '.claude\settings.json')); $kgClaude = ($kgHam -like '*kill-guard-on*' -or $kgHam -like '*pre-tool-use*') } catch { }
+    try { $kgHam = [IO.File]::ReadAllText((Join-Path $env:USERPROFILE '.codex\hooks.json')); $kgCodex = ($kgHam -like '*kill-guard-on*' -or $kgHam -like '*pre-tool-use*') } catch { }
+    $kgRed = @(Read-BeyinMakbuz -Paths $p -Gun 7 | Where-Object { [string]$_.script -eq 'kill-guard' -and [string]$_.outcome -eq 'RED' }).Count
+    $kgAyar = 'acik'; try { $kgAyar = [string](Get-BeyinAyar 'BEYIN_KILL_GUARD' (Get-BeyinAyarVars 'BEYIN_KILL_GUARD')) } catch { }
+    $kgD = "claude=$(if ($kgClaude) { 'kayitli' } else { 'kayitsiz' }) codex=$(if ($kgCodex) { 'kayitli' } else { 'kayitsiz' }) ayar=$kgAyar · 7 gunde $kgRed komut reddedildi"
+    if (-not $kgClaude -and -not $kgCodex) { $kgD += ' (istege bagli; onizle: kur.ps1 -KillGuard -KuruCalisma)' }
+    Add-Row 'kill guard' $true $kgD
+} catch { Add-Row 'kill guard' $true "olculemedi: $($_.Exception.Message)" '' -Durum 'OLCULEMEDI' }
+
 Add-Row 'PowerShell' $true "surum $($PSVersionTable.PSVersion)"
 
 # ============================================================================
@@ -178,18 +261,20 @@ Add-Row 'kultur-bagimsiz regex' $safe `
     'lib.ps1 icindeki BeyinRxCI tanimini kontrol et; bozuksa sir taramasi yanlis negatif verir'
 
 # 2) $OutputEncoding: temiz bir alt surecte olcuyoruz (kancalarin calistigi bicim)
-$encOk = $false; $encDetay = 'olculemedi'
+$encOk = $false; $encDetay = 'olculemedi'; $encDurum = ''
 try {
     $tmp = Join-Path $env:TEMP ("beyin-enc-{0}.ps1" -f ([guid]::NewGuid().ToString('N')))
     $probe = '. "' + (Join-Path $Vault 'motor\hooks\lib.ps1') + '"' + [Environment]::NewLine + '$OutputEncoding.WebName'
     [System.IO.File]::WriteAllText($tmp, $probe, (New-Object System.Text.UTF8Encoding($true)))
     $w = (& powershell -NoProfile -ExecutionPolicy Bypass -File $tmp 2>$null | Out-String).Trim()
     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-    $encOk = ($w -eq 'utf-8')
-    $encDetay = "alt surecte OutputEncoding=$w (utf-8 olmali)"
-} catch { $encDetay = "hata: $($_.Exception.Message)" }
+    if ($w) {
+        $encOk = ($w -eq 'utf-8')
+        $encDetay = "alt surecte OutputEncoding=$w (utf-8 olmali)"
+    } else { $encDurum = 'OLCULEMEDI'; $encDetay = 'alt surec cikti vermedi (olculemedi)' }
+} catch { $encDurum = 'OLCULEMEDI'; $encDetay = "olculemedi: $($_.Exception.Message)" }
 Add-Row 'pipe encoding' $encOk $encDetay `
-    'lib.ps1 basindaki $OutputEncoding atamasi eksik; Turkce karakterler claude -p''ye ? olarak gider'
+    'lib.ps1 basindaki $OutputEncoding atamasi eksik; Turkce karakterler claude -p''ye ? olarak gider' -Durum $encDurum
 
 # 3) .ps1 dosyalari BOM'lu mu (PS 5.1 BOM'suz dosyayi ANSI okur)
 $noBom = New-Object System.Collections.Generic.List[string]
@@ -276,6 +361,110 @@ Add-Row 'global kanca ayari' $sjOk $sjDetay 'global settings.json icine beyin ka
 Add-Row 'kanca yollari' $hookPathsOk `
     $(if ($hookPathsOk) { 'ayardaki tum kanca dosyalari mevcut' } else { "eksik: $($missing -join ', ')" }) `
     'vault tasindiysa global settings.json icindeki yollari guncelle'
+
+# KANCA YORUMLAYICISI (2026-10-06, AgentSpace firstRunDoctor 'foreignHooks' fikri).
+# Kanca komutunun ilk belirteci (powershell, node, pwsh, cmd) kancanin KOSACAGI
+# PATH'te yoksa kanca hata vermez, sessizce calismaz. Bu oturumun PATH'i yetmez:
+# kancayi baska bir ebeveyn (Explorer'dan acilan uygulama, zamanlayici) baslatir
+# ve o surec profilin ekledigi dizinleri gormez. Bu yuzden KAYITLI PATH (HKLM +
+# HKCU Environment) esas alinir; yalniz surec PATH'inde bulunan yorumlayici SORUN.
+try {
+    $kyKomutlar = New-Object System.Collections.Generic.List[string]
+    foreach ($kyDosya in @($sj, (Join-Path $env:USERPROFILE '.codex\hooks.json'))) {
+        if (-not (Test-Path -LiteralPath $kyDosya)) { continue }
+        $kyCfg = Get-Content -LiteralPath $kyDosya -Raw -Encoding UTF8 | ConvertFrom-Json
+        if (-not $kyCfg.hooks) { continue }
+        foreach ($kyOlay in $kyCfg.hooks.PSObject.Properties) {
+            foreach ($kyE in @($kyOlay.Value)) { foreach ($kyH in @($kyE.hooks)) { if ($kyH.command) { $kyKomutlar.Add([string]$kyH.command) } } }
+        }
+    }
+    $kyKayitli = $null
+    try {
+        $kyM = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+        $kyU = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $kyKayitli = @((([string]$kyM) + ';' + ([string]$kyU)) -split ';' | Where-Object { $_ } | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_.Trim('"')) })
+    } catch { $kyKayitli = $null }
+    if ($kyKomutlar.Count -eq 0) {
+        Add-Row 'kanca yorumlayicisi' $true 'kayitli kanca komutu yok' ''
+    } elseif ($null -eq $kyKayitli) {
+        Add-Row 'kanca yorumlayicisi' $true 'kayitli PATH okunamadi' '' -Durum 'OLCULEMEDI'
+    } else {
+        $kySay = @{}; $kySorun = New-Object System.Collections.Generic.List[string]
+        foreach ($kyK in $kyKomutlar) {
+            $kyTok = (($kyK.Trim()) -split '\s+')[0].Trim('"')
+            if (-not $kyTok) { continue }
+            $kyAd = Split-Path -Leaf $kyTok
+            if (-not $kySay.ContainsKey($kyAd)) { $kySay[$kyAd] = 0 }
+            $kySay[$kyAd]++
+            if ($kySay[$kyAd] -gt 1) { continue }
+            if ($kyTok -match '[\\/]') {
+                if (-not (Test-Path -LiteralPath $kyTok)) { $kySorun.Add("$kyAd (yol yok)") }
+                continue
+            }
+            $kyExe = $(if ([IO.Path]::GetExtension($kyTok)) { $kyTok } else { $kyTok + '.exe' })
+            $kyBul = @($kyKayitli | Where-Object { try { Test-Path -LiteralPath (Join-Path $_ $kyExe) } catch { $false } } | Select-Object -First 1)
+            if ($kyBul.Count -eq 0) {
+                $kySurec = Get-Command $kyTok -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($kySurec) { $kySorun.Add("$kyAd (yalniz bu surecin PATH'inde; kayitli PATH'te yok)") } else { $kySorun.Add("$kyAd (bulunamadi)") }
+            }
+        }
+        $kyOzet = (@($kySay.Keys | Sort-Object) | ForEach-Object { "$_ x$($kySay[$_])" }) -join ', '
+        Add-Row 'kanca yorumlayicisi' ($kySorun.Count -eq 0) `
+            $(if ($kySorun.Count -eq 0) { "$($kyKomutlar.Count) kanca, yorumlayicilar kayitli PATH'te: $kyOzet" } else { "sorun: $($kySorun -join '; ')" }) `
+            'yorumlayicinin dizinini kayitli PATH''e ekle (Sistem > Ortam degiskenleri) ya da kanca komutunda tam yol kullan'
+    }
+} catch {
+    Add-Row 'kanca yorumlayicisi' $true "olculemedi: $($_.Exception.Message)" '' -Durum 'OLCULEMEDI'
+}
+
+# AUTO-MEMORY INDEKSI (2026-10-06, AgentSpace engineMemoryScope olcumu: motor
+# hafizasinda 402 kayit, MEMORY.md yalniz 143'unu listeliyordu). Claude Code
+# proje hafizasinda acilista yalniz MEMORY.md yuklenir; orada listelenmeyen not
+# diskte durur ama modele HIC ulasmaz. Kok BEYIN_CLAUDE_PROJECTS ile degistirilebilir
+# (test). Claude'un kendi alanidir: doktor yalniz okur ve sayar.
+try {
+    $amKok = $(if ($env:BEYIN_CLAUDE_PROJECTS) { $env:BEYIN_CLAUDE_PROJECTS } else { Join-Path $env:USERPROFILE '.claude\projects' })
+    if (-not (Test-Path -LiteralPath $amKok)) {
+        Add-Row 'auto-memory' $true 'Claude proje hafizasi yok' ''
+    } elseif (-not (Test-Path -LiteralPath $amKok -PathType Container)) {
+        Add-Row 'auto-memory' $true "kok bir klasor degil: $amKok" '' -Durum 'OLCULEMEDI'
+    } else {
+        $amProje = 0; $amNot = 0; $amEksik = New-Object System.Collections.Generic.List[string]
+        foreach ($amD in @(Get-ChildItem -LiteralPath $amKok -Directory -ErrorAction Stop)) {
+            $amMd = Join-Path $amD.FullName 'memory'
+            if (-not (Test-Path -LiteralPath $amMd -PathType Container)) { continue }
+            $amNotlar = @(Get-ChildItem -LiteralPath $amMd -Filter '*.md' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'MEMORY.md' })
+            if ($amNotlar.Count -eq 0) { continue }
+            $amProje++; $amNot += $amNotlar.Count
+            $amIdx = Join-Path $amMd 'MEMORY.md'
+            $amLink = @()
+            if (Test-Path -LiteralPath $amIdx) { $amLink = @([regex]::Matches((Get-Content -LiteralPath $amIdx -Raw -Encoding UTF8), '\]\(([^)]+?\.md)\)') | ForEach-Object { [IO.Path]::GetFileName($_.Groups[1].Value) }) }
+            $amUn = @($amNotlar | Where-Object { $amLink -notcontains $_.Name })
+            if (-not (Test-Path -LiteralPath $amIdx)) { $amEksik.Add("$($amD.Name): MEMORY.md yok ($($amNotlar.Count) not)") }
+            elseif ($amUn.Count -gt 0) { $amEksik.Add("$($amD.Name): $($amUn.Count) listelenmemis ($((@($amUn | Select-Object -First 3 | ForEach-Object { $_.Name })) -join ', '))") }
+        }
+        Add-Row 'auto-memory' ($amEksik.Count -eq 0) `
+            $(if ($amEksik.Count -eq 0) { "$amProje proje, $amNot not, hepsi MEMORY.md'de listeli" } else { "$amProje proje, $amNot not; acilista gorunmeyen: $($amEksik -join ' | ')" }) `
+            'Claude''un kendi alani: ilgili projenin memory\MEMORY.md dosyasina satir ekle ya da notu sil'
+    }
+} catch {
+    Add-Row 'auto-memory' $true "olculemedi: $($_.Exception.Message)" '' -Durum 'OLCULEMEDI'
+}
+
+# YAZMA SONDASI (2026-10-06, AgentSpace agentMemory 'gercek yazma sondasi'):
+# izin/ACL beyani degil, gercek yazim. Motorun her yazimi .state'e ve makine
+# bolgesine gider; .state yazilamiyorsa makbuz, kuyruk ve kilitler sessizce duser.
+try {
+    $ysSw = [Diagnostics.Stopwatch]::StartNew()
+    $ysF = Join-Path $p.ScrState ('doktor-sonda-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    Write-BeyinText -Path $ysF -Text 'sonda'
+    $ysGeri = [IO.File]::ReadAllText($ysF)
+    [IO.File]::Delete($ysF)
+    $ysSw.Stop()
+    Add-Row 'yazma sondasi' ($ysGeri -eq 'sonda') ".state yaz-oku-sil $([int]$ysSw.ElapsedMilliseconds) ms" 'motor\scripts\.state klasorunun izinlerini ve disk alanini kontrol et'
+} catch {
+    Add-Row 'yazma sondasi' $false ".state yazilamadi: $($_.Exception.Message)" 'motor\scripts\.state klasorunun izinlerini ve disk alanini kontrol et'
+}
 
 # LAUNCHER IZI - kancanin vault'a HIC ULASAMADIGI durumlar.
 # Launcher, kayitli vault yolu erisilemezse ya da kanca betigi yoksa
@@ -558,7 +747,9 @@ try {
     }
 } catch { }
 
-Add-Row 'gunluk butce' ($used -lt $fb) "$used / $fb flush tavani (derleyici rezervi $cb)$butceKim" `
+$ertNot = ''
+try { $ert = Test-BeyinLimitErtele -Paths $p; if ($ert.Aktif) { $ertNot = " · ERTELE: model limiti, $($ert.Until.ToString('HH:mm'))'e kadar ($($ert.Kaynak))" } } catch { }
+Add-Row 'gunluk butce' ($used -lt $fb) "$used / $fb flush tavani (derleyici rezervi $cb)$butceKim$ertNot" `
     $(if ($used -ge $fb) { "flush tavani DOLU: yeni oturum ozeti uretilmiyor, isler KUYRUGA aliniyor (kayip yok). Gece yarisi sifirlanir. 'pre-compact' kalemi buyukse sebep uzun oturumlarin otomatik sikismasidir - oturum basina pay zaten sinirli; tavani yukseltmek icin: beyin ayar BEYIN_FLUSH_BUTCE <sayi>" } else { '' })
 
 # ============================================================================
@@ -1727,7 +1918,7 @@ try {
              " · son 24 saatte acilmis oturum: $($ky.AktifOturum) aktif, $($ky.BostaOturum) sessiz ($kyBosta+ dk)") `
             'beyin bekci: bosta oturumlar, yetim doktor, Codex MCP birikimi ve kapatma komutlari (yalniz gosterir, panoya kopyalar). Esik: beyin ayar BEYIN_BEKCI_COMMIT <50-99>'
     } else {
-        Add-Row 'kaynak' $true 'olculemedi (Win32_OperatingSystem yanit vermedi) - bilgi' ''
+        Add-Row 'kaynak' $true 'Win32_OperatingSystem yanit vermedi' '' -Durum 'OLCULEMEDI'
     }
 } catch { }
 # aktarim: diger ajana acik soru/handoff. 3 gunden eski acik aktarim SORUN:
@@ -1737,8 +1928,9 @@ try {
     $akEski = @($akListe | Where-Object { try { ((Get-Date) - [datetime]::Parse([string]$_.ts, [Globalization.CultureInfo]::InvariantCulture)).TotalDays -gt 3 } catch { $false } })
     $akClaude = @($akListe | Where-Object { $_.to -eq 'claude' }).Count
     $akCodex  = @($akListe | Where-Object { $_.to -eq 'codex' }).Count
+    $akBr = @(Read-BeyinMakbuz -Paths $p -Gun 7 | Where-Object { $_.script -eq 'aktar' -and $_.outcome -eq 'BRIFING_KAYDEDILDI' }).Count
     Add-Row 'aktarim' ($akEski.Count -eq 0) `
-        $(if ($akListe.Count -eq 0) { 'acik aktarim yok' }
+        $(if ($akListe.Count -eq 0) { "acik aktarim yok · pano brifingi (7 gun): $akBr" }
           else { "$($akListe.Count) acik (claude'a $akClaude, codex'e $akCodex)$(if ($akEski.Count) { " · $($akEski.Count) tanesi 3 gunden eski: $(($akEski | Select-Object -First 3 | ForEach-Object { $_.id }) -join ', ')" })" }) `
         'beyin aktar (liste) · kapat: beyin aktar -Tamam <id> · gorunum: 10-command-center/aktarimlar.md'
 } catch { }
@@ -2418,9 +2610,11 @@ if ($Derin) {
 if ($Ozet) {
     # "Beynim ne durumda?" - tek komut, 8-12 satir, model cagrisi yok.
     $bad = @($rows | Where-Object { $_.Durum -eq 'SORUN' })
-    function Detay([string]$ad) { $x = @($rows | Where-Object { $_.Kontrol -eq $ad }); if ($x.Count) { return $x[0].Detay }; if ($script:DoktorOzetDisi -contains $ad) { return '-Ozet''te kosmaz (tam tarama)' }; return '-' }
+    $olc = @($rows | Where-Object { $_.Durum -eq 'OLCULEMEDI' })
+    function Detay([string]$ad) { $x = @($rows | Where-Object { $_.Kontrol -eq $ad }); if ($x.Count) { if ($x[0].Durum -eq 'OLCULEMEDI') { return '? ' + $x[0].Detay }; return $x[0].Detay }; if ($script:DoktorOzetDisi -contains $ad) { return '-Ozet''te kosmaz (tam tarama)' }; return '-' }
     "BEYIN DURUMU  ($((Get-Date).ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)))  ·  motor v$(Get-BeyinVersion -Vault $Vault)"
-    $atlNot = $(if ($script:DoktorAtlanan.Count) { " · ATLANDI $($script:DoktorAtlanan.Count): $($script:DoktorAtlanan -join ', ') (sure butcesi $($script:DoktorSure) sn; tam tarama kosar)" } else { '' })
+    $olcNot = $(if ($olc.Count) { " · OLCULEMEDI $($olc.Count): " + (($olc | ForEach-Object { $_.Kontrol }) -join ', ') } else { '' })
+    $atlNot = $olcNot + $(if ($script:DoktorAtlanan.Count) { " · ATLANDI $($script:DoktorAtlanan.Count): $($script:DoktorAtlanan -join ', ') (sure butcesi $($script:DoktorSure) sn; tam tarama kosar)" } else { '' })
     if ($bad.Count -eq 0) { "  Saglik      : temiz ($($rows.Count) kontrol, $([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn)$atlNot" }
     else { "  Saglik      : $($bad.Count) sorun / $($rows.Count) kontrol ($([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn) -> " + (($bad | ForEach-Object { $_.Kontrol }) -join ', ') + $atlNot }
     "  Butce       : $(Detay 'gunluk butce')"
@@ -2473,10 +2667,12 @@ if ($Ozet) {
 $rows | Format-Table -AutoSize -Wrap
 ''
 $bad = @($rows | Where-Object { $_.Durum -eq 'SORUN' })
+$olc = @($rows | Where-Object { $_.Durum -eq 'OLCULEMEDI' })
+$olcEk = $(if ($olc.Count) { " - OLCULEMEDI $($olc.Count): " + (($olc | ForEach-Object { $_.Kontrol }) -join ', ') } else { '' })
 if ($bad.Count -eq 0) {
-    "TANI: saglikli ($($rows.Count) kontrol, $([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn)$(if ($script:DoktorAtlanan.Count) { " - $($script:DoktorAtlanan.Count) kontrol sure butcesinde ATLANDI" })"
+    "TANI: saglikli ($($rows.Count) kontrol, $([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn)$olcEk$(if ($script:DoktorAtlanan.Count) { " - $($script:DoktorAtlanan.Count) kontrol sure butcesinde ATLANDI" })"
 } else {
-    "TANI: $($bad.Count) sorun / $($rows.Count) kontrol ($([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn)$(if ($script:DoktorAtlanan.Count) { " - $($script:DoktorAtlanan.Count) kontrol sure butcesinde ATLANDI" })"
+    "TANI: $($bad.Count) sorun / $($rows.Count) kontrol ($([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn)$olcEk$(if ($script:DoktorAtlanan.Count) { " - $($script:DoktorAtlanan.Count) kontrol sure butcesinde ATLANDI" })"
     ''
     'Sorunlu kontroller:'
     foreach ($b in $bad) { "  - $($b.Kontrol): $($b.Detay)$(if ($b.Duzeltme) { "  ->  $($b.Duzeltme)" })" }

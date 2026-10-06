@@ -283,6 +283,14 @@ if (-not $slot) {
 # Butce tavani TEK KAYNAKTAN (lib.ps1): flush 50, compile 60 gorur ->
 # derleyici ac kalmaz. Sayilar uc betige gomuluydu; doktor 60'i tavan sanip
 # 'butce OK' diyordu, oysa flush 50'de tamamen kilitliydi.
+# MODEL LIMITI ERTELEMESI (2026-10-06): reset saatinden once ozetleyici cagrilmaz.
+$le = Test-BeyinLimitErtele -Paths $p
+if ($le.Aktif) {
+    Exit-BeyinSlot -Handle $slot
+    Add-BeyinQueue -Paths $p -TranscriptPath $TranscriptPath -Cwd $ProjectPath -Reason $Reason -Agent $Agent
+    Stop-Flush -Code 'FLUSH_ERTELENDI' -Log "flush: model limiti - $($le.Until.ToString('HH:mm'))'e kadar ertelendi ($($le.Kaynak)), is kuyruga alindi"
+}
+
 if (-not (Test-BeyinBudget -Paths $p -MaxPerDay (Get-BeyinFlushBudget))) {
     Exit-BeyinSlot -Handle $slot
     Add-BeyinQueue -Paths $p -TranscriptPath $TranscriptPath -Cwd $ProjectPath -Reason $Reason -Agent $Agent
@@ -360,6 +368,9 @@ CIKTI BICIMI - yalniz bu, baska hicbir sey yok:
   hedeflenen sayi YAZMA - yalniz kosarak gorulen. Yoksa "yok")
 **Yarim kalan:** (varsa madde madde, yoksa "yok")
 **Ogrenilen:** (kalici bilgiye donusebilecek 0-2 madde, yoksa "yok")
+**Devir:** (bu oturumun bir SONRAKI oturumuna tek paragraf, en fazla 3 kisa cumle:
+  nerede kalindi; siradaki somut adim; dokunulmamasi gereken dosya/is varsa o.
+  Yalniz transkriptte acikca gorulen; is bittiyse ya da belirsizse "yok")
 
 Kayda deger hicbir sey yoksa TEK BASINA su satiri yaz, baska hicbir sey yazma:
 FLUSH_BOS
@@ -406,6 +417,13 @@ FLUSH_BOS
         if ($errKisa -and (Test-BeyinMatch -Text $errKisa -Pattern 'KOTA/LIMIT|KIMLIK')) {
             Restore-BeyinBudget -Paths $p
             $script:mkBudget = 0
+        }
+        # ERTELE (2026-10-06): limit mesajindaki reset saatine kadar ozetleyici denenmez.
+        if ($errKisa -and (Test-BeyinMatch -Text $errKisa -Pattern 'KOTA/LIMIT')) {
+            $lr = Get-BeyinLimitReset -Text (([string]$res.Err) + ' ' + ([string]$res.Out))
+            if (Set-BeyinLimitErtele -Paths $p -Until $lr.Until -Kaynak $lr.Kaynak -Backend ([string]$res.Backend) -Ornek $errKisa) {
+                Write-BeyinLog -Vault $Vault -Message "limit: ozetleme $($lr.Until.ToString('yyyy-MM-dd HH:mm'))'e kadar ertelendi (kaynak=$($lr.Kaynak), arka uc=$($res.Backend))"
+            }
         }
         Add-BeyinQueue -Paths $p -TranscriptPath $TranscriptPath -Cwd $ProjectPath -Reason $Reason -Agent $Agent
         Stop-Flush -Code "FLUSH_HATA_$($res.Reason)" `
@@ -500,6 +518,32 @@ FLUSH_BOS
     if ($postYeni -lt 0) { $postYeni = 0 }
     $redTotal = $pre.Redactions + $postYeni
     if ($redTotal -gt 0) { $notes.Add("sir redaksiyonu: $redTotal deger maskelendi") }
+    # MALIYET SATIRI (BB1, 2026-10-06): oturumun o ana kadarki toplami, API esdegeri.
+    # Claude: transkript bastan okunur (256 MB ustu atlanir); Codex: kumulatif sayac,
+    # yalniz dosya sonu. Olculemezse satir yazilmaz (tahmin yok).
+    try {
+        $mzBoy = (Get-Item -LiteralPath $TranscriptPath).Length
+        if ($Agent -eq 'claude' -and $mzBoy -le 256MB) {
+            $mz = Measure-BeyinTranscriptUsage -Path $TranscriptPath -Agent 'claude'
+            if ($mz.Ok -and $mz.Kayitlar.Count -gt 0) {
+                $mzT = Get-BeyinFiyatTablosu -Paths $p; $mzUsd = 0.0; $mzMax = 0.0; $mzFiyatsiz = 0
+                foreach ($mk in $mz.Kayitlar) {
+                    $mu = Get-BeyinUsdTahmini -Tablo $mzT -Model $mk.Model -In $mk.In -Out $mk.Out -Cw5 $mk.Cw5 -Cw1h $mk.Cw1h -Cr $mk.Cr -Fast $mk.Fast
+                    if ($null -ne $mu) { $mzUsd += $mu } else { $mzFiyatsiz++ }
+                    if ([double]$mk.Ctx -gt $mzMax) { $mzMax = [double]$mk.Ctx }
+                }
+                $mzSat = "maliyet (oturum toplami, API esdegeri): " + ('$' + $mzUsd.ToString('0.00', [Globalization.CultureInfo]::InvariantCulture)) + " · $($mz.Kayitlar.Count) cagri · en buyuk baglam $([int]($mzMax / 1000))K"
+                if ($mzMax -gt 200000) { $mzSat += ' (200K ustu: tazelenmeliydi)' }
+                if ($mzFiyatsiz -gt 0) { $mzSat += " · $mzFiyatsiz cagri fiyatsiz" }
+                $notes.Add($mzSat)
+            }
+        } elseif ($Agent -eq 'codex') {
+            $mz = Measure-BeyinTranscriptUsage -Path $TranscriptPath -Agent 'codex'
+            if ($mz.Ok -and $mz.CodexToplam) {
+                $notes.Add("jeton (oturum toplami): girdi $([int64]$mz.CodexToplam.In) · onbellek $([int64]$mz.CodexToplam.Cr) · cikti $([int64]$mz.CodexToplam.Out)$(if ($mz.Model) { " · $($mz.Model)" })")
+            }
+        }
+    } catch { }
     if ($inj.Banner) {
         $notes.Add("**UYARI - supheli talimat metni** (injection puani $($inj.Score): " + ($inj.Signals -join ', ') + "). Ozet otomatik uretildi; guvenmeden once oturumu gozden gecir.")
     } elseif ($inj.Score -gt 0) {
@@ -621,11 +665,21 @@ tags: ["gunluk-log", "makine-uretimi"]
         # kuyrukta kaliyordu; bir sonraki SessionStart onu cekip bos bir flush
         # spawn ediyor ve uc spawn slotundan birini yakiyordu.
         Remove-BeyinQueueItem -File (Join-Path $p.Queue ((Get-BeyinKey -Text $TranscriptPath) + '.json'))
+        # DEVIR (BB3): yalniz canli kanca tetiklemesinde (sikistirma oncesi / oturum sonu)
+        # ve SON parcada. Yetim toplama ya da eski gun isleme bayat devir uretmesin.
+        if ($Reason -match '(pre-compact|session-end)$') {
+            try {
+                $dvKey = Get-BeyinKey -Text $TranscriptPath
+                $dv = Add-BeyinDevir -Paths $p -Ozet $summary -Agent $Agent -Proje $projLeaf -SessionKey $dvKey
+                if ($dv.Ok) { Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'DEVIR_KAYDEDILDI' -Agent $Agent -Key $dvKey -Reason $Reason -Note $dv.Id }
+            } catch { }
+        }
     }
     $yeniOlcu = if ($buyuk) { "yeni bayt: $($baytIslenen - $baytBaslangic)" } else { "yeni satir: $($islenen - $mark)" }
     $msg = "flush: yazildi -> $today.md (ajan: $Agent, proje: $(if ($projLeaf) { $projLeaf } else { '-' }), redaksiyon: $redTotal, injection: $($inj.Score), $yeniOlcu$parcaNot)"
     Write-BeyinLog -Vault $Vault -Message $msg
     $script:mkNote = "proje=$(if ($projLeaf) { $projLeaf } else { '-' }) redaksiyon=$redTotal injection=$($inj.Score)$parcaNot"
+    Clear-BeyinLimitErtele -Paths $p
     Write-FlushMakbuz 'FLUSH_OK'
     Write-Output "FLUSH_OK $logFile"
 }

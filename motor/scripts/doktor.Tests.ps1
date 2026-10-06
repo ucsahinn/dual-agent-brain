@@ -77,3 +77,33 @@ Describe 'doktor.ps1 yetim ve sure kapilari' {
         @($log | Where-Object { $_ -match 'doktor: ebeveyn surec \(' + $outer.Id + '\) oldu' }).Count | Should BeGreaterThan 0
     }
 }
+
+Describe 'doktor.ps1 ucuncu durum (OLCULEMEDI) ve yeni problar' {
+    It 'olculemeyen kontrol SORUN sayilmaz, ozette OLCULEMEDI sayimi ve ? on ekiyle gorunur, cikis 0' -Skip:$baskaDoktor {
+        # auto-memory kokunu bir DOSYAYA yonlendir: prob olcum yapamaz -> OLCULEMEDI.
+        $sahte = Join-Path $env:TEMP ("beyin-am-" + [guid]::NewGuid().ToString('N') + '.txt')
+        [IO.File]::WriteAllText($sahte, 'klasor degil')
+        $eski = $env:BEYIN_CLAUDE_PROJECTS
+        $env:BEYIN_CLAUDE_PROJECTS = $sahte
+        try { $r = Invoke-Doktor @('-Ozet', '-SureSiniri', '1') }
+        finally { $env:BEYIN_CLAUDE_PROJECTS = $eski; Remove-Item -LiteralPath $sahte -Force -ErrorAction SilentlyContinue }
+        $r.Exit | Should Be 0
+        $r.Out | Should Match 'OLCULEMEDI \d+: [^\r\n]*auto-memory'
+        $r.Out | Should Not Match '- auto-memory:'
+    }
+
+    It 'auto-memory: MEMORY.md''de listelenmeyen not SORUN olarak raporlanir' -Skip:$baskaDoktor {
+        $kok = Join-Path $env:TEMP ("beyin-amk-" + [guid]::NewGuid().ToString('N'))
+        $md = Join-Path $kok 'C--ornek-proje\memory'
+        New-Item -ItemType Directory -Force -Path $md | Out-Null
+        [IO.File]::WriteAllText((Join-Path $md 'MEMORY.md'), "- [Bir](bir.md) - listeli`n")
+        [IO.File]::WriteAllText((Join-Path $md 'bir.md'), 'not')
+        [IO.File]::WriteAllText((Join-Path $md 'iki.md'), 'listelenmemis not')
+        $eski = $env:BEYIN_CLAUDE_PROJECTS
+        $env:BEYIN_CLAUDE_PROJECTS = $kok
+        try { $r = Invoke-Doktor @('-Ozet', '-SureSiniri', '1') }
+        finally { $env:BEYIN_CLAUDE_PROJECTS = $eski; Remove-Item -LiteralPath $kok -Recurse -Force -ErrorAction SilentlyContinue }
+        $r.Exit | Should Be 0
+        $r.Out | Should Match '- auto-memory: [^\r\n]*1 listelenmemis \(iki\.md\)'
+    }
+}

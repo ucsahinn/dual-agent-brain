@@ -59,7 +59,7 @@ Describe 'session-start: Claude Code 10k tavani' {
     It 'session-start makbuzu dusuyor (uzunluk + tavan + dusenler)' {
         $m = @(Read-BeyinMakbuz -Paths $p -Gun 1 | Where-Object { $_.script -eq 'session-start' -and $_.key -eq $sid })
         $m.Count | Should Be 1
-        ([string]$m[0].note -like 'uzunluk=*tavan=*') | Should Be $true
+        ([string]$m[0].note -like 'uzunluk=*tavan=*maske=*') | Should Be $true
     }
     Remove-Oturum $sid
 }
@@ -210,5 +210,345 @@ Describe 'betikler: kullanim, geri-getirme-olc, kirp (kuru), gom cikis kodu' {
         $src = Get-Content -LiteralPath (Join-Path $vault 'motor\scripts\gom.ps1') -Raw
         ($src -match "exit \`$Cikis") | Should Be $true
         (@([regex]::Matches($src, "-Cikis 5")).Count) | Should Be 3
+    }
+}
+
+Describe 'Faz A (2026-10-06): pano gorunumu, cakisma, kaynak onerisi, maske, sentetik filtre' {
+    It 'Update-BeyinPanoMd: in_progress + 0 kanit KANIT YOK, todo isaretlenmez, backlog ayri tabloda' {
+        $tv = Join-Path $env:TEMP ("beyin-pano-" + [guid]::NewGuid().ToString('N'))
+        $tp = Get-BeyinPaths -Vault $tv
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $tp.Board), (Join-Path $tv '10-command-center') | Out-Null
+        $board = @{ schemaVersion = 4; tasks = @(
+            @{ id = 'TASK-A'; title = 'calisiyor'; status = 'in_progress'; owner = @{ agent = 'codex'; session = 's1' }; writeScope = @{ repo = 'r'; paths = @('a.ps1') }; brief = 'x'; evidence = @() },
+            @{ id = 'TASK-B'; title = 'sirada'; status = 'todo'; owner = $null; writeScope = $null; brief = ''; evidence = @() },
+            @{ id = 'TASK-C'; title = 'kuyrukta'; status = 'backlog'; owner = @{ agent = 'codex'; session = $null }; writeScope = @{ repo = 'r'; paths = @('c.ps1') }; brief = 'y'; evidence = @() }) }
+        [IO.File]::WriteAllText($tp.Board, ($board | ConvertTo-Json -Depth 6))
+        $r = Update-BeyinPanoMd -Paths $tp
+        $md = [IO.File]::ReadAllText((Join-Path $tv '10-command-center\pano.md'))
+        Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue
+        $r.Ok | Should Be $true
+        $md | Should Match '\| `TASK-A` \| in_progress \|[^\r\n]*\*\*KANIT YOK\*\*'
+        $md | Should Not Match '\| `TASK-B` \|[^\r\n]*KANIT YOK'
+        $md | Should Match '## Bekleyen \(backlog, 1\)'
+        $md | Should Match '\| `TASK-C` \| codex \|'
+    }
+    It 'Get-BeyinPanoCakisma: esit yol, dizin on eki, glob; farkli repo cakismaz; izole isaret' {
+        $k = @(
+            [pscustomobject]@{ id = 'T1'; writeScope = [pscustomobject]@{ repo = 'Beyin'; paths = @('motor/x.ps1') }; isolation = $null },
+            [pscustomobject]@{ id = 'T2'; writeScope = [pscustomobject]@{ repo = 'beyin'; paths = @('motor') }; isolation = 'worktree' },
+            [pscustomobject]@{ id = 'T3'; writeScope = [pscustomobject]@{ repo = 'Beyin'; paths = @('docs/*.md') }; isolation = $null },
+            [pscustomobject]@{ id = 'T4'; writeScope = [pscustomobject]@{ repo = 'Beyin'; paths = @('docs/a.md') }; isolation = $null },
+            [pscustomobject]@{ id = 'T5'; writeScope = [pscustomobject]@{ repo = 'baska'; paths = @('motor/x.ps1') }; isolation = $null })
+        $c = @(Get-BeyinPanoCakisma -Kartlar $k)
+        $ciftler = @($c | ForEach-Object { "$($_.A)-$($_.B)" })
+        $ciftler -contains 'T1-T2' | Should Be $true
+        $ciftler -contains 'T3-T4' | Should Be $true
+        @($ciftler | Where-Object { $_ -like '*T5*' }).Count | Should Be 0
+        (@($c | Where-Object { $_.A -eq 'T1' -and $_.B -eq 'T2' })[0].Izole) | Should Be $true
+    }
+    It 'Get-BeyinKaynakOzeti: onerilen es zamanli ajan 2-6 araliginda ve bos RAM olculur' {
+        $tv = Join-Path $env:TEMP ("beyin-kay-" + [guid]::NewGuid().ToString('N'))
+        $tp = Get-BeyinPaths -Vault $tv
+        New-Item -ItemType Directory -Force -Path $tp.ScrState | Out-Null
+        $k = Get-BeyinKaynakOzeti -Paths $tp -OnbellekDk 0
+        Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue
+        ($k.BosRamGB -ge 0) | Should Be $true
+        ($k.OnerilenAjan -ge 2 -and $k.OnerilenAjan -le 6) | Should Be $true
+    }
+    It 'Protect-BeyinBlok: sir maskelenir ve sayac artar; bos metin aynen doner' {
+        $once = $script:BeyinMaskeSayac
+        $m = Protect-BeyinBlok -Text ('kanit: sk-ant-' + ('a' * 30) + ' sonu') -Ad 'test'
+        $m | Should Not Match 'sk-ant-a{30}'
+        ($script:BeyinMaskeSayac -gt $once) | Should Be $true
+        (Protect-BeyinBlok -Text '' -Ad 'test') | Should Be ''
+    }
+    It 'prompt-counter: "Another Claude session" sarmalli ajan mesaji ATLANDI, kavram enjekte edilmez' {
+        $sid = "kanca-test-acs-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+        $ic = "Another Claude session sent a message:`n<agent-message from=`"a1`">Kapasite ve yuk testi harness'inde fail-closed onay kapisi raporu</agent-message>"
+        $c = Invoke-Kanca 'prompt-counter.ps1' @{ session_id = $sid; cwd = $vault; prompt = $ic }
+        $m = @(Read-BeyinMakbuz -Paths $p -Gun 1 | Where-Object { $_.script -eq 'retrieval' -and $_.key -eq $sid })
+        Remove-Oturum $sid
+        ($c.Length -eq 0 -or -not $c.Contains('[Hafiza: Ilgili Kavram')) | Should Be $true
+        ([string]$m[0].outcome) | Should Be 'ATLANDI'
+    }
+    It 'prompt-counter: Ollama erisilemez ve kelime yedegi bos -> OLCULEMEDI (bulamadim degil)' {
+        $sid = "kanca-test-olc-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+        $eski = $env:BEYIN_OLLAMA_URL
+        $env:BEYIN_OLLAMA_URL = 'http://127.0.0.1:9'
+        try { $null = Invoke-Kanca 'prompt-counter.ps1' @{ session_id = $sid; cwd = $vault; prompt = 'zxqvwplork mnbvcqazx lkjhgpoiu qwertzuiop yxcvbmnasd' } }
+        finally { $env:BEYIN_OLLAMA_URL = $eski }
+        $m = @(Read-BeyinMakbuz -Paths $p -Gun 1 | Where-Object { $_.script -eq 'retrieval' -and $_.key -eq $sid })
+        Remove-Oturum $sid
+        $m.Count | Should Be 1
+        ([string]$m[0].outcome) | Should Be 'OLCULEMEDI'
+        ([string]$m[0].reason) | Should Be 'vektor-dusme'
+    }
+}
+
+Describe 'Faz A BA7 (2026-10-06): aktarim v2, pano brifingi, oturum ici gosterim' {
+    It 'Add-BeyinHandoff: v2 kaydi (kind/ref/coordinator), sir maskelenir, bos metin BOS' {
+        $tv = Join-Path $env:TEMP ("beyin-hd-" + [guid]::NewGuid().ToString('N'))
+        $tp = Get-BeyinPaths -Vault $tv
+        New-Item -ItemType Directory -Force -Path (Join-Path $tv '10-command-center') | Out-Null
+        $a = Add-BeyinHandoff -Paths $tp -Metin ('kontrol et: sk-ant-' + ('b' * 30)) -Kime 'claude' -Kind 'brifing' -Ref 'TASK-9@review@x' -Coordinator 'qa_coordinator' -FromAgent 'pano'
+        $h = Get-BeyinHandoff -Paths $tp -Id $a.Id
+        $bos = Add-BeyinHandoff -Paths $tp -Metin '   ' -Kime 'claude'
+        Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue
+        $a.Ok | Should Be $true
+        [int]$h.v | Should Be 2
+        [string]$h.kind | Should Be 'brifing'
+        [string]$h.ref | Should Be 'TASK-9@review@x'
+        [string]$h.coordinator | Should Be 'qa_coordinator'
+        ([string]$h.question -notmatch 'sk-ant-b{30}') | Should Be $true
+        ($a.Maske -gt 0) | Should Be $true
+        $bos.Kod | Should Be 'BOS'
+    }
+    It 'Sync-BeyinPanoBrifing: review ve blocked icin tek brifing, tekrar yok, kart ilerleyince kapanir' {
+        $tv = Join-Path $env:TEMP ("beyin-br-" + [guid]::NewGuid().ToString('N'))
+        $tp = Get-BeyinPaths -Vault $tv
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $tp.Board), (Join-Path $tv '10-command-center') | Out-Null
+        $tasks = @(
+            @{ id = 'TASK-R'; title = 'inceleme'; status = 'review'; owner = @{ agent = 'codex'; session = 's' }; ownerCoordinator = 'leadership_coordinator'; writeScope = @{ repo = 'r'; paths = @('a') }; evidence = @('e1'); reports = @('TASK-R-codex.md'); handoffs = @(); history = @(@{ at = '2026-10-06T10:00:00.000Z'; action = 'transition'; from = 'in_progress'; to = 'review' }) },
+            @{ id = 'TASK-B'; title = 'takildi'; status = 'blocked'; owner = @{ agent = 'claude'; session = 's' }; ownerCoordinator = 'qa_coordinator'; writeScope = $null; evidence = @(); reports = @(); handoffs = @(); history = @(@{ at = '2026-10-06T10:05:00.000Z'; action = 'transition'; from = 'in_progress'; to = 'blocked' }) },
+            @{ id = 'TASK-D'; title = 'bitti'; status = 'done'; owner = @{ agent = 'codex'; session = 's' }; ownerCoordinator = 'leadership_coordinator'; writeScope = $null; evidence = @('e'); reports = @('TASK-D-x.md'); handoffs = @(); history = @() })
+        [IO.File]::WriteAllText($tp.Board, (@{ schemaVersion = 4; tasks = $tasks } | ConvertTo-Json -Depth 8))
+        $r1 = Sync-BeyinPanoBrifing -Paths $tp -Tetik 'test'
+        $r2 = Sync-BeyinPanoBrifing -Paths $tp -Tetik 'test'
+        Start-Sleep -Milliseconds 30
+        [IO.File]::WriteAllText($tp.Board, (@{ schemaVersion = 4; tasks = $tasks } | ConvertTo-Json -Depth 8))
+        $r3 = Sync-BeyinPanoBrifing -Paths $tp -Tetik 'test'
+        $acik1 = @(Get-BeyinHandoffListe -Paths $tp)
+        $tasks[0].status = 'in_progress'
+        Start-Sleep -Milliseconds 30
+        [IO.File]::WriteAllText($tp.Board, (@{ schemaVersion = 4; tasks = $tasks } | ConvertTo-Json -Depth 8))
+        $r4 = Sync-BeyinPanoBrifing -Paths $tp -Tetik 'test'
+        $acik2 = @(Get-BeyinHandoffListe -Paths $tp)
+        Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue
+        $r1.Yeni | Should Be 2
+        $r2.Yeni | Should Be 0
+        $r3.Yeni | Should Be 0
+        @($acik1 | Where-Object { $_.ref -like 'TASK-R@review@*' -and $_.to -eq 'claude' }).Count | Should Be 1
+        @($acik1 | Where-Object { $_.ref -like 'TASK-B@blocked@*' -and $_.to -eq 'codex' }).Count | Should Be 1
+        $r4.Kapanan | Should Be 1
+        @($acik2 | Where-Object { $_.ref -like 'TASK-R@*' }).Count | Should Be 0
+    }
+    It 'prompt-counter: oturum icinde gelen yeni aktarim bir kez gosterilir ve GOSTERILDI makbuzu yazilir' {
+        $sid = "kanca-test-hd-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+        $a = Add-BeyinHandoff -Paths $p -Metin 'kanca testi: oturum ici aktarim gosterimi' -Kime 'claude' -Proje 'kanca-test' -FromAgent 'codex'
+        try {
+            $c1 = Invoke-Kanca 'prompt-counter.ps1' @{ session_id = $sid; cwd = $vault; prompt = 'zxqvwplork mnbvcqazx lkjhgpoiu ilk tur' }
+            $c2 = Invoke-Kanca 'prompt-counter.ps1' @{ session_id = $sid; cwd = $vault; prompt = 'zxqvwplork mnbvcqazx lkjhgpoiu ikinci tur' }
+            $m = @(Read-BeyinMakbuz -Paths $p -Gun 1 | Where-Object { $_.script -eq 'aktar' -and $_.outcome -eq 'GOSTERILDI' -and $_.key -eq $sid })
+        } finally {
+            $f = Join-Path $p.Handoff "$($a.Id).json"
+            Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+            $null = Update-BeyinAktarimlarMd -Paths $p
+            Remove-Oturum $sid
+        }
+        $c1.Contains('[Hafiza: Aktarim | yeni') | Should Be $true
+        $c1.Contains($a.Id) | Should Be $true
+        ($c2.Length -eq 0 -or -not $c2.Contains($a.Id)) | Should Be $true
+        $m.Count | Should Be 1
+        ([string]$m[0].note).Contains($a.Id) | Should Be $true
+    }
+}
+
+Describe 'Faz A BA8 (2026-10-06): model limiti reset saati ve erteleme' {
+    $simdi = [datetime]::new(2026, 10, 6, 10, 0, 0)
+    It 'Get-BeyinLimitReset: saat, goreli, epoch, iso ve bilinmeyen mesaj' {
+        $a = Get-BeyinLimitReset -Text "You've hit your session limit - resets 3pm" -Simdi $simdi
+        $a.Ok | Should Be $true; $a.Kaynak | Should Be 'saat'; $a.Until | Should Be ([datetime]::new(2026, 10, 6, 15, 0, 0))
+        $b = Get-BeyinLimitReset -Text 'rate limit exceeded, try again in 2 hours' -Simdi $simdi
+        $b.Kaynak | Should Be 'goreli'; $b.Until | Should Be $simdi.AddHours(2)
+        $c = Get-BeyinLimitReset -Text '{"rate_limits":{"primary":{"resets_at": 1791300000}}}' -Simdi ([DateTimeOffset]::FromUnixTimeSeconds(1791290000).LocalDateTime)
+        $c.Kaynak | Should Be 'epoch'
+        $d = Get-BeyinLimitReset -Text 'usage limit reached; available after 2026-10-06T12:30:00Z' -Simdi $simdi
+        $d.Kaynak | Should Be 'iso'
+        $e = Get-BeyinLimitReset -Text 'quota hatasi, ayrinti yok' -Simdi $simdi
+        $e.Ok | Should Be $false; $e.Until | Should Be $simdi.AddMinutes(60)
+        $f = Get-BeyinLimitReset -Text 'resets at 9am' -Simdi $simdi
+        $f.Until | Should Be ([datetime]::new(2026, 10, 7, 9, 0, 0))
+        $g = Get-BeyinLimitReset -Text 'try again in 3000 minutes' -Simdi $simdi
+        $g.Until | Should Be $simdi.AddHours(24)
+    }
+    It 'Get-BeyinLimitReset: gercek CLI bicimleri (3:50am, haftalik tarih)' {
+        $s = [datetime]::new(2026, 10, 6, 0, 31, 0)
+        $a = Get-BeyinLimitReset -Text ("You've hit your session limit " + [char]0xB7 + " resets 3:50am (Europe/Istanbul)") -Simdi $s
+        $a.Kaynak | Should Be 'saat'; $a.Until | Should Be ([datetime]::new(2026, 10, 6, 3, 50, 0))
+        $s2 = [datetime]::new(2026, 9, 27, 10, 0, 0)
+        $b = Get-BeyinLimitReset -Text ("You've hit your weekly limit " + [char]0xB7 + " resets Sep 28, 4am (Europe/Istanbul)") -Simdi $s2
+        $b.Kaynak | Should Be 'tarih'; $b.Until | Should Be ([datetime]::new(2026, 9, 28, 4, 0, 0))
+        $c = Get-BeyinLimitReset -Text 'resets Oct 1, 4:30pm' -Simdi $s
+        $c.Kaynak | Should Be 'tarih'; $c.Until | Should Be $s.AddHours(24)
+    }
+    It 'Get-BeyinFailDetail: stderr uyarisi stdout limit mesajini gizlemez (2026-10-06 regresyonu)' {
+        $res = @{ Ok = $false; ExitCode = 1; Reason = 'cikis-kodu'
+                  Err = 'Permission deny rule "MultiEdit" matches no known tool - check for typos.'
+                  Out = ("You've hit your session limit " + [char]0xB7 + " resets 3:50am (Europe/Istanbul)") }
+        $d = Get-BeyinFailDetail -Result $res
+        $d | Should Match '\[KOTA/LIMIT\]'
+        $d | Should Match 'session limit'
+        $d | Should Match 'MultiEdit'
+        $d.Length | Should BeLessThan 304
+        $d2 = Get-BeyinFailDetail -Result @{ Err = ('x' * 400); Out = ('y' * 400) }
+        $d2 | Should Match 'stdout: y'
+        $d2.Length | Should BeLessThan 304
+    }
+    It 'Get-BeyinClaudeArgs: tum araclar kapali, ad listesi yok' {
+        $a = Get-BeyinClaudeArgs -Model 'haiku'
+        $a.Contains('--tools "" --no-session-persistence') | Should Be $true
+        $a.Contains('--disallowed-tools') | Should Be $false
+        $a.Contains('--strict-mcp-config') | Should Be $true
+    }
+    It 'Set/Test/Clear-BeyinLimitErtele: aktif, gecmis zaman pasif, temizlenince pasif' {
+        $tv = Join-Path $env:TEMP ("beyin-lim-" + [guid]::NewGuid().ToString('N'))
+        $tp = Get-BeyinPaths -Vault $tv
+        New-Item -ItemType Directory -Force -Path $tp.ScrState | Out-Null
+        $null = Set-BeyinLimitErtele -Paths $tp -Until (Get-Date).AddMinutes(30) -Kaynak 'test' -Ornek ('sk-ant-' + ('c' * 30))
+        $t1 = Test-BeyinLimitErtele -Paths $tp
+        $ham = [IO.File]::ReadAllText((Join-Path $tp.ScrState 'limit-ertele.json'))
+        $null = Set-BeyinLimitErtele -Paths $tp -Until (Get-Date).AddMinutes(-5) -Kaynak 'gecmis'
+        $t2 = Test-BeyinLimitErtele -Paths $tp
+        $null = Set-BeyinLimitErtele -Paths $tp -Until (Get-Date).AddMinutes(30) -Kaynak 'test'
+        Clear-BeyinLimitErtele -Paths $tp
+        $t3 = Test-BeyinLimitErtele -Paths $tp
+        Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue
+        $t1.Aktif | Should Be $true
+        ($ham -notmatch 'sk-ant-c{30}') | Should Be $true
+        $t2.Aktif | Should Be $false
+        $t3.Aktif | Should Be $false
+    }
+}
+
+Describe 'Faz B BB6 (2026-10-06): blocked kart kilidi birakir' {
+    It 'blocked kartin yazma kapsami cakisma sayilmaz; worktree izolasyonu isaretlenir' {
+        $ws = [pscustomobject]@{ repo = 'r'; paths = @('docs') }
+        $k = @(
+            [pscustomobject]@{ id = 'TASK-1'; status = 'in_progress'; writeScope = $ws },
+            [pscustomobject]@{ id = 'TASK-2'; status = 'blocked'; writeScope = $ws },
+            [pscustomobject]@{ id = 'TASK-3'; status = 'todo'; isolation = 'worktree'; writeScope = [pscustomobject]@{ repo = 'r'; paths = @('docs/a.md') } })
+        $c = @(Get-BeyinPanoCakisma -Kartlar $k)
+        $c.Count | Should Be 1
+        "$($c[0].A)-$($c[0].B)" | Should Be 'TASK-1-TASK-3'
+        $c[0].Izole | Should Be $true
+    }
+}
+
+Describe 'Faz B BB2 (2026-10-06): kullanim sonmesi okuyucusu' {
+    It 'yorum satirini atlar, carpani okur; BEYIN_SONME=kapali iken bos doner' {
+        $tv = Join-Path $env:TEMP ("beyin-sonme-" + [guid]::NewGuid().ToString('N'))
+        $tp = Get-BeyinPaths -Vault $tv
+        New-Item -ItemType Directory -Force -Path $tp.ScrState | Out-Null
+        $dat = Join-Path $tp.ScrState 'kullanim-sonme.dat'
+        Write-BeyinText -Path $dat -Text ("# yorum$([char]9)x`nNot-Bir.md$([char]9)0.6$([char]9)7$([char]9)0`nbozuk.md$([char]9)abc`ntam.md$([char]9)1")
+        try {
+            $h = Get-BeyinKullanimSonme -Paths $tp
+            $env:BEYIN_SONME = 'kapali'
+            $h2 = Get-BeyinKullanimSonme -Paths $tp
+        } finally { $env:BEYIN_SONME = $null; Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue }
+        $h.Count | Should Be 1
+        $h['not-bir.md'] | Should Be 0.6
+        $h2.Count | Should Be 0
+    }
+    It 'BEYIN_SONME ayari dogrulanir' {
+        (Test-BeyinAyarDeger -Ad 'BEYIN_SONME' -Deger 'kapali').Ok | Should Be $true
+        (Test-BeyinAyarDeger -Ad 'BEYIN_SONME' -Deger 'belki').Ok | Should Be $false
+    }
+}
+
+Describe 'Faz B BB3 (2026-10-06): devir blogu' {
+    It 'Get-BeyinDevirMetni: bolumu ayiklar, yok/kisa ise bos' {
+        $oz = "**Yarim kalan:** x`n**Ogrenilen:** yok`n**Devir:** BB3 testleri yazildi; siradaki adim BB4 skill-aday.`n  pano.ps1'e dokunma."
+        Get-BeyinDevirMetni -Ozet $oz | Should Be "BB3 testleri yazildi; siradaki adim BB4 skill-aday. pano.ps1'e dokunma."
+        Get-BeyinDevirMetni -Ozet "**Devir:** yok" | Should Be ''
+        Get-BeyinDevirMetni -Ozet "**Kararlar:** yok" | Should Be ''
+    }
+    It 'Add-BeyinDevir: ayni oturumun onceki devri kapanir, son devir acik kalir' {
+        $tv = Join-Path $env:TEMP ("beyin-devir-" + [guid]::NewGuid().ToString('N'))
+        $tp = Get-BeyinPaths -Vault $tv
+        New-Item -ItemType Directory -Force -Path $tp.ScrState | Out-Null
+        try {
+            $a = Add-BeyinDevir -Paths $tp -Ozet "**Devir:** birinci devir metni burada duruyor." -Agent 'claude' -Proje 'p1' -SessionKey 'k1'
+            $b = Add-BeyinDevir -Paths $tp -Ozet "**Devir:** ikinci devir metni burada duruyor." -Agent 'claude' -Proje 'p1' -SessionKey 'k1'
+            $acik = @(Get-BeyinHandoffAcik -Paths $tp -Kime 'claude')
+            $ilk = Get-BeyinHandoff -Paths $tp -Id $a.Id
+        } finally { Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue }
+        $a.Ok | Should Be $true
+        $acik.Count | Should Be 1
+        [string]$acik[0].id | Should Be $b.Id
+        [string]$acik[0].kind | Should Be 'devir'
+        [string]$ilk.status | Should Be 'tamam'
+    }
+    It 'session-start: devir yalniz ayni projede gosterilir ve gosterilince kapanir' {
+        $sid = "kanca-test-devir-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+        $proje = Get-BeyinProjectLeaf -Path $vault -Paths $p
+        $d1 = Add-BeyinDevir -Paths $p -Ozet "**Devir:** KANCATEST-DEVIR-AYNI proje devri metni." -Agent 'claude' -Proje $proje -SessionKey "kt-$sid-1"
+        $d2 = Add-BeyinDevir -Paths $p -Ozet "**Devir:** KANCATEST-DEVIR-BASKA proje devri metni." -Agent 'claude' -Proje 'kancatest-baska-proje' -SessionKey "kt-$sid-2"
+        try {
+            $ctx = Invoke-Kanca 'session-start.ps1' @{ session_id = $sid; cwd = $vault; hook_event_name = 'SessionStart'; source = 'startup' }
+            $s1 = [string](Get-BeyinHandoff -Paths $p -Id $d1.Id).status
+            $s2 = [string](Get-BeyinHandoff -Paths $p -Id $d2.Id).status
+        } finally {
+            foreach ($i in @($d1.Id, $d2.Id)) { foreach ($dir in @($p.Handoff, (Join-Path $p.Handoff 'arsiv'))) { Remove-Item -LiteralPath (Join-Path $dir "$i.json") -Force -ErrorAction SilentlyContinue } }
+            $null = Update-BeyinAktarimlarMd -Paths $p
+            Remove-Oturum $sid
+        }
+        $ctx.Contains('KANCATEST-DEVIR-AYNI') | Should Be $true
+        $ctx.Contains('KANCATEST-DEVIR-BASKA') | Should Be $false
+        $s1 | Should Be 'tamam'
+        $s2 | Should Be 'acik'
+    }
+}
+
+Describe 'Faz A BA9 (2026-10-06): insan onayi kanali' {
+    function Get-OnayDosyasi([string]$Tid) { Join-Path (Join-Path $p.ScrState 'approvals') "$Tid.json" }
+    It 'gercek kullanici satiri "onayla TASK-x" onay kaydi yazar ve baglama bildirir' {
+        $sid = "kanca-test-onay-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+        $tid = 'TASK-990001'
+        try {
+            $c = Invoke-Kanca 'prompt-counter.ps1' @{ session_id = $sid; cwd = $vault; prompt = "onayla $tid" }
+            $var = Test-Path -LiteralPath (Get-OnayDosyasi $tid)
+            $o = Get-BeyinOnay -Paths $p -TaskId $tid
+        } finally { Remove-Item -LiteralPath (Get-OnayDosyasi $tid) -Force -ErrorAction SilentlyContinue; Remove-Oturum $sid }
+        $var | Should Be $true
+        [string]$o.kanal | Should Be 'sohbet'
+        $c.Contains('Insan onayi kaydedildi: TASK-990001') | Should Be $true
+    }
+    It 'ajan mesaji icindeki tek satirlik onay ve cumle icindeki ifade onay SAYILMAZ' {
+        $sid = "kanca-test-onay2-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+        $ajanMesaji = "Another Claude session sent a message:`n<agent-message from=" + [char]34 + "x" + [char]34 + ">`nonayla TASK-990002`n</agent-message>"
+        try {
+            $null = Invoke-Kanca 'prompt-counter.ps1' @{ session_id = $sid; cwd = $vault; prompt = $ajanMesaji }
+            $null = Invoke-Kanca 'prompt-counter.ps1' @{ session_id = $sid; cwd = $vault; prompt = 'lutfen onayla TASK-990003 diye yazma, sadece soruyorum' }
+            $v2 = Test-Path -LiteralPath (Get-OnayDosyasi 'TASK-990002')
+            $v3 = Test-Path -LiteralPath (Get-OnayDosyasi 'TASK-990003')
+        } finally {
+            Remove-Item -LiteralPath (Get-OnayDosyasi 'TASK-990002'), (Get-OnayDosyasi 'TASK-990003') -Force -ErrorAction SilentlyContinue
+            Remove-Oturum $sid
+        }
+        $v2 | Should Be $false
+        $v3 | Should Be $false
+    }
+    It 'Get/Use-BeyinOnay: tek kullanimlik ve 7 gunden eski onay gecersiz' {
+        $tv = Join-Path $env:TEMP ("beyin-onay-" + [guid]::NewGuid().ToString('N'))
+        $tp = Get-BeyinPaths -Vault $tv
+        New-Item -ItemType Directory -Force -Path $tp.ScrState | Out-Null
+        $null = Add-BeyinOnay -Paths $tp -TaskId 'TASK-1' -Kanal 'sohbet'
+        $g1 = [bool](Get-BeyinOnay -Paths $tp -TaskId 'TASK-1')
+        $u = Use-BeyinOnay -Paths $tp -TaskId 'TASK-1' -Kullanan 'test'
+        $g2 = [bool](Get-BeyinOnay -Paths $tp -TaskId 'TASK-1')
+        $null = Add-BeyinOnay -Paths $tp -TaskId 'TASK-2' -Kanal 'sohbet'
+        $f2 = Join-Path (Join-Path $tp.ScrState 'approvals') 'TASK-2.json'
+        $o2 = Get-Content -LiteralPath $f2 -Raw | ConvertFrom-Json
+        $o2.approvedAt = (Get-Date).AddDays(-8).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+        [IO.File]::WriteAllText($f2, ($o2 | ConvertTo-Json -Compress))
+        $g3 = [bool](Get-BeyinOnay -Paths $tp -TaskId 'TASK-2')
+        $gecersiz = (Add-BeyinOnay -Paths $tp -TaskId 'task-x').Ok
+        Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue
+        $g1 | Should Be $true
+        $u | Should Be $true
+        $g2 | Should Be $false
+        $g3 | Should Be $false
+        $gecersiz | Should Be $false
     }
 }

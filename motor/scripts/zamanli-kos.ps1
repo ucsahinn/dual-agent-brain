@@ -44,6 +44,13 @@ if ($Komut -eq 'zamanli') { Write-BeyinLog -Vault $Vault -Message '[zamanlayici]
 $script:kimlikBelirsiz = ''
 $modelGerekir = @('derle', 'derle-zorla', 'compile', 'topla-uygula', 'derin')
 if ($modelGerekir -contains $Komut.ToLowerInvariant()) {
+    # MODEL LIMITI ERTELEMESI (2026-10-06): reset saatinden once gece isi model cagirmaz.
+    $le = Test-BeyinLimitErtele -Paths $p
+    if ($le.Aktif) {
+        Write-BeyinLog -Vault $Vault -Message "[zamanlayici] $komutTam ATLANDI: model limiti, $($le.Until.ToString('HH:mm'))'e kadar ertelendi"
+        Write-BeyinMakbuz -Paths $p -Script 'zamanli' -Outcome 'LIMIT_ERTELE' -Reason $Komut -DurationMs $sw.ElapsedMilliseconds -Note "${komutTam}: $($le.Until.ToString('o'))"
+        exit 3
+    }
     # TAVAN 60 sn: varsayilan 20 sn soguk baslangicta yetmiyor. Olculdu
     # (2026-09-18): etkilesimli kosuda 'claude auth status' 543-729 ms, ama
     # 03:00'teki zamanlanmis kosuda 20 sn asildi. Burasi kanca yolu degil,

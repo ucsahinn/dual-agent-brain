@@ -27,6 +27,8 @@ param(
     [string]$Sonraki = '',
     [string]$Kime = '',
     [string]$Proje = '',
+    # Tur (2026-10-06): soru (varsayilan) ya da devir (nerede kaldim / siradaki adim). brifing yalniz pano uretir.
+    [string]$Tur = 'soru',
     [string]$Tamam = '',
     [switch]$Hepsi
 )
@@ -97,64 +99,39 @@ $kime = ([string]$Kime).Trim().ToLowerInvariant()
 if (-not $kime) { $kime = $(if ($ajan -eq 'codex') { 'claude' } else { 'codex' }) }
 if ($kime -ne 'claude' -and $kime -ne 'codex') { Write-Output "HATA: -Kime claude ya da codex olmali (verilen: '$Kime')"; exit 2 }
 
-function Temizle([string]$T, [int]$Max) {
-    $t = ([string]$T -replace '\s+', ' ').Trim()
-    if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max - 3) + '...' }
-    return $t
-}
-$alanlar = [ordered]@{ question = (Temizle $Metin 600); evidence = (Temizle $Kanit 300); scope = (Temizle $Kapsam 300); risk = (Temizle $Risk 300); next = (Temizle $Sonraki 300) }
-if (-not $alanlar.question) { Write-Output 'HATA: bos soru/handoff metni'; exit 2 }
-$maskeToplam = 0
-foreach ($ad in @($alanlar.Keys)) {
-    if (-not $alanlar[$ad]) { continue }
-    $prot = Protect-BeyinSecrets -Text $alanlar[$ad] -Vault $Vault
-    # FAIL-CLOSED: redaksiyon duserse YAZMA (niyet.ps1 ile ayni sozlesme).
-    if ($prot.Failed -gt 0) {
-        Write-Output "HATA: sir redaksiyonu uygulanamadi ($($prot.Failed) desen). Aktarim YAZILMADI."
-        Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_REDAKSIYON_DUSTU' -Note "$($prot.Failed) desen uygulanamadi"
-        exit 3
-    }
-    $alanlar[$ad] = $prot.Text
-    $maskeToplam += [int]$prot.Redactions
-}
-if ($maskeToplam -gt 0) { "UYARI: $maskeToplam sir benzeri deger maskelendi." }
-
+# KAYIT TEK YOLDAN (2026-10-06): lib Add-BeyinHandoff (pano brifingi de ayni fonksiyonu
+# kullanir). Sozlesme ayni: alanlar fail-closed maskelenir, yazim geri okunur.
 $proje = ([string]$Proje).Trim()
 if (-not $proje) { try { $proje = Get-BeyinProjectLeaf -Path (Get-Location).Path -Paths $p } catch { $proje = '' } }
-$id = (Get-Date).ToString('yyyyMMddTHHmmss', [Globalization.CultureInfo]::InvariantCulture) + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 4))
-$kayit = [ordered]@{
-    v        = 1
-    id       = $id
-    ts       = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
-    from     = [ordered]@{ agent = $ajan; session = [string]$env:HERDR_PANE_ID; project = $proje }
-    to       = $kime
-    question = $alanlar.question
-    evidence = $alanlar.evidence
-    scope    = $alanlar.scope
-    risk     = $alanlar.risk
-    next     = $alanlar.next
-    status   = 'acik'
-    doneBy   = ''
-    doneTs   = ''
+$tur = ([string]$Tur).Trim().ToLowerInvariant()
+if (-not $tur) { $tur = 'soru' }
+if ($tur -ne 'soru' -and $tur -ne 'devir') { Write-Output "HATA: -Tur soru ya da devir olmali (verilen: '$Tur')"; exit 2 }
+# DEVIR AYNI AJANA (2026-10-06): devir yalniz ayni ajanin AYNI projedeki acilisinda
+# gosterilir ve gosterilince kapanir. Baska ajana yazilan devir sessizce gorunmez
+# kalirdi (olculdu: Codex'e giden kart bildirimi bu yuzden dustu). Acikca reddet.
+if ($tur -eq 'devir' -and $kime -ne $ajan) {
+    Write-Output "HATA: -Tur devir yalniz ayni ajana yazilir (gonderen: $ajan, hedef: $kime). Baska ajana bildirim icin -Tur'u verme (soru/handoff)."
+    exit 2
 }
-$yaz = Set-BeyinHandoff -Paths $p -Kayit $kayit
-if (-not $yaz.Ok) {
-    Write-BeyinLog -Vault $Vault -Message "aktar: YAZILAMADI ($($yaz.Hata))"
-    Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_YAZILAMADI' -Note $yaz.Hata
-    Write-Host "HATA: aktarim kaydedilemedi - $($yaz.Hata)" -ForegroundColor Red
+$sonuc = Add-BeyinHandoff -Paths $p -Metin $Metin -Kime $kime -Kanit $Kanit -Kapsam $Kapsam -Risk $Risk -Sonraki $Sonraki `
+    -Proje $proje -Kind $tur -FromAgent $ajan -FromSession ([string]$env:HERDR_PANE_ID)
+if ($sonuc.Kod -eq 'BOS') { Write-Output 'HATA: bos soru/handoff metni'; exit 2 }
+if ($sonuc.Kod -eq 'REDAKSIYON_DUSTU') {
+    Write-Output "HATA: sir redaksiyonu uygulanamadi ($($sonuc.Hata)). Aktarim YAZILMADI."
+    Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_REDAKSIYON_DUSTU' -Note $sonuc.Hata
     exit 3
 }
-# GERI OKUMA: motorun session-start'ta kullanacagi yoldan (niyet.ps1 sozlesmesi).
-$geri = Get-BeyinHandoff -Paths $p -Id $id
-if (-not $geri -or [string]$geri.question -ne [string]$alanlar.question) {
-    Write-BeyinLog -Vault $Vault -Message "aktar: YAZILAMADI (geri okuma farkli ya da yok: $id)"
-    Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_YAZILAMADI' -Note 'geri okuma farkli'
-    Write-Host 'HATA: aktarim yazildi sanildi ama geri okunamadi' -ForegroundColor Red
+if (-not $sonuc.Ok) {
+    Write-BeyinLog -Vault $Vault -Message "aktar: YAZILAMADI ($($sonuc.Hata))"
+    Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_YAZILAMADI' -Note $sonuc.Hata
+    Write-Host "HATA: aktarim kaydedilemedi - $($sonuc.Hata)" -ForegroundColor Red
     exit 3
 }
-$md = Update-BeyinAktarimlarMd -Paths $p
-Write-BeyinLog -Vault $Vault -Message "aktar: kaydedildi $id ($ajan -> $kime, proje=$proje, $($alanlar.question.Length) kr)"
-Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_KAYDEDILDI' -Agent $ajan -Note "$id -> $kime"
+if ($sonuc.Maske -gt 0) { "UYARI: $($sonuc.Maske) sir benzeri deger maskelendi." }
+$id = $sonuc.Id
+$md = @{ Yol = (Join-Path (Join-Path $Vault '10-command-center') 'aktarimlar.md') }
+Write-BeyinLog -Vault $Vault -Message "aktar: kaydedildi $id ($ajan -> $kime, tur=$tur, proje=$proje)"
+Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_KAYDEDILDI' -Agent $ajan -Note "$id -> $kime ($tur)"
 "Aktarim kaydedildi: $id  ($ajan -> $kime, proje: $(if ($proje) { $proje } else { '-' }))"
 "  Hedef ajanin bir sonraki oturum acilisinda [Hafiza: Aktarim] blogu olarak gorunur; kapatmak icin: beyin aktar -Tamam $id"
 if ($md -and $md.Yol) { "  Turetilmis gorunum: $($md.Yol)" }

@@ -72,6 +72,9 @@ if ($transcript -and $prompts -ge 2 -and $isCodex) {
     Write-BeyinMakbuz -Paths $p -Script 'session-end' -Outcome 'KUYRUK' -Agent 'codex' -Key (Get-BeyinSessionKey -SessionId $hook.session_id) `
         -Reason 'session-end' -DurationMs (Get-SeMs) -Note "$prompts prompt, proje=$cwdLeaf (3 sn tavani: flush kuyrukta)"
     Write-BeyinLog -Vault $vault -Message "session-end: is kuyruga alindi - Codex 3 sn tavani ($prompts prompt, proje=$cwdLeaf, ajan=codex)"
+    # BRIFING (2026-10-06): Codex panoyu sarmalayicisiz da gecirebilir; kapanista
+    # review/blocked kartlar icin brifing uretilir. Yalniz zaman kaldiysa (3 sn tavani).
+    if ((Get-SeMs) -lt 1500) { try { $null = Sync-BeyinPanoBrifing -Paths $p -Tetik 'codex-session-end' } catch { } }
 } elseif ($transcript -and $prompts -ge 2) {
     $ok = Start-BeyinScript -ScriptPath (Join-Path $p.Scripts 'flush.ps1') -Vault $vault -Params @{
         TranscriptPath = $transcript

@@ -124,6 +124,17 @@ Her anlamli oturum iz birakir: ya bir not, ya bir karar, ya guncellenmis bir dos
   o satiri gorursen ihtiyacin olan dosyayi kendin oku.
   Kullanici bir niyet soylerse `beyin niyet` ile kaydetmeyi ONER (kuratorlu alan
   degildir, onay gerekmez ama kullanicinin cumlesi oldugu gibi yazilir).
+- Motor 1.1+ (2026-10-06): `beyin maliyet [gun]` iki ajanin jeton
+  kullanimi ve API esdegeri maliyet (gun/proje/oturum, oturum basi sabit
+  yuk, 200K ustu oturumlar; abonelik faturasi DEGILDIR; gece 04:10
+  `maliyet-tara` artimli tarar). `beyin skill-aday` tekrar eden yordamsal
+  notlardan skill adayi listesi (86-compiled/skill-adaylari.md; skill'i
+  insan ya da Claude ai-skill-create ile acar).
+  Pano karti `done` icin INSAN ONAYI gerekir: kullanici sohbete yalniz
+  `onayla TASK-x` satirini yazar; ajan mesaji ve cumle icindeki ifade
+  sayilmaz. Flush ozetinin `**Devir:**` bolumu ayni ajanin ayni
+  projedeki bir sonraki acilisinda bir kez gosterilir
+  (`aktar -Tur devir` yalniz ayni ajana).
 - `beyin yedek` tam vault yedegi alir (`.brain/backups/`). Tamamlanma isareti
   `TAMAM.txt` tasimayan klasor YARIM yedektir ve sayilmaz; `-KuruCalisma` plani
   yazmadan gosterir. Kopyaya girmeyenler: `.git`, `.obsidian`, `*/.state` ve

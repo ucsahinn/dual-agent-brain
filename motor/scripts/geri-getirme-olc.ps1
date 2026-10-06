@@ -22,8 +22,14 @@ param(
     [int]$Vaka = 40,
     [double]$Esik = 0.8,
     [switch]$Dondur,
-    [switch]$Json
+    [switch]$Json,
+    # DENEY (BB2): varsayilan disi bir ayar DENEY sayilir; rapor geri-getirme-deney.json'a
+    # gider ve makbuz OLC_DENEY yazar - haftalik regresyon kapisini (OLC_OK/DUSTU) kirletmez.
+    [string]$Fusion = 'hibrit',
+    [int]$TopK = 6,
+    [switch]$SonmeYok
 )
+$deney = ($Fusion -ne 'hibrit' -or $TopK -ne 6 -or $SonmeYok)
 
 $ErrorActionPreference = 'SilentlyContinue'
 $vaultOk = $false
@@ -109,7 +115,7 @@ foreach ($v in $vakalar) {
     if (-not (Test-Path -LiteralPath (Join-Path $conceptDir $v.dosya))) { $eksik++; continue }
     if ($vekHazir) {
         $t0 = $sw.ElapsedMilliseconds
-        $vr = Find-BeyinRelevantConceptsVec -Paths $p -Query $v.sorgu -EnFazla 5 -TimeoutMs 3000
+        $vr = Find-BeyinRelevantConceptsVec -Paths $p -Query $v.sorgu -EnFazla 5 -TimeoutMs 3000 -Fusion $Fusion -TopK $TopK -SonmeYok:$SonmeYok
         $vekMs.Add($sw.ElapsedMilliseconds - $t0)
         $liste = @()
         if ($vr.Ok) { $liste = @($vr.Sonuc | ForEach-Object { [string]$_.Item.dosya }) }
@@ -118,7 +124,7 @@ foreach ($v in $vakalar) {
         elseif ($liste.Count -gt 1 -and $liste[1] -eq $v.dosya) { $vekR2++ }
         else { if ($hatalar.Count -lt 10) { $hatalar.Add("vektor: $($v.dosya) -> $($liste[0])") } }
     }
-    $kl = @(Find-BeyinRelevantConcepts -Paths $p -Query $v.sorgu -EnFazla 5 | ForEach-Object { [string]$_.Item.dosya })
+    $kl = @(Find-BeyinRelevantConcepts -Paths $p -Query $v.sorgu -EnFazla 5 -SonmeYok:$SonmeYok | ForEach-Object { [string]$_.Item.dosya })
     if ($kl.Count -eq 0) { $kelBos++ }
     elseif ($kl[0] -eq $v.dosya) { $kelR1++; $kelR2++ }
     elseif ($kl.Count -gt 1 -and $kl[1] -eq $v.dosya) { $kelR2++ }
@@ -135,16 +141,17 @@ $rapor = [ordered]@{
     vektor = [ordered]@{ rank1 = (Oran $vekR1); rank2 = (Oran $vekR2); bos = (Oran $vekBos); p50ms = $p50 }
     kelime = [ordered]@{ rank1 = (Oran $kelR1); rank2 = (Oran $kelR2); bos = (Oran $kelBos) }
     esik = $Esik; gecti = ($vekOk -and $bozuk -eq 0)
+    fusion = $Fusion; topK = $TopK; sonme = (-not $SonmeYok); deney = $deney
     ornekHata = @($hatalar)
     sureMs = $sw.ElapsedMilliseconds
 }
-try { Write-BeyinText -Path (Join-Path $p.ScrState 'geri-getirme-olc.json') -Text ($rapor | ConvertTo-Json -Depth 5) } catch { }
-$kod = if ($rapor.gecti) { 'OLC_OK' } else { 'OLC_DUSTU' }
+try { Write-BeyinText -Path (Join-Path $p.ScrState $(if ($deney) { 'geri-getirme-deney.json' } else { 'geri-getirme-olc.json' })) -Text ($rapor | ConvertTo-Json -Depth 5) } catch { }
+$kod = if ($deney) { 'OLC_DENEY' } elseif ($rapor.gecti) { 'OLC_OK' } else { 'OLC_DUSTU' }
 Write-BeyinMakbuz -Paths $p -Script 'geri-getirme-olc' -Outcome $kod -DurationMs $sw.ElapsedMilliseconds `
-    -Note "vaka=$n; vektor r1=$(Oran $vekR1) r2=$(Oran $vekR2) bos=$(Oran $vekBos); kelime r1=$(Oran $kelR1); esik=$Esik; bozukSha=$bozuk"
+    -Note "fusion=$Fusion topK=$TopK sonme=$(-not $SonmeYok); vaka=$n; vektor r1=$(Oran $vekR1) r2=$(Oran $vekR2) bos=$(Oran $vekBos); kelime r1=$(Oran $kelR1); esik=$Esik; bozukSha=$bozuk"
 
 if ($Json) { $rapor | ConvertTo-Json -Depth 5 } else {
-    "GERI GETIRME OLCUMU  ($kaynak; $n vaka, $($sw.ElapsedMilliseconds) ms)"
+    "GERI GETIRME OLCUMU  ($kaynak; $n vaka, $($sw.ElapsedMilliseconds) ms)$(if ($deney) { "  [DENEY: fusion=$Fusion topK=$TopK sonme=$(-not $SonmeYok)]" })"
     if ($vekHazir) { "  Vektor (bge-m3): rank-1 $(Oran $vekR1)  ilk-2 $(Oran $vekR2)  bos $(Oran $vekBos)  p50 $p50 ms" } else { '  Vektor: indeks hazir degil (beyin gom) - yalniz kelime olculdu' }
     "  Kelime         : rank-1 $(Oran $kelR1)  ilk-2 $(Oran $kelR2)  bos $(Oran $kelBos)"
     "  Esik (vektor rank-1 >= $Esik): $(if ($rapor.gecti) { 'GECTI' } else { 'DUSTU' })$(if ($bozuk) { "  - fixture sha uyusmazligi: $bozuk" })$(if ($eksik) { "  - silinmis not: $eksik" })"

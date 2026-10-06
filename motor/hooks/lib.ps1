@@ -178,6 +178,10 @@ function Get-BeyinAyarKayitlari {
         @{ Ad = 'BEYIN_BEKCI_COMMIT';   Varsayilan = '85';                   Secenekler = @();                          Aciklama = 'Kaynak bekcisi: commit yuzdesi esigi (50-99); asilinca oturum acilisinda tek uyari satiri' },
         @{ Ad = 'BEYIN_BEKCI_BOSTA_DK'; Varsayilan = '120';                  Secenekler = @();                          Aciklama = 'Kaynak bekcisi: bosta oturum esigi, dakika (10-1440)' },
         @{ Ad = 'BEYIN_CLAUDE_TAVAN';   Varsayilan = '9500';                 Secenekler = @();                          Aciklama = 'Claude Code acilis baglami toplam tavani, karakter (4000-9800). Claude Code 10.000 karakteri asan kanca ciktisini dosyaya atip modele ~2 KB onizleme verir (2026-10-05 transkriptten olculdu)' },
+        @{ Ad = 'BEYIN_BRIFING_KIME';   Varsayilan = 'claude';               Secenekler = @('claude', 'codex');         Aciklama = 'Sahipsiz pano kartinin brifingi kime gider (koordinator ajan). Sahipli kartta karsi ajan secilir.' },
+        @{ Ad = 'BEYIN_PANO_ONAY';      Varsayilan = 'zorunlu';              Secenekler = @('zorunlu', 'kapali');        Aciklama = 'Pano karti done icin insan onayi (sohbete onayla TASK-x ya da beyin pano onayla). kapali = eski davranis.' },
+        @{ Ad = 'BEYIN_KILL_GUARD';     Varsayilan = 'acik';                 Secenekler = @('acik', 'kapali');           Aciklama = 'Surec oldurme korumasi (PreToolUse kancasi, kayitliysa): ajanlari ad ile toptan olduren ve korunan PID hedefleyen komutlari reddeder. Kayit: kur.ps1 -KillGuard' },
+        @{ Ad = 'BEYIN_SONME';          Varsayilan = 'acik';                 Secenekler = @('acik', 'kapali');           Aciklama = 'Kullanim sonmesi: 14 gunde 5+ olculebilir enjeksiyonda hic acilmayan/anilmayan kavram notunun geri getirme skoru x0.6 (beyin kullanim 14 hesaplar; 14 gunden taze not muaf)' },
         @{ Ad = 'BEYIN_AGENTCHEF_KOK';  Varsayilan = (Join-Path $env:USERPROFILE 'Desktop\codex-chef'); Secenekler = @(); Aciklama = 'AgentChef checkout yolu (bekci: codex-process-hygiene.mjs; pano: coordination-board.mjs)' },
         @{ Ad = 'BEYIN_PANO_KOORDINATOR'; Varsayilan = 'leadership_coordinator'; Secenekler = @('backend_coordinator', 'devops_coordinator', 'leadership_coordinator', 'product_coordinator', 'qa_coordinator', 'ui_coordinator', 'marketing_coordinator'); Aciklama = 'beyin pano create icin varsayilan --owner-coordinator (AgentChef katalog koordinatoru); -Koordinator ile ezilir' },
         @{ Ad = 'BEYIN_BRAIN_CLI';   Varsayilan = '';                       Secenekler = @();                          Aciklama = 'brain-cli.mjs yolu (istege bagli, beyin yedek)' },
@@ -311,6 +315,13 @@ function Test-BeyinAyarDeger {
     } elseif ($Ad -eq 'BEYIN_PANO_KOORDINATOR') {
         $k = $v.Trim().ToLowerInvariant()
         if ($k -and $k -notlike '*_coordinator') { $k = "${k}_coordinator" }
+        $secenek = @((Get-BeyinAyarKayit -Ad $Ad).Secenekler)
+        if ($secenek -notcontains $k) {
+            $s.Ok = $false
+            $s.Hata = "gecerli degerler: $($secenek -join ' | ')  (verilen: '$v')"
+        } else { $s.Deger = $k }
+    } elseif ($Ad -eq 'BEYIN_BRIFING_KIME' -or $Ad -eq 'BEYIN_PANO_ONAY' -or $Ad -eq 'BEYIN_SONME' -or $Ad -eq 'BEYIN_KILL_GUARD') {
+        $k = $v.Trim().ToLowerInvariant()
         $secenek = @((Get-BeyinAyarKayit -Ad $Ad).Secenekler)
         if ($secenek -notcontains $k) {
             $s.Ok = $false
@@ -663,6 +674,13 @@ function Get-BeyinSessionState {
             # basmasin.
             $seenHandoff = @()
             if ($o.PSObject.Properties['seenHandoff'] -and $o.seenHandoff) { $seenHandoff = @($o.seenHandoff) }
+            # 'handoffDamga' (2026-10-06): prompt-counter aktarim klasoru damgasi (dosya
+            # sayisi + en yeni yazim); degismediyse JSON okunmaz. 'pid': oturumun ajan
+            # sureci (kill guard korunan PID kumesi). Set- tarafiyla BIRLIKTE eklendi.
+            $handoffDamga = ''
+            if ($o.PSObject.Properties['handoffDamga'] -and $o.handoffDamga) { $handoffDamga = [string]$o.handoffDamga }
+            $oturumPid = 0
+            if ($o.PSObject.Properties['pid'] -and $o.pid) { $oturumPid = [int]$o.pid }
             return @{
                 start       = [int64]$o.start
                 prompts     = [int]$o.prompts
@@ -673,11 +691,13 @@ function Get-BeyinSessionState {
                 pcGun       = $pcGun
                 herdrPane   = $herdrPane
                 seenHandoff = $seenHandoff
+                handoffDamga = $handoffDamga
+                pid         = $oturumPid
                 key         = $key
             }
         } catch { }
     }
-    return @{ start = 0; prompts = 0; cwd = ''; kavram = @(); agent = ''; pcSayi = 0; pcGun = ''; herdrPane = ''; seenHandoff = @(); key = $key }
+    return @{ start = 0; prompts = 0; cwd = ''; kavram = @(); agent = ''; pcSayi = 0; pcGun = ''; herdrPane = ''; seenHandoff = @(); handoffDamga = ''; pid = 0; key = $key }
 }
 
 function Set-BeyinSessionState {
@@ -703,7 +723,11 @@ function Set-BeyinSessionState {
     if ($State.ContainsKey('herdrPane') -and $State['herdrPane']) { $herdrPane = [string]$State['herdrPane'] }
     $seenHandoff = @()
     if ($State.ContainsKey('seenHandoff') -and $State['seenHandoff']) { $seenHandoff = @($State['seenHandoff']) }
-    $json = @{ start = $State.start; prompts = $State.prompts; cwd = $State.cwd; kavram = $kavram; agent = $agent; pcSayi = $pcSayi; pcGun = $pcGun; herdrPane = $herdrPane; seenHandoff = $seenHandoff } |
+    $handoffDamga = ''
+    if ($State.ContainsKey('handoffDamga') -and $State['handoffDamga']) { $handoffDamga = [string]$State['handoffDamga'] }
+    $oturumPid = 0
+    if ($State.ContainsKey('pid') -and $State['pid']) { $oturumPid = [int]$State['pid'] }
+    $json = @{ start = $State.start; prompts = $State.prompts; cwd = $State.cwd; kavram = $kavram; agent = $agent; pcSayi = $pcSayi; pcGun = $pcGun; herdrPane = $herdrPane; seenHandoff = $seenHandoff; handoffDamga = $handoffDamga; pid = $oturumPid } |
             ConvertTo-Json -Compress
     Write-BeyinText -Path $f -Text $json
 }
@@ -2787,13 +2811,45 @@ function Get-BeyinConceptIndex {
     return @($items.ToArray())
 }
 
+# KULLANIM SONMESI (BB2, 2026-10-06; AgentSpace usage ledger + decay dersi).
+# 'beyin kullanim 14' (Pazar gorevi) .state\kullanim-sonme.dat yazar: son 14 gunde
+# 5+ OLCULEBILIR enjeksiyonda hic acilmayan/anilmayan kavram notu x0.6 (14 gunden
+# taze not muaf). Kanca yolu yalniz bu dosyayi okur (ConvertFrom-Json yok, mtime
+# onbellekli). Esigi GECMIS adayin SIRASINI degistirir; esigi kendisi degistirmez.
+$script:BeyinSonmeOnbellek = $null; $script:BeyinSonmeDamga = 0
+function Get-BeyinKullanimSonme {
+    param([hashtable]$Paths)
+    $bos = @{}
+    try {
+        $ayar = 'acik'
+        try { $ayar = [string](Get-BeyinAyar 'BEYIN_SONME' (Get-BeyinAyarVars 'BEYIN_SONME')) } catch { }
+        if ($ayar -eq 'kapali') { return $bos }
+        $f = Join-Path $Paths.ScrState 'kullanim-sonme.dat'
+        if (-not (Test-Path -LiteralPath $f)) { return $bos }
+        $d = (Get-Item -LiteralPath $f).LastWriteTimeUtc.Ticks
+        if ($script:BeyinSonmeOnbellek -and $script:BeyinSonmeDamga -eq $d) { return $script:BeyinSonmeOnbellek }
+        $h = @{}
+        foreach ($s in [IO.File]::ReadAllLines($f)) {
+            $par = $s.Split([char]9)
+            if ($par.Count -lt 2) { continue }
+            $c = 0.0
+            if ([double]::TryParse($par[1], [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$c) -and $c -gt 0 -and $c -lt 1) {
+                $h[$par[0].Trim([char]0xFEFF).ToLowerInvariant()] = $c
+            }
+        }
+        $script:BeyinSonmeOnbellek = $h; $script:BeyinSonmeDamga = $d
+        return $h
+    } catch { return $bos }
+}
+
 function Find-BeyinRelevantConcepts {
     # Sorgu metnine en yakin kavramlari doner. Eslesme yoksa BOS dizi.
     param(
         [hashtable]$Paths,
         [string]$Query,
         [int]$EnFazla = 2,
-        [int]$Esik = 2          # kac AYRI terim tutmali (baslik terimi 2 sayar)
+        [int]$Esik = 2,         # kac AYRI terim tutmali (baslik terimi 2 sayar)
+        [switch]$SonmeYok
     )
     $qt = @(Get-BeyinKelimeler -Text $Query)
     if ($qt.Count -lt 2) { return @() }   # tek kelimelik prompt: sinyal yok
@@ -2823,6 +2879,12 @@ function Find-BeyinRelevantConcepts {
         }
     }
     if ($skorlu.Count -eq 0) { return @() }
+    if (-not $SonmeYok) {
+        $sn = Get-BeyinKullanimSonme -Paths $Paths
+        if ($sn.Count -gt 0) {
+            foreach ($x in $skorlu) { $sk = ([string]$x.Item.dosya).ToLowerInvariant(); if ($sn.ContainsKey($sk)) { $x.Skor = [math]::Round($x.Skor * $sn[$sk], 2) } }
+        }
+    }
     return @($skorlu.ToArray() | Sort-Object Skor -Descending | Select-Object -First $EnFazla)
 }
 
@@ -3435,15 +3497,15 @@ function Get-BeyinFailDetail {
         return ' [KIMLIK] oturum yok / kimlik gecersiz - yeniden denemekle gecmez, giris yap'
     }
 
-    $parts = @()
-    if ($Result.Err) { $parts += 'stderr: ' + (($Result.Err -replace '\s+', ' ').Trim()) }
-    # stderr bossa stdout'a bak - asil sebep genelde orada.
-    if (-not $Result.Err -and $Result.Out) {
-        $parts += 'stdout: ' + (($Result.Out -replace '\s+', ' ').Trim())
-    }
-    if ($parts.Count -eq 0) { return ' | (cikti yok)' }
-
-    $d = $parts -join ' ; '
+    # IKI AKIS BIRLIKTE (2026-10-06): eskiden stdout'a yalniz stderr BOSKEN
+    # bakiliyordu. CLI stderr'e bir UYARI bastiginda (taninmayan arac adi gibi) asil
+    # mesaj stdout'ta kalip atiliyordu ve asagidaki KOTA etiketi yalniz gorunen
+    # parcaya bakildigi icin eslesmiyordu (36 limit hatasi 'cikis-kodu' sayildi,
+    # bkz. Get-BeyinClaudeArgs). Simdi siniflama BIRLESIK metinde; gosterimde iki
+    # akis da var, sinyal tasiyan akis once gelir ki kesmede kaybolmasin.
+    $errT = (([string]$Result.Err) -replace '\s+', ' ').Trim()
+    $outT = (([string]$Result.Out) -replace '\s+', ' ').Trim()
+    if (-not $errT -and -not $outT) { return ' | (cikti yok)' }
 
     # Kota/limit basarisizligini AYRI etiketle: bu, yeniden denemekle gecmez.
     # Motor duvara vurup vurmadigini boyle ayirt eder.
@@ -3465,12 +3527,303 @@ function Get-BeyinFailDetail {
     # stderr ayiklamak gerekiyor. Yani buradaki yaklasim dogru, eksik olan
     # yalnizca dize listesiydi.
     # tr-TR: '(?i)' -match buyuk 'I' iceren mesajlari kacirir (RATE LIMIT). Test-BeyinMatch kultur-bagimsiz.
-    if (Test-BeyinMatch -Text $d -Pattern 'usage limit|rate limit|quota|too many requests|429|overloaded|hit your [a-z]* ?limit|credit balance is too low|spend limit') {
-        $d = '[KOTA/LIMIT] ' + $d
+    $kotaRx = 'usage limit|rate limit|quota|too many requests|429|overloaded|hit your [a-z]* ?limit|credit balance is too low|spend limit'
+    $kota = Test-BeyinMatch -Text $__metin -Pattern $kotaRx
+    $parts = New-Object System.Collections.Generic.List[string]
+    if ($errT) { $parts.Add('stderr: ' + $errT) }
+    if ($outT) {
+        if ($kota -and $errT -and -not (Test-BeyinMatch -Text $errT -Pattern $kotaRx)) { $parts.Insert(0, 'stdout: ' + $outT) }
+        else { $parts.Add('stdout: ' + $outT) }
     }
-
+    $onEk = $(if ($kota) { '[KOTA/LIMIT] ' } else { '' })
+    if ($parts.Count -eq 2) {
+        $yer = [math]::Max(2, $MaxLen - $onEk.Length - 3)
+        $a = $parts[0]; $b = $parts[1]
+        if ($a.Length + $b.Length -gt $yer) {
+            $yari = [int][math]::Floor($yer / 2)
+            if ($a.Length -le $yari) { $b = $b.Substring(0, [math]::Max(0, $yer - $a.Length)) }
+            elseif ($b.Length -le $yari) { $a = $a.Substring(0, [math]::Max(0, $yer - $b.Length)) }
+            else { $a = $a.Substring(0, $yari); $b = $b.Substring(0, $yer - $yari) }
+        }
+        $d = $a + ' ; ' + $b
+    } else { $d = $parts[0] }
+    $d = $onEk + $d
     if ($d.Length -gt $MaxLen) { $d = $d.Substring(0, $MaxLen) }
     return ' | ' + $d
+}
+
+# MODEL LIMITI ERTELEME (2026-10-06, AgentSpace limitDetect/resumeDaemon dersi).
+# Limit mesajindan 'ne zaman tekrar denenir' cikarilir; o saate kadar ozetleyici
+# denenmez (is kuyrukta bekler, butce yakilmaz). Ilk basarili flush/compile
+# kaydi temizler. Bulunamazsa +60 dk; tavan +24 saat.
+function Get-BeyinLimitReset {
+    param([string]$Text, [datetime]$Simdi = (Get-Date))
+    $r = @{ Ok = $false; Until = $Simdi.AddMinutes(60); Kaynak = 'varsayilan-60dk' }
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $r }
+    $t = [string]$Text
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    try {
+        # 1) Goreli: 'try again in 2 hours', 'resets in 45 minutes', 'retry after 120 seconds', 'Retry-After: 120'
+        $m = [regex]::Match($t, '(?i)(?:try again|retry|resets?|available)\s+(?:in|after)\s+(\d+)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b')
+        if ($m.Success) {
+            $n = [double]$m.Groups[1].Value; $birim = $m.Groups[2].Value.ToLowerInvariant()
+            $dk = $(if ($birim.StartsWith('h')) { $n * 60 } elseif ($birim.StartsWith('m')) { $n } else { $n / 60.0 })
+            $r.Until = $Simdi.AddMinutes([math]::Max(1, $dk)); $r.Ok = $true; $r.Kaynak = 'goreli'
+        }
+        if (-not $r.Ok) {
+            $m = [regex]::Match($t, '(?i)retry-after\s*[:=]\s*(\d+)')
+            if ($m.Success) { $r.Until = $Simdi.AddSeconds([math]::Max(60, [double]$m.Groups[1].Value)); $r.Ok = $true; $r.Kaynak = 'retry-after' }
+        }
+        # 2) Epoch: Codex rate_limits 'resets_at': 1791234567
+        if (-not $r.Ok) {
+            $m = [regex]::Match($t, '(?i)resets?_?at"?\s*[:=]\s*(\d{10})\b')
+            if ($m.Success) { $r.Until = [DateTimeOffset]::FromUnixTimeSeconds([int64]$m.Groups[1].Value).LocalDateTime; $r.Ok = $true; $r.Kaynak = 'epoch' }
+        }
+        # 3) ISO-8601 zaman damgasi
+        if (-not $r.Ok) {
+            $m = [regex]::Match($t, '\b(20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2}))')
+            if ($m.Success) { $r.Until = ([DateTimeOffset]::Parse($m.Groups[1].Value, $inv)).LocalDateTime; $r.Ok = $true; $r.Kaynak = 'iso' }
+        }
+        # 4a) Tarih + saat (2026-10-06): haftalik limit 'resets Sep 28, 4am' (yerel; gecmisse gelecek yil).
+        # Eskiden saat dali 'resets Sep' gorup eslesmiyor, +60 dk varsayilana dusuyordu.
+        if (-not $r.Ok) {
+            $m = [regex]::Match($t, '(?i)\bresets?\s+(?:at\s+|on\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b')
+            if ($m.Success) {
+                $ay = [array]::IndexOf([string[]]@('jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'), $m.Groups[1].Value.ToLowerInvariant()) + 1
+                $gun = [int]$m.Groups[2].Value; $sa = [int]$m.Groups[3].Value
+                $dkk = $(if ($m.Groups[4].Value) { [int]$m.Groups[4].Value } else { 0 })
+                $ap = $m.Groups[5].Value.ToLowerInvariant()
+                if ($ap -eq 'pm' -and $sa -lt 12) { $sa += 12 } elseif ($ap -eq 'am' -and $sa -eq 12) { $sa = 0 }
+                if ($ay -ge 1 -and $gun -ge 1 -and $gun -le [DateTime]::DaysInMonth($Simdi.Year, $ay) -and $sa -le 23 -and $dkk -le 59) {
+                    $hedef = New-Object DateTime($Simdi.Year, $ay, $gun, $sa, $dkk, 0)
+                    if ($hedef -le $Simdi) { $hedef = $hedef.AddYears(1) }
+                    $r.Until = $hedef; $r.Ok = $true; $r.Kaynak = 'tarih'
+                }
+            }
+        }
+        # 4) Saat: 'resets at 3pm', 'resets 3:30 PM', 'reset at 15:00' (yerel saat; gecmisse yarin)
+        if (-not $r.Ok) {
+            $m = [regex]::Match($t, '(?i)\bresets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b')
+            if (-not $m.Success) { $m = [regex]::Match($t, '(?i)\bresets?\s+(?:at\s+)?(\d{1,2}):(\d{2})()\b') }
+            if ($m.Success) {
+                $sa = [int]$m.Groups[1].Value
+                $dkk = $(if ($m.Groups[2].Value) { [int]$m.Groups[2].Value } else { 0 })
+                $ap = $m.Groups[3].Value.ToLowerInvariant()
+                if ($ap -eq 'pm' -and $sa -lt 12) { $sa += 12 } elseif ($ap -eq 'am' -and $sa -eq 12) { $sa = 0 }
+                if ($sa -le 23 -and $dkk -le 59) {
+                    $hedef = $Simdi.Date.AddHours($sa).AddMinutes($dkk)
+                    if ($hedef -le $Simdi) { $hedef = $hedef.AddDays(1) }
+                    $r.Until = $hedef; $r.Ok = $true; $r.Kaynak = 'saat'
+                }
+            }
+        }
+    } catch { }
+    if ($r.Until -gt $Simdi.AddHours(24)) { $r.Until = $Simdi.AddHours(24) }
+    if ($r.Until -lt $Simdi.AddMinutes(1)) { $r.Until = $Simdi.AddMinutes(1) }
+    return $r
+}
+
+function Set-BeyinLimitErtele {
+    param([hashtable]$Paths, [datetime]$Until, [string]$Kaynak = '', [string]$Backend = '', [string]$Ornek = '')
+    try {
+        $inv = [Globalization.CultureInfo]::InvariantCulture
+        $ornekM = ''
+        if ($Ornek) {
+            $pr = Protect-BeyinSecrets -Text $Ornek -Vault $Paths.Vault
+            if ([int]$pr.Failed -eq 0) { $ornekM = [string]$pr.Text; if ($ornekM.Length -gt 120) { $ornekM = $ornekM.Substring(0, 120) } }
+        }
+        $o = [ordered]@{ v = 1; until = $Until.ToString('o', $inv); kaynak = $Kaynak; backend = $Backend; ts = (Get-Date).ToString('o', $inv); ornek = $ornekM }
+        Write-BeyinText -Path (Join-Path $Paths.ScrState 'limit-ertele.json') -Text (ConvertTo-Json -InputObject $o -Compress)
+        return $true
+    } catch { return $false }
+}
+
+function Test-BeyinLimitErtele {
+    param([hashtable]$Paths)
+    $r = @{ Aktif = $false; Until = $null; Kaynak = '' }
+    try {
+        $f = Join-Path $Paths.ScrState 'limit-ertele.json'
+        if (-not (Test-Path -LiteralPath $f)) { return $r }
+        $o = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json
+        $u = [datetime]::Parse([string]$o.until, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        if ($u.Kind -eq [DateTimeKind]::Utc) { $u = $u.ToLocalTime() }
+        if ($u -gt (Get-Date)) { $r.Aktif = $true; $r.Until = $u; $r.Kaynak = [string]$o.kaynak }
+    } catch { }
+    return $r
+}
+
+function Clear-BeyinLimitErtele {
+    param([hashtable]$Paths)
+    try { $f = Join-Path $Paths.ScrState 'limit-ertele.json'; if (Test-Path -LiteralPath $f) { [IO.File]::Delete($f) } } catch { }
+}
+
+# ============================================================================
+# MALIYET OLCUMU (2026-10-06, AgentSpace token cost dersi; BB1)
+# ----------------------------------------------------------------------------
+# Kaynak: Claude Code transkriptindeki assistant satirlarinin message.usage alani
+# (ayni yanit birden cok satira bolunur, message.id ile TEKILLESTIRILIR) ve Codex
+# rollout'undaki token_count olayinin KUMULATIF total_token_usage alani (son deger
+# eksi onceki olcum). Ikisi de RESMI OLMAYAN bicimlerdir: beklenen alan yoksa satir
+# 'taninmayan' sayilir, tahmin uretilmez. Dolar degeri API ESDEGERIDIR (fiyat.json).
+# ============================================================================
+$script:BeyinFiyatOnbellek = $null
+
+function Get-BeyinFiyatTablosu {
+    param([hashtable]$Paths)
+    if ($script:BeyinFiyatOnbellek) { return $script:BeyinFiyatOnbellek }
+    $r = @{ Ok = $false; Tarih = ''; Modeller = @(); Hata = '' }
+    try {
+        $f = Join-Path $Paths.Vault 'motor\scripts\fiyat.json'
+        $o = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json
+        $r.Tarih = [string]$o.tarih
+        # Uzun onek once: 'claude-opus-5-5' 'claude-opus-5'ten once eslesmeli.
+        $r.Modeller = @($o.modeller | Sort-Object { ([string]$_.onek).Length } -Descending)
+        $r.Ok = ($r.Modeller.Count -gt 0)
+    } catch { $r.Hata = $_.Exception.Message }
+    $script:BeyinFiyatOnbellek = $r
+    return $r
+}
+
+function Get-BeyinUsdTahmini {
+    # $null = bu model icin fiyat yok (Codex/bilinmeyen). Jeton alanlari:
+    # In (onbelleksiz girdi), Out, Cw5, Cw1h (onbellek yazma), Cr (onbellek okuma).
+    param($Tablo, [string]$Model, [double]$In, [double]$Out, [double]$Cw5, [double]$Cw1h, [double]$Cr, [bool]$Fast = $false)
+    if (-not $Tablo -or -not $Tablo.Ok -or -not $Model) { return $null }
+    $m = $null
+    foreach ($x in $Tablo.Modeller) { if ($Model.StartsWith([string]$x.onek, [StringComparison]::OrdinalIgnoreCase)) { $m = $x; break } }
+    if (-not $m) { return $null }
+    $g = [double]$m.girdi
+    $usd = ($In * $g + $Out * [double]$m.cikti + $Cw5 * $g * 1.25 + $Cw1h * $g * 2.0 + $Cr * [double]$m.okuma) / 1000000.0
+    if ($Fast -and $m.hizliCarpan) { $usd *= [double]$m.hizliCarpan }
+    return $usd
+}
+
+function Measure-BeyinTranscriptUsage {
+    # Bir transkriptin $Offset'ten sonrasini okur. Doner:
+    #   Ok, Offset (son TAM satirin sonu), SonId, Kayitlar (claude), Taninmayan,
+    #   CodexToplam @{In;Cr;Out} + CodexTs + Model (codex), Cwd, SessionId.
+    # Claude: yalniz '"usage"' iceren assistant satirlari ayristirilir (ConvertFrom-Json
+    # YOK; 2 GB'lik ilk tarama icin satir basina regex). Codex: kumulatif sayac
+    # oldugu icin dosyanin yalniz SONU okunur (once 2 MB, bulunamazsa 8 MB).
+    param([string]$Path, [string]$Agent, [long]$Offset = 0, [string]$SonId = '')
+    $r = @{ Ok = $false; Offset = $Offset; SonId = $SonId; Kayitlar = (New-Object System.Collections.Generic.List[object])
+            Taninmayan = 0; CodexToplam = $null; CodexTs = ''; Model = ''; Cwd = ''; SessionId = ''; Hata = '' }
+    $fs = $null
+    try {
+        $fs = New-Object System.IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $boy = $fs.Length
+        if ($boy -lt $Offset) { $Offset = 0; $r.SonId = '' }   # dosya kisaldi/yeniden yazildi
+        $utf8 = New-Object System.Text.UTF8Encoding($false)
+        if ($Agent -eq 'codex') {
+            if ($Offset -eq 0) {
+                $bas = New-Object byte[] ([int][math]::Min(262144, $boy))
+                $null = $fs.Read($bas, 0, $bas.Length)
+                $t0 = $utf8.GetString($bas)
+                $mc = [regex]::Match($t0, '"cwd":"((?:[^"\\]|\\.)*)"')
+                if ($mc.Success) { $r.Cwd = ($mc.Groups[1].Value -replace '\\\\', '\') }
+                $ms = [regex]::Match($t0, '"session_id":"([^"]+)"')
+                if ($ms.Success) { $r.SessionId = $ms.Groups[1].Value }
+                $mt0 = [regex]::Match($t0, '"type":"turn_context"[\s\S]{0,4000}?"model":"([^"]+)"')
+                if ($mt0.Success) { $r.Model = $mt0.Groups[1].Value }
+            }
+            foreach ($kuyruk in @(2MB, 8MB)) {
+                $bas = [long][math]::Max($Offset, $boy - $kuyruk)
+                if ($bas -ge $boy) { break }
+                $n = [int]($boy - $bas)
+                $buf = New-Object byte[] $n
+                $null = $fs.Seek($bas, [IO.SeekOrigin]::Begin)
+                $okunan = 0; while ($okunan -lt $n) { $k = $fs.Read($buf, $okunan, $n - $okunan); if ($k -le 0) { break }; $okunan += $k }
+                $t = $utf8.GetString($buf, 0, $okunan)
+                $i = $t.LastIndexOf('"total_token_usage":{')
+                if ($i -ge 0) {
+                    $sat0 = $t.LastIndexOf("`n", $i) + 1
+                    $sat = $t.Substring($sat0, [math]::Min(4000, $t.Length - $sat0))
+                    $u = $t.Substring($i, [math]::Min(600, $t.Length - $i))
+                    $mi = [regex]::Match($u, '"input_tokens":(\d+)'); $mk = [regex]::Match($u, '"cached_input_tokens":(\d+)'); $mo = [regex]::Match($u, '"output_tokens":(\d+)')
+                    if ($mi.Success -and $mo.Success) {
+                        $inT = [double]$mi.Groups[1].Value; $crT = $(if ($mk.Success) { [double]$mk.Groups[1].Value } else { 0 })
+                        $r.CodexToplam = @{ In = [math]::Max(0, $inT - $crT); Cr = $crT; Out = [double]$mo.Groups[1].Value }
+                        $mt = [regex]::Match($sat, '"timestamp":"([^"]+)"'); if ($mt.Success) { $r.CodexTs = $mt.Groups[1].Value }
+                    } else { $r.Taninmayan++ }
+                    $j = $t.LastIndexOf('"type":"turn_context"')
+                    if ($j -ge 0) { $mm = [regex]::Match($t.Substring($j, [math]::Min(4000, $t.Length - $j)), '"model":"([^"]+)"'); if ($mm.Success) { $r.Model = $mm.Groups[1].Value } }
+                    break
+                }
+            }
+            $r.Offset = $boy; $r.Ok = $true
+            return $r
+        }
+
+        # --- Claude: Offset'ten sona, parca parca, yalniz tam satirlar ---
+        $null = $fs.Seek($Offset, [IO.SeekOrigin]::Begin)
+        $buf = New-Object byte[] (8MB)
+        $artik = New-Object System.IO.MemoryStream
+        $sonId = $r.SonId
+        while ($true) {
+            $k = $fs.Read($buf, 0, $buf.Length)
+            if ($k -le 0) { break }
+            $son = [Array]::LastIndexOf($buf, [byte]10, $k - 1)
+            if ($son -lt 0) { $artik.Write($buf, 0, $k); continue }
+            $artik.Write($buf, 0, $son + 1)
+            $parca = $utf8.GetString($artik.GetBuffer(), 0, [int]$artik.Length)
+            $tamBayt = [long]$artik.Length
+            $artik.SetLength(0)
+            if ($son + 1 -lt $k) { $artik.Write($buf, $son + 1, $k - $son - 1) }
+            foreach ($sat in $parca.Split("`n")) {
+                if ($sat.IndexOf('"usage":{', [StringComparison]::Ordinal) -lt 0) { continue }
+                if ($sat.IndexOf('"type":"assistant"', [StringComparison]::Ordinal) -lt 0) { continue }
+                $im = $sat.IndexOf('"message":{', [StringComparison]::Ordinal)
+                $iu = $sat.LastIndexOf('"usage":{', [StringComparison]::Ordinal)
+                if ($im -lt 0 -or $iu -lt $im) { $r.Taninmayan++; continue }
+                $msg = $sat.Substring($im, [math]::Min(400, $sat.Length - $im))
+                $mId = [regex]::Match($msg, '"id":"(msg_[A-Za-z0-9_]+)"')
+                $mMo = [regex]::Match($msg, '"model":"([^"]+)"')
+                $model = $(if ($mMo.Success) { $mMo.Groups[1].Value } else { '' })
+                if ($model.StartsWith('<')) { continue }   # <synthetic> API hata satiri
+                $id = $(if ($mId.Success) { $mId.Groups[1].Value } else { '' })
+                if ($id -and $id -eq $sonId) { continue }   # ayni yanitin devam satiri
+                $u = $sat.Substring($iu, [math]::Min(1500, $sat.Length - $iu))
+                $mi = [regex]::Match($u, '"input_tokens":(\d+)'); $mo = [regex]::Match($u, '"output_tokens":(\d+)')
+                if (-not ($mi.Success -and $mo.Success)) { $r.Taninmayan++; continue }
+                $mcw = [regex]::Match($u, '"cache_creation_input_tokens":(\d+)'); $mcr = [regex]::Match($u, '"cache_read_input_tokens":(\d+)')
+                $m1h = [regex]::Match($u, '"ephemeral_1h_input_tokens":(\d+)')
+                $mSp = [regex]::Match($u, '"speed":"(\w+)"')
+                $cw = $(if ($mcw.Success) { [double]$mcw.Groups[1].Value } else { 0 })
+                $cw1h = $(if ($m1h.Success) { [math]::Min($cw, [double]$m1h.Groups[1].Value) } else { 0 })
+                $in = [double]$mi.Groups[1].Value; $cr = $(if ($mcr.Success) { [double]$mcr.Groups[1].Value } else { 0 })
+                $its = $sat.LastIndexOf('"timestamp":"', [StringComparison]::Ordinal)
+                $ts = $(if ($its -ge 0) { $e = $sat.IndexOf('"', $its + 13); $sat.Substring($its + 13, $e - $its - 13) } else { '' })
+                if (-not $r.SessionId) { $mS = [regex]::Match($sat, '"sessionId":"([^"]+)"'); if ($mS.Success) { $r.SessionId = $mS.Groups[1].Value } }
+                if (-not $r.Cwd) { $mC = [regex]::Match($sat, '"cwd":"((?:[^"\\]|\\.)*)"'); if ($mC.Success) { $r.Cwd = ($mC.Groups[1].Value -replace '\\\\', '\') } }
+                $r.Kayitlar.Add(@{ Ts = $ts; Model = $model; In = $in; Out = [double]$mo.Groups[1].Value; Cw5 = $cw - $cw1h; Cw1h = $cw1h; Cr = $cr
+                                   Fast = ($mSp.Success -and $mSp.Groups[1].Value -eq 'fast'); Ctx = ($in + $cw + $cr) })
+                if ($id) { $sonId = $id }
+            }
+            $Offset += $tamBayt
+        }
+        $r.Offset = $Offset; $r.SonId = $sonId; $r.Ok = $true
+    } catch { $r.Hata = $_.Exception.Message } finally { if ($fs) { $fs.Dispose() } }
+    return $r
+}
+
+function Get-BeyinClaudeArgs {
+    # Ozetleyici 'claude -p' arguman dizesi TEK YERDE (2026-10-06). Invoke-BeyinClaude
+    # ve doktorun model cagirmayan 'ozetleyici bayraklari' sondasi ayni dizeyi kullanir.
+    #
+    # --tools "": yerlesik araclarin TAMAMI kapali (CLI yardimi: 'Use "" to disable
+    # all tools'). Onceki --disallowed-tools ad listesi CLI surumuyle kayiyordu:
+    # 2.1.268 ve 2.1.290 'MultiEdit' adini tanimiyor, her cagrida stderr'e
+    # 'Permission deny rule "MultiEdit" matches no known tool' UYARISI basiyordu.
+    # Uyari cagriyi durdurmuyordu ama stderr hic bos kalmadigi icin
+    # Get-BeyinFailDetail stdout'taki asil mesaji atiyordu: 2026-10-06 00:31-03:49
+    # arasi 36 flush 'You've hit your session limit - resets 3:50am' aldi, hepsi
+    # 'cikis-kodu' sayildi, butce iade edilmedi, erteleme kurulmadi.
+    # Bos arguman dusurulurse --tools degersiz kalir ve CLI ACIK hata verir (ardindan
+    # gelen --no-session-persistence bir secenektir, deger olarak yutulmaz).
+    # --no-session-persistence: ozetleyici transkriptleri ~/.claude/projects altina
+    # yazilmasin (2006 beyin-engine-cwd dokumu olculmustu).
+    param([string]$Model = 'haiku')
+    return ('-p --model ' + $Model + ' --strict-mcp-config --tools "" --no-session-persistence')
 }
 
 function Invoke-BeyinClaude {
@@ -3565,8 +3918,8 @@ function Invoke-BeyinClaude {
     $psi.FileName               = $claude
     # Arguman dizesi: hicbir deger bosluk icermiyor, duz birlestirme guvenli.
     # --strict-mcp-config + --mcp-config VERMEMEK = hic MCP sunucusu yuklenmez.
-    # --disallowed-tools: ozetleyici arac cagirmaya ihtiyac duymuyor; prompt'ta
-    # rica etmek yerine mekanik olarak yasakliyoruz.
+    # --tools "": ozetleyici arac cagirmaya ihtiyac duymuyor; prompt'ta rica etmek
+    # yerine yerlesik araclarin TAMAMINI mekanik olarak kapatiyoruz (Get-BeyinClaudeArgs).
     #
     # --bare KULLANILMIYOR ve bu bilincli. Resmi belge onu "scripted/SDK
     # cagrilari icin onerilen mod" diye tanimliyor ve kancalari/LSP/plugin'i
@@ -3577,10 +3930,7 @@ function Invoke-BeyinClaude {
     # --bare kimlik dogrulamayi da dusuruyor; eklenseydi HER ozetleme cokerdi.
     # Kendi kancalarimiza karsi korunma zaten BEYIN_CHILD ile saglaniyor
     # (Test-BeyinChild her kancanin ilk satirinda cikis yapiyor).
-    $psi.Arguments = '-p --model ' + $Model +
-                     ' --strict-mcp-config' +
-                     ' --disallowed-tools Bash Read Write Edit MultiEdit NotebookEdit WebFetch WebSearch Glob Grep Task Agent Skill TodoWrite BashOutput KillShell ToolSearch' +
-                     ' --no-session-persistence'
+    $psi.Arguments = Get-BeyinClaudeArgs -Model $Model
     # 2026-10-05 (kod incelemesi): Agent (Task'in yeni adi), Skill, MultiEdit,
     # BashOutput/KillShell, ToolSearch listede yoktu - guvenilmez transkript
     # ozetleyiciye Skill/Agent cagrisi yaptirabilirdi. --no-session-persistence:
@@ -4505,6 +4855,256 @@ function Update-BeyinAktarimlarMd {
     return $r
 }
 
+function Add-BeyinHandoff {
+    # TEK KAYIT YOLU (2026-10-06): aktar.ps1 ve pano brifingi ayni fonksiyondan yazar.
+    # Sema v2: kind (soru|brifing|devir), ref (tekillestirme anahtari), coordinator.
+    # Alanlar Protect-BeyinSecrets'ten FAIL-CLOSED gecer; yazim geri okunur.
+    # Donus: @{ Ok; Id; Hata; Kod; Maske }  Kod: KAYDEDILDI | BOS | REDAKSIYON_DUSTU | YAZILAMADI
+    param([hashtable]$Paths, [string]$Metin, [string]$Kime, [string]$Kanit = '', [string]$Kapsam = '', [string]$Risk = '',
+          [string]$Sonraki = '', [string]$Proje = '', [string]$Kind = 'soru', [string]$Ref = '', [string]$Coordinator = '',
+          [string]$FromAgent = '', [string]$FromSession = '', [switch]$GorunumYok)
+    $r = @{ Ok = $false; Id = ''; Hata = ''; Kod = ''; Maske = 0 }
+    $kisalt = { param([string]$T, [int]$Max) $t = ([string]$T -replace '\s+', ' ').Trim(); if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max - 3) + '...' }; $t }
+    $alanlar = [ordered]@{ question = (& $kisalt $Metin 600); evidence = (& $kisalt $Kanit 300); scope = (& $kisalt $Kapsam 300); risk = (& $kisalt $Risk 300); next = (& $kisalt $Sonraki 300) }
+    if (-not $alanlar.question) { $r.Kod = 'BOS'; $r.Hata = 'bos soru/handoff metni'; return $r }
+    foreach ($ad in @($alanlar.Keys)) {
+        if (-not $alanlar[$ad]) { continue }
+        $prot = Protect-BeyinSecrets -Text $alanlar[$ad] -Vault $Paths.Vault
+        if ([int]$prot.Failed -gt 0) { $r.Kod = 'REDAKSIYON_DUSTU'; $r.Hata = "$($prot.Failed) desen uygulanamadi"; return $r }
+        $alanlar[$ad] = $prot.Text
+        $r.Maske += [int]$prot.Redactions
+    }
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $id = (Get-Date).ToString('yyyyMMddTHHmmss', $inv) + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 4))
+    $kayit = [ordered]@{
+        v = 2; id = $id; ts = (Get-Date).ToString('o', $inv)
+        from = [ordered]@{ agent = $FromAgent; session = $FromSession; project = $Proje }
+        to = $Kime; kind = $(if ($Kind) { $Kind } else { 'soru' }); ref = $Ref; coordinator = $Coordinator
+        question = $alanlar.question; evidence = $alanlar.evidence; scope = $alanlar.scope; risk = $alanlar.risk; next = $alanlar.next
+        status = 'acik'; doneBy = ''; doneTs = ''
+    }
+    $yaz = Set-BeyinHandoff -Paths $Paths -Kayit $kayit
+    if (-not $yaz.Ok) { $r.Kod = 'YAZILAMADI'; $r.Hata = $yaz.Hata; return $r }
+    $geri = Get-BeyinHandoff -Paths $Paths -Id $id
+    if (-not $geri -or [string]$geri.question -ne [string]$alanlar.question) { $r.Kod = 'YAZILAMADI'; $r.Hata = 'geri okuma farkli ya da yok'; return $r }
+    if (-not $GorunumYok) { $null = Update-BeyinAktarimlarMd -Paths $Paths }
+    $r.Ok = $true; $r.Id = $id; $r.Kod = 'KAYDEDILDI'
+    return $r
+}
+
+# ============================================================================
+# KORUNAN SURECLER (BB5, 2026-10-06): kill guard ve session-start kullanir.
+# ============================================================================
+function Get-BeyinAtaZinciri {
+    # Verilen PID'den yukari ata zinciri: @(@{ Pid; Ad }) (kendisi dahil). CIM, seviye basina ~40 ms.
+    param([int]$ProcessId = $PID, [int]$Derinlik = 8)
+    $z = New-Object System.Collections.Generic.List[object]
+    $cur = $ProcessId
+    for ($i = 0; $i -lt $Derinlik -and $cur -gt 0; $i++) {
+        try { $w = Get-CimInstance Win32_Process -Filter "ProcessId = $cur" -ErrorAction Stop } catch { break }
+        if (-not $w) { break }
+        $z.Add(@{ Pid = [int]$w.ProcessId; Ad = [string]$w.Name })
+        $ust = [int]$w.ParentProcessId
+        if ($ust -eq $cur -or $ust -le 4) { break }
+        $cur = $ust
+    }
+    return $z
+}
+
+function Get-BeyinAjanPid {
+    # Bu kancayi baslatan ajan sureci: ata zincirinde ilk claude/codex/node.
+    param([int]$ProcessId = $PID)
+    foreach ($a in @(Get-BeyinAtaZinciri -ProcessId $ProcessId)) {
+        if ([string]$a.Ad -match '^(claude|codex|node)(\.exe)?$') { return [int]$a.Pid }
+    }
+    return 0
+}
+
+function Get-BeyinKorunanPid {
+    # PID -> aciklama. Kaynaklar: bu surecin ata zinciri, son 24 saatte guncellenmis
+    # oturum durumlarindaki canli ajan PID'leri, .state\korunan-pid.json {"pids":[..]}.
+    param([hashtable]$Paths)
+    $h = @{}
+    foreach ($a in @(Get-BeyinAtaZinciri -ProcessId $PID)) { if ($a.Pid -ne $PID) { $h[[int]$a.Pid] = "ata surec: $($a.Ad)" } }
+    try {
+        $sinir = (Get-Date).AddHours(-24)
+        foreach ($f in @(Get-ChildItem -LiteralPath $Paths.Sessions -Filter '*.json' -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $sinir })) {
+            $ham = [IO.File]::ReadAllText($f.FullName)
+            $m = [regex]::Match($ham, '"pid"\s*:\s*(\d+)')
+            if ($m.Success -and [int]$m.Groups[1].Value -gt 0) {
+                $sp = [int]$m.Groups[1].Value
+                if (Get-Process -Id $sp -ErrorAction SilentlyContinue) { if (-not $h.ContainsKey($sp)) { $h[$sp] = 'ajan oturumu' } }
+            }
+        }
+    } catch { }
+    try {
+        $kf = Join-Path $Paths.ScrState 'korunan-pid.json'
+        if (Test-Path -LiteralPath $kf) {
+            foreach ($m in [regex]::Matches([IO.File]::ReadAllText($kf), '\d+')) { $n = [int]$m.Value; if ($n -gt 4 -and -not $h.ContainsKey($n)) { $h[$n] = 'korunan-pid.json' } }
+        }
+    } catch { }
+    return $h
+}
+
+function Close-BeyinHandoff {
+    # Acik aktarimi kapatir (status=tamam). Zaten kapaliysa $false.
+    param([hashtable]$Paths, [string]$Id, [string]$DoneBy = '')
+    try {
+        $h = Get-BeyinHandoff -Paths $Paths -Id $Id
+        if (-not $h -or [string]$h.status -ne 'acik') { return $false }
+        $h.status = 'tamam'; $h.doneBy = $DoneBy; $h.doneTs = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+        return [bool](Set-BeyinHandoff -Paths $Paths -Kayit $h).Ok
+    } catch { return $false }
+}
+
+function Get-BeyinDevirMetni {
+    # Flush ozetindeki '**Devir:**' bolumu (sonraki '**Baslik:**' satirina ya da sona kadar).
+    # 'yok' ya da 12 karakterden kisa ise bos dize.
+    param([string]$Ozet)
+    if (-not $Ozet) { return '' }
+    $m = [regex]::Match($Ozet, '(?ms)^\*\*Devir:\*\*[ \t]*(.*?)(?=^\*\*[^*\r\n]+:\*\*|\z)')
+    if (-not $m.Success) { return '' }
+    $t = ($m.Groups[1].Value -replace '\s+', ' ').Trim()
+    if ($t.Length -lt 12 -or $t -match '^(?i)\(?yok\)?\.?$') { return '' }
+    return $t
+}
+
+function Add-BeyinDevir {
+    # DEVIR (BB3, 2026-10-06; AgentSpace handoff dersi): oturum kapanirken ya da
+    # sikistirilmadan once ozetleyicinin yazdigi "nerede kaldim / siradaki adim /
+    # dokunulmayacak dosyalar" metni, AYNI AJANIN AYNI PROJEDEKI bir sonraki acilisina
+    # TEK ATIMLIK aktarim olarak gider (gosterilince kapanir). Ayni oturumun onceki
+    # acik devri kapatilir: gecerli olan son devirdir.
+    param([hashtable]$Paths, [string]$Ozet, [string]$Agent, [string]$Proje, [string]$SessionKey)
+    $r = @{ Ok = $false; Id = ''; Kod = 'YOK' }
+    $metin = Get-BeyinDevirMetni -Ozet $Ozet
+    if (-not $metin) { return $r }
+    $ref = "devir@$SessionKey"
+    foreach ($h in @(Get-BeyinHandoffListe -Paths $Paths)) {
+        if ([string]$h.kind -eq 'devir' -and [string]$h.ref -eq $ref) { $null = Close-BeyinHandoff -Paths $Paths -Id ([string]$h.id) -DoneBy 'devir (yenisi yazildi)' }
+    }
+    $a = Add-BeyinHandoff -Paths $Paths -Metin $metin -Kime $Agent -Proje $Proje -Kind 'devir' -Ref $ref -FromAgent $Agent -FromSession $SessionKey
+    $r.Ok = [bool]$a.Ok; $r.Id = [string]$a.Id; $r.Kod = [string]$a.Kod
+    return $r
+}
+
+function Sync-BeyinPanoBrifing {
+    # TUR BASI BRIFING (2026-10-06, AgentSpace briefingLedger dersi): pano karti review
+    # ya da blocked durumuna gecince karsi ajana (koordinator tarafina) TEK brifing
+    # aktarimi yazilir; ayni gecis (kart@durum@gecis-zamani) bir daha yazilmaz, kart
+    # ilerleyince eski brifing kendiliginden kapanir. Node BASLATILMAZ; board.json
+    # damgasi degismediyse dosya bile okunmaz (~1 ms).
+    param([hashtable]$Paths, [string]$Tetik = '')
+    $r = @{ Yeni = 0; Kapanan = 0; Ms = 0 }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        if (-not $Paths.Board -or -not (Test-Path -LiteralPath $Paths.Board)) { return $r }
+        $damgaF = Join-Path $Paths.ScrState 'pano-brifing-son.dat'
+        $mt = [string](Get-Item -LiteralPath $Paths.Board).LastWriteTimeUtc.Ticks
+        $eski = ''
+        if (Test-Path -LiteralPath $damgaF) { try { $eski = ([IO.File]::ReadAllText($damgaF)).Trim() } catch { } }
+        if ($eski -eq $mt) { $r.Ms = [int]$sw.ElapsedMilliseconds; return $r }
+        $st = Get-Content -LiteralPath $Paths.Board -Raw -Encoding UTF8 | ConvertFrom-Json
+        $inv = [Globalization.CultureInfo]::InvariantCulture
+        $kartDurum = @{}
+        foreach ($k in @($st.tasks)) { if ($k) { $kartDurum[[string]$k.id] = [string]$k.status } }
+        $varRef = @{}
+        foreach ($h in @(Get-BeyinHandoffListe -Paths $Paths -Hepsi)) {
+            if (-not ($h.PSObject.Properties['ref'] -and $h.ref)) { continue }
+            $varRef[[string]$h.ref] = $true
+            if ($h.status -ne 'tamam' -and $h.PSObject.Properties['kind'] -and $h.kind -eq 'brifing') {
+                $parca = ([string]$h.ref) -split '@'
+                if ($parca.Count -ge 2 -and $kartDurum.ContainsKey($parca[0]) -and $kartDurum[$parca[0]] -ne $parca[1]) {
+                    $h.status = 'tamam'; $h.doneBy = 'pano (kart ilerledi)'; $h.doneTs = (Get-Date).ToString('o', $inv)
+                    if ((Set-BeyinHandoff -Paths $Paths -Kayit $h).Ok) { $r.Kapanan++ }
+                }
+            }
+        }
+        $varsayilanKime = 'claude'
+        try { $varsayilanKime = [string](Get-BeyinAyar 'BEYIN_BRIFING_KIME' (Get-BeyinAyarVars 'BEYIN_BRIFING_KIME')) } catch { }
+        foreach ($k in @($st.tasks)) {
+            if (-not $k) { continue }
+            $durum = [string]$k.status
+            if ($durum -ne 'review' -and $durum -ne 'blocked') { continue }
+            $an = ''
+            foreach ($hx in @($k.history)) { if ($hx -and [string]$hx.to -eq $durum -and $hx.at) { $an = [string]$hx.at } }
+            if (-not $an) { $an = [string]$k.updatedAt }
+            $ref = "$($k.id)@$durum@$an"
+            if ($varRef.ContainsKey($ref)) { continue }
+            $sahip = $(if ($k.owner) { [string]$k.owner.agent } else { '' })
+            $kime = $(if ($sahip -eq 'codex') { 'claude' } elseif ($sahip -eq 'claude') { 'codex' } else { $varsayilanKime })
+            $rapor = @($k.reports) | Select-Object -Last 1
+            $sonH = @($k.handoffs) | Select-Object -Last 1
+            $ozet = ''
+            if ($sonH) { foreach ($alan in @('outcome', 'summary', 'text', 'body')) { if ($sonH.PSObject.Properties[$alan] -and $sonH.$alan) { $ozet = [string]$sonH.$alan; break } } }
+            $metin = $(if ($durum -eq 'review') { "$($k.id) incelemeye hazir: $($k.title)" } else { "$($k.id) TAKILDI (blocked): $($k.title)" })
+            $kanit = "rapor: $(if ($rapor) { $rapor } else { 'YOK' }); kanit kaydi: $(@($k.evidence).Count)$(if ($ozet) { '; son devir: ' + $ozet })"
+            $sonraki = $(if ($durum -eq 'review') { "dogrula: beyin pano show --task $($k.id); gecerse insan onayi (onayla $($k.id)) + transition done" } else { "karar ver: beyin pano show --task $($k.id)" })
+            $proje = $(if ($k.writeScope) { [string]$k.writeScope.repo } else { '' })
+            $a = Add-BeyinHandoff -Paths $Paths -Metin $metin -Kime $kime -Kanit $kanit -Sonraki $sonraki -Proje $proje -Kind 'brifing' -Ref $ref `
+                -Coordinator ([string]$k.ownerCoordinator) -FromAgent 'pano' -GorunumYok
+            if ($a.Ok) {
+                $r.Yeni++; $varRef[$ref] = $true
+                Write-BeyinMakbuz -Paths $Paths -Script 'aktar' -Outcome 'BRIFING_KAYDEDILDI' -Agent 'pano' -Reason $Tetik -Note "$($a.Id) ref=$ref -> $kime"
+            }
+        }
+        if ($r.Yeni -gt 0 -or $r.Kapanan -gt 0) { $null = Update-BeyinAktarimlarMd -Paths $Paths }
+        Write-BeyinText -Path $damgaF -Text $mt
+    } catch { }
+    $r.Ms = [int]$sw.ElapsedMilliseconds
+    return $r
+}
+
+# INSAN ONAYI (2026-10-06, kullanici karari): pano karti 'done' icin insan onayi.
+# Kayit .state\approvals\<TASK>.json (AgentChef K12 ayni yeri okur: board.json'un
+# klasoru). Yazan yalniz iki insan kanali: kullanicinin GERCEK mesajinda tek satir
+# 'onayla TASK-x' (prompt-counter) ve etkilesimli terminalde 'beyin pano onayla'.
+# 7 gun gecerli, tek kullanimlik (done gecisinde 'kullanildi' damgalanir).
+function Add-BeyinOnay {
+    param([hashtable]$Paths, [string]$TaskId, [string]$Kanal = 'sohbet', [string]$Ajan = '', [string]$Session = '')
+    $r = @{ Ok = $false; Hata = ''; Yol = '' }
+    try {
+        if ($TaskId -cnotmatch '^TASK-\d+$') { $r.Hata = "gecersiz kart kimligi: $TaskId"; return $r }
+        $dir = Join-Path $Paths.ScrState 'approvals'
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $inv = [Globalization.CultureInfo]::InvariantCulture
+        $o = [ordered]@{ v = 1; taskId = $TaskId; nonce = [guid]::NewGuid().ToString('N').Substring(0, 12); approvedAt = (Get-Date).ToString('o', $inv)
+                         kanal = $Kanal; ajan = $Ajan; session = $Session; kullanildi = ''; kullanan = '' }
+        $f = Join-Path $dir "$TaskId.json"
+        Write-BeyinText -Path $f -Text (ConvertTo-Json -InputObject $o -Compress)
+        $r.Ok = [bool](Test-Path -LiteralPath $f); $r.Yol = $f
+    } catch { $r.Hata = $_.Exception.Message }
+    return $r
+}
+
+function Get-BeyinOnay {
+    # Gecerli (Gun icinde, kullanilmamis) onay kaydi ya da $null.
+    param([hashtable]$Paths, [string]$TaskId, [int]$Gun = 7)
+    try {
+        if ($TaskId -cnotmatch '^TASK-\d+$') { return $null }
+        $f = Join-Path (Join-Path $Paths.ScrState 'approvals') "$TaskId.json"
+        if (-not (Test-Path -LiteralPath $f)) { return $null }
+        $o = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ([string]$o.taskId -cne $TaskId -or [string]$o.kullanildi) { return $null }
+        $ts = [datetime]::Parse([string]$o.approvedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        if ($ts.Kind -eq [DateTimeKind]::Utc) { $ts = $ts.ToLocalTime() }
+        if (((Get-Date) - $ts).TotalDays -gt $Gun) { return $null }
+        return $o
+    } catch { return $null }
+}
+
+function Use-BeyinOnay {
+    param([hashtable]$Paths, [string]$TaskId, [string]$Kullanan = '')
+    try {
+        $o = Get-BeyinOnay -Paths $Paths -TaskId $TaskId
+        if (-not $o) { return $false }
+        $o.kullanildi = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+        $o.kullanan = $Kullanan
+        Write-BeyinText -Path (Join-Path (Join-Path $Paths.ScrState 'approvals') "$TaskId.json") -Text (ConvertTo-Json -InputObject $o -Compress)
+        return $true
+    } catch { return $false }
+}
+
 # ============================================================================
 # ORTAK GOREV PANOSU - OKUMA KATMANI  (2026-10-04, plan #13/#14)  -  beyin pano
 # ----------------------------------------------------------------------------
@@ -4515,7 +5115,7 @@ function Update-BeyinAktarimlarMd {
 # ============================================================================
 function Get-BeyinPanoDurum {
     param([hashtable]$Paths, [string]$Proje = '')
-    $r = @{ Var = $false; Toplam = 0; Acik = 0; Todo = 0; Surecte = 0; Inceleme = 0; Kartlar = @(); BuProje = @(); Satir = '' }
+    $r = @{ Var = $false; Toplam = 0; Acik = 0; Todo = 0; Surecte = 0; Inceleme = 0; Bekleyen = 0; BekleyenKartlar = @(); Kartlar = @(); BuProje = @(); Satir = '' }
     try {
         if (-not (Test-Path -LiteralPath $Paths.Board)) { return $r }
         $st = Get-Content -LiteralPath $Paths.Board -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -4529,16 +5129,59 @@ function Get-BeyinPanoDurum {
         $r.Surecte = @($acik | Where-Object { $_.status -eq 'in_progress' }).Count
         $r.Inceleme = @($acik | Where-Object { $_.status -eq 'review' }).Count
         $r.Kartlar = $acik
+        # BACKLOG (2026-10-06): AgentChef create kartlari 'backlog'da acar; acik
+        # sayilmaz ama gorunmez de kalmamali (12 kart acildi, pano '0 acik' diyordu).
+        $r.BekleyenKartlar = @($st.tasks | Where-Object { $_.status -eq 'backlog' })
+        $r.Bekleyen = $r.BekleyenKartlar.Count
         if ($Proje) {
             $r.BuProje = @($acik | Where-Object { $_.writeScope -and ([string]$_.writeScope.repo).Equals($Proje, [System.StringComparison]::OrdinalIgnoreCase) })
         }
         if ($r.Acik -gt 0) {
             $ilk = $(if ($r.BuProje.Count) { $r.BuProje[0] } else { $acik[0] })
             $r.Satir = "Pano: $($r.Acik) acik" + $(if ($Proje) { ", $($r.BuProje.Count) bu projede" } else { '' }) +
+                       $(if ($r.Bekleyen -gt 0) { ", $($r.Bekleyen) bekleyen" } else { '' }) +
                        " ($($ilk.id) $(if ($ilk.owner) { $ilk.owner.agent } else { '-' })/$($ilk.status))."
+        } elseif ($r.Bekleyen -gt 0) {
+            $r.Satir = "Pano: 0 acik, $($r.Bekleyen) bekleyen (backlog; ilk $($r.BekleyenKartlar[0].id))."
         }
     } catch { }
     return $r
+}
+
+function Get-BeyinPanoCakisma {
+    # YOL CAKISMASI (2026-10-06, AgentSpace CONFLICT-NOTICE dersi): ayni repoya yazan
+    # acik kartlarin yazma kapsamlari kesisiyor mu? Esitlik ya da dizin on eki
+    # ('docs' ~ 'docs/a.md'); glob iceren yolda literal onek karsilastirilir (fazla
+    # raporlar, asla eksik raporlamaz). Donus: @( @{ A; B; Yol; Izole } ).
+    param([object[]]$Kartlar)
+    $sonuc = New-Object System.Collections.Generic.List[object]
+    # BLOCKED KILIT BIRAKIR (BB6, kullanici karari 2026-10-06; AgentChef K2 ayni anlam):
+    # kilitli kartin yazma kapsami baskasini engellemez, cakisma sayilmaz.
+    $liste = @($Kartlar | Where-Object { $_ -and [string]$_.status -ne 'blocked' -and $_.writeScope -and @($_.writeScope.paths).Count -gt 0 })
+    for ($i = 0; $i -lt $liste.Count; $i++) {
+        for ($j = $i + 1; $j -lt $liste.Count; $j++) {
+            $a = $liste[$i]; $b = $liste[$j]
+            if (-not ([string]$a.writeScope.repo).Equals([string]$b.writeScope.repo, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+            $bulundu = $false
+            foreach ($pa in @($a.writeScope.paths)) {
+                foreach ($pb in @($b.writeScope.paths)) {
+                    $x = (([string]$pa).Trim().Replace('\', '/').ToLowerInvariant() -split '[\*\?]')[0]
+                    $y = (([string]$pb).Trim().Replace('\', '/').ToLowerInvariant() -split '[\*\?]')[0]
+                    while ($x.StartsWith('./')) { $x = $x.Substring(2) }
+                    while ($y.StartsWith('./')) { $y = $y.Substring(2) }
+                    $x = $x.TrimEnd('/'); $y = $y.TrimEnd('/')
+                    if (-not $x -or -not $y) { continue }
+                    if ($x -eq $y -or $x.StartsWith($y + '/') -or $y.StartsWith($x + '/')) {
+                        $sonuc.Add([pscustomobject]@{ A = [string]$a.id; B = [string]$b.id; Yol = $(if ($x.Length -le $y.Length) { $x } else { $y })
+                            Izole = (([string]$a.isolation -eq 'worktree') -or ([string]$b.isolation -eq 'worktree')) })
+                        $bulundu = $true; break
+                    }
+                }
+                if ($bulundu) { break }
+            }
+        }
+    }
+    return $sonuc.ToArray()
 }
 
 function Update-BeyinPanoMd {
@@ -4561,7 +5204,7 @@ function Update-BeyinPanoMd {
         [void]$sb.AppendLine('---')
         [void]$sb.AppendLine('# Ortak gorev panosu')
         [void]$sb.AppendLine('')
-        [void]$sb.AppendLine('> **Turetilmis dosya** - `beyin pano` her degisiklikte yeniden yazar; elle duzenleme. Kaynak: `motor/scripts/.state/board.json` (AgentChef coordination-board sema v3).')
+        [void]$sb.AppendLine('> **Turetilmis dosya** - `beyin pano` her degisiklikte yeniden yazar; elle duzenleme. Kaynak: `motor/scripts/.state/board.json` (AgentChef coordination-board sema v3-v5; bilinmeyen alanlar yok sayilir).')
         [void]$sb.AppendLine('> Kural: yazma kapsami iceren her delegasyondan once kart acilir; `todo -> in_progress` icin brief (7 alan) ve yazma kapsami varsa canli kira gerekir.')
         [void]$sb.AppendLine('')
         [void]$sb.AppendLine("## Acik ($($d.Acik))")
@@ -4573,7 +5216,28 @@ function Update-BeyinPanoMd {
             foreach ($k in $d.Kartlar) {
                 $sahip = $(if ($k.owner) { "$($k.owner.agent)$(if ($k.owner.session) { '/' + $k.owner.session })" } else { '-' })
                 $ws = $(if ($k.writeScope) { "$($k.writeScope.repo): $(Kisa (@($k.writeScope.paths) -join ', ') 90)" } else { '-' })
-                [void]$sb.AppendLine("| ``$($k.id)`` | $($k.status) | $sahip | $ws | $(Zaman $k.leaseUntil) | $(if ($k.brief) { 'var' } else { 'YOK' }) | $(@($k.evidence).Count) | $(Kisa $k.title 70) |")
+                # IZOLASYON / KILIT (BB6, ileriye uyumlu): AgentChef 1.3.5 'isolation' alani
+                # varsa kapsam hucresine eklenir; blocked kart kilidini birakmistir.
+                if ([string]$k.isolation -eq 'worktree') { $ws += ' [worktree]' }
+                if ([string]$k.status -eq 'blocked' -and $k.writeScope) { $ws += ' (kilit birakildi)' }
+                # KANIT YOK (2026-10-06): calisilan ya da incelemedeki kartta tek kanit yoksa
+                # isaret; 'todo' isaretlenmez (henuz baslamadi).
+                $kanitSay = @($k.evidence).Count
+                $kanitHucre = $(if (($kanitSay -eq 0 -and $k.status -in @('in_progress', 'review')) -or $k.evidenceMissing -eq $true) { '**KANIT YOK**' } else { [string]$kanitSay })
+                [void]$sb.AppendLine("| ``$($k.id)`` | $($k.status) | $sahip | $ws | $(Zaman $k.leaseUntil) | $(if ($k.brief) { 'var' } else { 'YOK' }) | $kanitHucre | $(Kisa $k.title 70) |")
+            }
+            $kanitsiz = @($d.Kartlar | Where-Object { @($_.evidence).Count -eq 0 -and $_.status -in @('in_progress', 'review') }).Count
+            if ($kanitsiz -gt 0) { [void]$sb.AppendLine(''); [void]$sb.AppendLine("> **KANIT YOK:** $kanitsiz kart calisiliyor ya da incelemede ama tek kanit kaydi yok.") }
+        }
+        if ($d.Bekleyen -gt 0) {
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine("## Bekleyen (backlog, $($d.Bekleyen))")
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine('| Kart | Sahip | Yazma kapsami | Brief | Baslik |')
+            [void]$sb.AppendLine('| --- | --- | --- | --- | --- |')
+            foreach ($k in $d.BekleyenKartlar) {
+                $ws = $(if ($k.writeScope) { "$($k.writeScope.repo): $(Kisa (@($k.writeScope.paths) -join ', ') 70)" } else { '-' })
+                [void]$sb.AppendLine("| ``$($k.id)`` | $(if ($k.owner) { $k.owner.agent } else { '-' }) | $ws | $(if ($k.brief) { 'var' } else { 'YOK' }) | $(Kisa $k.title 70) |")
             }
         }
         # 1.3.3: 'cancelled' da kapali listesine girer (status sutununda ayirt edilir).
@@ -4605,10 +5269,29 @@ function Update-BeyinPanoMd {
 # elde ne varsa onunla doner, uyari uretmez (acilisi yavaslatmak kabul degil).
 # Hicbir sureci listelemez/oldurmez; tam liste 'beyin bekci'de (bekci.ps1).
 # ============================================================================
+# OKUMA YOLU SIR MASKESI (2026-10-06, AgentSpace memorySecretMask): enjeksiyona giren
+# metin (gunluk blogu, devam tablosu, aktarim, kavram ozeti) ikinci kez maskelenir.
+# Yazim yolu fail-closed'dir; burada fail-DROP: desen uygulanamazsa blok HIC enjekte
+# edilmez (maskesiz metin sizmaz) ve engine.log'a dusulur. Sayaclar makbuz notu icin.
+$script:BeyinMaskeSayac = 0
+$script:BeyinMaskeDusen = 0
+function Protect-BeyinBlok {
+    param([string]$Text, [string]$Vault = '', [string]$Ad = 'blok')
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $pr = Protect-BeyinSecrets -Text $Text -Vault $Vault
+    if ([int]$pr.Failed -gt 0) {
+        $script:BeyinMaskeDusen++
+        if ($Vault) { try { Write-BeyinLog -Vault $Vault -Message "maske: '$Ad' blogu dusuruldu (uygulanamayan desen: $($pr.FailedPatterns))" } catch { } }
+        return $null
+    }
+    $script:BeyinMaskeSayac += [int]$pr.Redactions
+    return [string]$pr.Text
+}
+
 function Get-BeyinKaynakOzeti {
     param([hashtable]$Paths, [int]$CommitEsik = 85, [int]$BostaDk = 120, [string]$SessionKey = '', [int]$OnbellekDk = 10)
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $r = @{ Ok = $false; CommitYuzde = -1; CommitGB = 0.0; CommitTavanGB = 0.0; OlcumYasiDk = 0; BostaOturum = 0; AktifOturum = 0; Esik = $false; Satir = ''; Ms = 0 }
+    $r = @{ Ok = $false; CommitYuzde = -1; CommitGB = 0.0; CommitTavanGB = 0.0; BosRamGB = -1.0; OnerilenAjan = 0; OlcumYasiDk = 0; BostaOturum = 0; AktifOturum = 0; Esik = $false; Satir = ''; Ms = 0 }
     try {
         # OLCUM ONBELLEGI (olculdu, soguk surecte): Get-CimInstance ~600 ms,
         # PerformanceCounter ~2,5 sn - ikisi de kanca icin pahali (hedef <150 ms).
@@ -4626,6 +5309,7 @@ function Get-BeyinKaynakOzeti {
         }
         if ($onb) {
             $r.CommitYuzde = [int]$onb.commitYuzde; $r.CommitGB = [double]$onb.commitGB; $r.CommitTavanGB = [double]$onb.commitTavanGB; $r.Ok = $true
+            if ($onb.PSObject.Properties['bosRamGB']) { $r.BosRamGB = [double]$onb.bosRamGB }
         } else {
             $os = Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 1 -ErrorAction Stop
             # TotalVirtualMemorySize = commit LIMITI (KB), FreeVirtualMemory = bos commit (KB).
@@ -4635,10 +5319,13 @@ function Get-BeyinKaynakOzeti {
                 $r.CommitYuzde   = [int][math]::Round(100.0 * ($top - $bos) / $top)
                 $r.CommitGB      = [math]::Round(($top - $bos) / 1MB, 1)
                 $r.CommitTavanGB = [math]::Round($top / 1MB, 1)
+                # BOS FIZIKSEL RAM (2026-10-06, AgentSpace resourceGovernor fikri): sabit
+                # '<=4 isci' yerine olcumden turetilen ONERI. Ayni CIM nesnesinden, ek maliyet yok.
+                try { $r.BosRamGB = [math]::Round([double]$os.FreePhysicalMemory / 1MB, 1) } catch { }
                 $r.Ok = $true
                 if ($onbF) {
                     try {
-                        Write-BeyinText -Path $onbF -Text (@{ ts = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture); commitYuzde = $r.CommitYuzde; commitGB = $r.CommitGB; commitTavanGB = $r.CommitTavanGB } | ConvertTo-Json -Compress)
+                        Write-BeyinText -Path $onbF -Text (@{ ts = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture); commitYuzde = $r.CommitYuzde; commitGB = $r.CommitGB; commitTavanGB = $r.CommitTavanGB; bosRamGB = $r.BosRamGB; onerilenAjan = [int][math]::Min(6, [math]::Max(2, [math]::Floor([math]::Max(0, $r.BosRamGB)))) } | ConvertTo-Json -Compress)
                     } catch { }
                 }
             }
@@ -4659,11 +5346,15 @@ function Get-BeyinKaynakOzeti {
         }
         # Kapi: commit esigi ASILDIYSA ya da 5+ oturum sessizse. Tek sessiz
         # oturum siradan; bes tanesi gercek bir sizinti sinyali.
+        # ONERILEN ES ZAMANLI AJAN: bos RAM GB basina bir ajan, 2-6 araligi (kaba tahmin;
+        # AgentChef routing'e bilgi, kapi degil). Olculemediyse 0.
+        if ($r.BosRamGB -ge 0) { $r.OnerilenAjan = [int][math]::Min(6, [math]::Max(2, [math]::Floor($r.BosRamGB))) }
         $r.Esik = (($r.CommitYuzde -ge $CommitEsik) -or ($r.BostaOturum -ge 5))
         if ($r.Esik) {
             $saat = [math]::Round($BostaDk / 60.0, 1)
             $r.Satir = "[Hafiza] UYARI kaynak: commit %$($r.CommitYuzde) ($($r.CommitGB)/$($r.CommitTavanGB) GB$(if ($r.OlcumYasiDk -gt 0) { ", $($r.OlcumYasiDk) dk onceki olcum" }))" +
                        $(if ($r.BostaOturum -gt 0) { ", son 24 saatte acilmis $($r.BostaOturum) oturum ${saat}+ saattir sessiz (kapanmis olabilir)" } else { '' }) +
+                       $(if ($r.OnerilenAjan -gt 0) { "; onerilen es zamanli ajan: $($r.OnerilenAjan) (bos RAM $($r.BosRamGB) GB)" } else { '' }) +
                        " - liste: beyin bekci (yalniz gosterir, hicbir sureci kapatmaz)."
         }
     } catch { }
@@ -4825,7 +5516,12 @@ function Find-BeyinRelevantConceptsVec {
         [int]$EnFazla = 2,
         [int]$TopK = 6,
         [double]$MinBenzerlik = 0.42,   # olculdu: dogru not 0.45-0.67, medyan 0.33-0.40 (bge-m3)
-        [int]$TimeoutMs = 800
+        [int]$TimeoutMs = 800,
+        # FUSION DENEYI (BB2): 'hibrit' (varsayilan: cos*10 + baslik*2 + govde) ya da
+        # 'rrfK' (K=5/60: esigi gecen adaylarda cos sirasi ile kelime sirasinin
+        # karsilikli sira birlesimi). Varsayilan ancak holdout >= +0.02 olursa degisir.
+        [string]$Fusion = 'hibrit',
+        [switch]$SonmeYok
     )
     $r = @{ Ok = $false; Sonuc = @() }
     try {
@@ -4892,9 +5588,24 @@ function Find-BeyinRelevantConceptsVec {
                     else { 0.60 }
             if ($cos -lt $esik) { continue }
             $hibrit = [math]::Round($cos * 10 + $bt * 2 + $gt, 2)
-            $secilen.Add([pscustomobject]@{ Item = $it; Skor = $hibrit; Tutan = @($tutan.ToArray()); Cos = [math]::Round($cos, 3) })
+            $secilen.Add([pscustomobject]@{ Item = $it; Skor = $hibrit; Tutan = @($tutan.ToArray()); Cos = [math]::Round($cos, 3); Kel = ($bt * 2 + $gt) })
         }
-        $r.Sonuc = @($secilen.ToArray() | Sort-Object Skor -Descending | Select-Object -First $EnFazla)
+        $liste = @($secilen.ToArray())
+        if ($Fusion -match '^rrf(\d+)$' -and $liste.Count -gt 1) {
+            $rrfK = [double]$Matches[1]
+            $rc = @{}; $rk = @{}; $sira = 1
+            foreach ($x in @($liste | Sort-Object Cos -Descending)) { $rc[[string]$x.Item.dosya] = $sira; $sira++ }
+            $sira = 1
+            foreach ($x in @($liste | Sort-Object Kel -Descending)) { $rk[[string]$x.Item.dosya] = $sira; $sira++ }
+            foreach ($x in $liste) { $x.Skor = [math]::Round(100.0 * (1.0 / ($rrfK + $rc[[string]$x.Item.dosya]) + 1.0 / ($rrfK + $rk[[string]$x.Item.dosya])), 3) }
+        }
+        if (-not $SonmeYok) {
+            $sn = Get-BeyinKullanimSonme -Paths $Paths
+            if ($sn.Count -gt 0) {
+                foreach ($x in $liste) { $sk = ([string]$x.Item.dosya).ToLowerInvariant(); if ($sn.ContainsKey($sk)) { $x.Skor = [math]::Round($x.Skor * $sn[$sk], 3) } }
+            }
+        }
+        $r.Sonuc = @($liste | Sort-Object Skor -Descending | Select-Object -First $EnFazla)
     } catch { }
     return $r
 }

@@ -12,6 +12,7 @@
 #   topla-uygula   03:20 her gun     3 gunluk yetim oturumlari isle (model gerekir)
 #   yedek          03:40 Pazar       tam vault yedegi (brain-cli; brain-cli cozulmuyorsa KAYDEDILMEZ)
 #   copcu          04:00 her gun     disk copcusu RAPORU (silmez; silme kullanici karari)
+#   maliyet        04:10 her gun     jeton/maliyet artimli taramasi (model cagirmaz; rota maliyet-tara)
 #   bahcivan       04:30 Pazar       kavram/skill/betik kullanim raporu
 #   denetle        05:00 Pazar       kavram notu semantik denetimi (hizli yol; model cagirmaz)
 #
@@ -104,6 +105,7 @@ $GOREVLER = @(
     @{ Ad = 'topla-uygula'; Saat = '03:20'; Gun = '';       Aciklama = 'Son 3 gunun yetim oturumlarini isle (model gerekir)'; Arg = '3' },
     @{ Ad = 'yedek';        Saat = '03:40'; Gun = 'Sunday'; Aciklama = 'Tam vault yedegi' },
     @{ Ad = 'copcu';        Saat = '04:00'; Gun = '';       Aciklama = 'Disk copcusu raporu (silmez)' },
+    @{ Ad = 'maliyet';      Saat = '04:10'; Gun = '';       Aciklama = 'Jeton/maliyet artimli taramasi (model cagirmaz)'; Komut = 'maliyet-tara' },
     @{ Ad = 'bahcivan';     Saat = '04:30'; Gun = 'Sunday'; Aciklama = 'Kavram/skill/betik kullanim raporu' },
     # NEDEN HAFTALIK (2.3): gorev -Derin VERMEZ, yani denetle'nin hizli yolu kosar;
     # o yol model cagirmaz (diskteki bge-m3 vektorleri uzerinde calisir) ve gece
@@ -119,6 +121,10 @@ $GOREVLER = @(
     @{ Ad = 'denetle';      Saat = '05:00'; Gun = 'Sunday'; Aciklama = 'Kavram notlari semantik denetimi (yakin-ikiz / celiski)' },
     # GERI GETIRME KAPISI (2026-10-05, avenoxbeyin CI kapisi fikri): dondurulmus
     # holdout her Pazar kosar; dusunce exit 5 -> makbuz ZAMANLI_HATA, doktor kirmizi.
+    # KULLANIM SONMESI (BB2): 14 gunluk pencere; sonme dosyasini tazeler. Kapidan
+    # (05:20) ONCE kosar ki holdout guncel sonmeyle olculsun.
+    @{ Ad = 'kullanim';     Saat = '05:10'; Gun = 'Sunday'; Aciklama = 'Kavram kullanim olcumu + kullanim sonmesi (14 gun; model cagirmaz)'; Arg = '14' },
+    @{ Ad = 'skill-aday';   Saat = '05:30'; Gun = 'Sunday'; Aciklama = 'Skill adayi listesi (86-compiled/skill-adaylari.md; model cagirmaz)' },
     @{ Ad = 'geri-getirme-olc'; Saat = '05:20'; Gun = 'Sunday'; Aciklama = 'Geri getirme regresyon kapisi (dondurulmus holdout; model cagirmaz)' }
 )
 

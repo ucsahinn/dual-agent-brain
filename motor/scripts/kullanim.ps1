@@ -106,8 +106,33 @@ foreach ($c in $kavramToplam.Keys) { $t = $kavramToplam[$c]; $enjToplam += $t.en
 $olculen = $enjToplam - $yokToplam
 $oran = if ($olculen -gt 0) { [math]::Round(100.0 * ($acildiToplam + $anildiToplam) / $olculen, 1) } else { 0 }
 
+# --- 4) Kullanim sonmesi (BB2): yalniz >=14 gun penceresinde yazilir ---------
+$sondu = -1
+if ($Gun -ge 14) {
+    $sondu = 0
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $sonmeSat = New-Object System.Collections.Generic.List[string]
+    $sonmeSat.Add("# kullanim sonmesi (BB2) $((Get-Date).ToString('o', $inv)) pencere=$Gun gun; 5+ olculen enjeksiyonda 0 kullanim -> 0.6; 14 gunden taze not muaf")
+    $conceptDir = Join-Path $p.Compiled 'concepts'
+    foreach ($c in $kavramToplam.Keys) {
+        $t = $kavramToplam[$c]; $olc = $t.enj - $t.yok
+        if ($olc -lt 5 -or ($t.acildi + $t.anildi) -gt 0) { continue }
+        $nf = Join-Path $conceptDir $c
+        if (-not (Test-Path -LiteralPath $nf)) { continue }
+        $taze = $false
+        try {
+            $bas = [IO.File]::ReadAllText($nf); if ($bas.Length -gt 2000) { $bas = $bas.Substring(0, 2000) }
+            $mcr = [regex]::Match($bas, '(?m)^created:\s*"?(\d{4}-\d{2}-\d{2})')
+            if ($mcr.Success -and ((Get-Date) - [datetime]::ParseExact($mcr.Groups[1].Value, 'yyyy-MM-dd', $inv)).TotalDays -lt 14) { $taze = $true }
+        } catch { }
+        if ($taze) { continue }
+        $sonmeSat.Add("$($c.ToLowerInvariant())$([char]9)0.6$([char]9)$olc$([char]9)0"); $sondu++
+    }
+    try { Write-BeyinText -Path (Join-Path $p.ScrState 'kullanim-sonme.dat') -Text ($sonmeSat -join "`n") } catch { }
+}
+
 $rapor = [ordered]@{
-    v = 1; ts = (Get-Date).ToString('o'); gun = $Gun
+    v = 1; ts = (Get-Date).ToString('o'); gun = $Gun; sonme = $sondu
     oturum = $oturumlar.Count; transkriptYok = $transkriptYok
     enjeksiyon = $enjToplam; olculen = $olculen; acildi = $acildiToplam; anildi = $anildiToplam
     kullanimYuzde = $oran
@@ -133,5 +158,6 @@ foreach ($c in @($kavramToplam.Keys | Sort-Object { -$kavramToplam[$_].enj } | S
     $t = $kavramToplam[$c]
     "  {0,-50} {1,4} {2,7} {3,7} {4,4}" -f $(if ($c.Length -gt 50) { $c.Substring(0, 47) + '...' } else { $c }), $t.enj, $t.acildi, $t.anildi, $t.yok
 }
+if ($sondu -ge 0) { "  Kullanim sonmesi: $sondu not x0.6 (motor\scripts\.state\kullanim-sonme.dat; ayar BEYIN_SONME)" } else { "  Kullanim sonmesi: yazilmadi (en az 14 gunluk pencere gerekir: beyin kullanim 14)" }
 "  Rapor: motor\scripts\.state\kullanim-son.json"
 exit 0

@@ -72,6 +72,80 @@ Describe 'kill guard (BB5)' {
         $sonuc['taskkill /IM node.exe /F'] | Should Be 2
         $sonuc['kill-guard-on.mjs dosyasina bak'] | Should Be 0
     }
+    It 'anlik aktarim: calisan ajana PreToolUse additionalContext ile bir kez teslim, projeye sinirli olan baska projede gelmez' {
+        if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Set-TestInconclusive 'node yok'; return }
+        $hd = Join-Path $kgVault 'motor\scripts\.state\handoff'
+        New-Item -ItemType Directory -Force -Path $hd | Out-Null
+        $ts = (Get-Date).ToString('o')
+        @(
+            @{ v = 2; id = '20991231T000001-aaaa'; ts = $ts; from = @{ agent = 'claude'; project = 'Beyin' }; to = 'codex'; toProject = ''; kind = 'soru'; question = 'ANLIK-HER-YERE'; status = 'acik' },
+            @{ v = 2; id = '20991231T000002-bbbb'; ts = $ts; from = @{ agent = 'claude'; project = 'Beyin' }; to = 'codex'; toProject = 'baska-proje'; kind = 'soru'; question = 'ANLIK-SINIRLI'; status = 'acik' },
+            @{ v = 2; id = '20991231T000003-cccc'; ts = $ts; from = @{ agent = 'codex'; project = 'codex-chef' }; to = 'codex'; toProject = ''; kind = 'devir'; question = 'ANLIK-DEVIR'; status = 'acik' }
+        ) | ForEach-Object { [IO.File]::WriteAllText((Join-Path $hd "$($_.id).json"), ($_ | ConvertTo-Json -Compress -Depth 4)) }
+        $in = Join-Path $env:TEMP ("anlik-" + [guid]::NewGuid().ToString('N') + '.json')
+        [IO.File]::WriteAllText($in, (@{ session_id = 'anlik-test-1'; tool_name = 'Bash'; tool_input = @{ command = 'git status' }; cwd = 'D:\proje\codex-chef' } | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding $false))
+        $mjs = Join-Path $here 'kill-guard-on.mjs'
+        $eskiV = $env:BEYIN_VAULT; $env:BEYIN_VAULT = $kgVault
+        try {
+            $o1 = [string](cmd /c "node `"$mjs`" --codex < `"$in`"")
+            $o2 = [string](cmd /c "node `"$mjs`" --codex < `"$in`"")
+        } finally { $env:BEYIN_VAULT = $eskiV; Remove-Item -LiteralPath $in -Force -ErrorAction SilentlyContinue }
+        $o1 | Should Match 'additionalContext'
+        $o1 | Should Match 'ANLIK-HER-YERE'
+        $o1 | Should Not Match 'ANLIK-SINIRLI'
+        $o1 | Should Not Match 'ANLIK-DEVIR'
+        [string]::IsNullOrWhiteSpace($o2) | Should Be $true
+    }
+    It 'teslim hakki: atomik, ikinci talep reddedilir; PowerShell yolunun aldigini node vermez; alt ajan cagrisi atlanir' {
+        if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Set-TestInconclusive 'node yok'; return }
+        $kp = Get-BeyinPaths -Vault $kgVault
+        $hd = Join-Path $kgVault 'motor\scripts\.state\handoff'
+        New-Item -ItemType Directory -Force -Path $hd | Out-Null
+        $ts = (Get-Date).ToString('o')
+        @{ v = 2; id = '20991231T000010-dddd'; ts = $ts; from = @{ agent = 'claude'; project = 'Beyin' }; to = 'codex'; toProject = ''; kind = 'soru'; question = 'HAK-PS-ALDI'; status = 'acik' },
+        @{ v = 2; id = '20991231T000011-eeee'; ts = $ts; from = @{ agent = 'claude'; project = 'Beyin' }; to = 'codex'; toProject = ''; kind = 'soru'; question = 'HAK-SERBEST'; status = 'acik' } |
+            ForEach-Object { [IO.File]::WriteAllText((Join-Path $hd "$($_.id).json"), ($_ | ConvertTo-Json -Compress -Depth 4)) }
+        $ilk = Request-BeyinTeslimHakki -Paths $kp -SessionKey 'hak-test' -Id '20991231T000010-dddd'
+        $ikinci = Request-BeyinTeslimHakki -Paths $kp -SessionKey 'hak-test' -Id '20991231T000010-dddd'
+        $mjs = Join-Path $here 'kill-guard-on.mjs'
+        $in = Join-Path $env:TEMP ("hak-" + [guid]::NewGuid().ToString('N') + '.json')
+        $inAlt = Join-Path $env:TEMP ("hak-alt-" + [guid]::NewGuid().ToString('N') + '.json')
+        [IO.File]::WriteAllText($in, (@{ session_id = 'hak-test'; tool_name = 'Bash'; tool_input = @{ command = 'git status' }; cwd = 'D:\proje\codex-chef' } | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding $false))
+        [IO.File]::WriteAllText($inAlt, (@{ session_id = 'hak-alt'; agent_id = 'sub-1'; tool_name = 'Bash'; tool_input = @{ command = 'git status' }; cwd = 'D:\proje\codex-chef' } | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding $false))
+        $eskiV = $env:BEYIN_VAULT; $env:BEYIN_VAULT = $kgVault
+        try {
+            $o = [string](cmd /c "node `"$mjs`" --codex < `"$in`"")
+            $oAlt = [string](cmd /c "node `"$mjs`" --codex < `"$inAlt`"")
+        } finally { $env:BEYIN_VAULT = $eskiV; Remove-Item -LiteralPath $in, $inAlt -Force -ErrorAction SilentlyContinue }
+        $ilk | Should Be $true
+        $ikinci | Should Be $false
+        $o | Should Match 'HAK-SERBEST'
+        $o | Should Not Match 'HAK-PS-ALDI'
+        [string]::IsNullOrWhiteSpace($oAlt) | Should Be $true
+        (Get-BeyinTeslimEdilen -Paths $kp -SessionKey 'hak-test') -contains '20991231T000011-eeee' | Should Be $true
+    }
+    It 'paralel arac cagrilari: ayni oturumda 6 es zamanli kanca, mesaj TAM BIR KEZ verilir' {
+        if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Set-TestInconclusive 'node yok'; return }
+        $hd = Join-Path $kgVault 'motor\scripts\.state\handoff'
+        New-Item -ItemType Directory -Force -Path $hd | Out-Null
+        $kayit = @{ v = 2; id = '20991231T000020-ffff'; ts = (Get-Date).ToString('o'); from = @{ agent = 'claude'; project = 'Beyin' }; to = 'codex'; toProject = ''; kind = 'soru'; question = 'PARALEL-TEK'; status = 'acik' }
+        [IO.File]::WriteAllText((Join-Path $hd "$($kayit.id).json"), ($kayit | ConvertTo-Json -Compress -Depth 4))
+        $in = Join-Path $env:TEMP ("par-" + [guid]::NewGuid().ToString('N') + '.json')
+        [IO.File]::WriteAllText($in, (@{ session_id = 'paralel-test'; tool_name = 'Bash'; tool_input = @{ command = 'git status' }; cwd = 'D:\proje\codex-chef' } | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding $false))
+        $mjs = Join-Path $here 'kill-guard-on.mjs'
+        $surecler = @()
+        try {
+            foreach ($i in 1..6) {
+                $psi = New-Object System.Diagnostics.ProcessStartInfo
+                $psi.FileName = 'cmd.exe'; $psi.Arguments = "/d /c node `"$mjs`" --codex < `"$in`""
+                $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.CreateNoWindow = $true
+                $psi.EnvironmentVariables['BEYIN_VAULT'] = $kgVault
+                $surecler += [System.Diagnostics.Process]::Start($psi)
+            }
+            $ciktilar = @($surecler | ForEach-Object { $o = $_.StandardOutput.ReadToEnd(); $_.WaitForExit(); $o })
+        } finally { Remove-Item -LiteralPath $in -Force -ErrorAction SilentlyContinue }
+        @($ciktilar | Where-Object { $_ -match 'PARALEL-TEK' }).Count | Should Be 1
+    }
     It 'makbuzlar gecici vault''a yazilir (gercek vault kirlenmez)' {
         $null = Invoke-Guard 'taskkill /IM node.exe /F'
         $gun = (Get-Date).ToString('yyyy-MM-dd')

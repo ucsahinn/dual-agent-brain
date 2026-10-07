@@ -123,6 +123,14 @@ function Get-BeyinAyarTablo {
     return $t
 }
 
+# YONLENDIRILMIS CIKTI UTF-8 (2026-10-07): dispatcher (beyin.ps1 Cagir) cikti bir ajana
+# yonlendirildiginde betigi kendi gizli konsoluyla BEYIN_STDOUT_UTF8=1 ile baslatir; burada
+# stdout UTF-8'e alinir. Gizli konsol paylasilmadigi icin baska hicbir terminal etkilenmez.
+# Kancalar bu degiskeni almaz: davranislari degismez.
+if ($env:BEYIN_STDOUT_UTF8 -eq '1') {
+    try { if ([Console]::IsOutputRedirected) { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } } catch { }
+}
+
 function Get-BeyinAyar([string]$Ad, [string]$Varsayilan) {
     try {
         $o = [Environment]::GetEnvironmentVariable($Ad, 'Process')
@@ -3342,6 +3350,7 @@ function Invoke-BeyinCodex {
     $psi.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
     $psi.StandardErrorEncoding  = New-Object System.Text.UTF8Encoding($false)
     $psi.EnvironmentVariables['BEYIN_CHILD'] = '1'   # beyin kancalari alt surecte calismasin (olculdu: 26k token yakiyordu)
+    $psi.EnvironmentVariables['AGENTCHEF_ROUTING_HINT'] = 'off'   # AgentChef yonlendirme satiri motorun kendi model cagrilarinda gereksiz
     $proc = $null
     try {
         $proc = [System.Diagnostics.Process]::Start($psi)
@@ -3457,6 +3466,7 @@ function Test-BeyinModelAuth {
         $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
         $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
         $psi.EnvironmentVariables['BEYIN_CHILD'] = '1'
+        $psi.EnvironmentVariables['AGENTCHEF_ROUTING_HINT'] = 'off'   # AgentChef yonlendirme satiri motorun kendi model cagrilarinda gereksiz
         $proc = [System.Diagnostics.Process]::Start($psi)
         $tOut = $proc.StandardOutput.ReadToEndAsync(); $tErr = $proc.StandardError.ReadToEndAsync()
         if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) { Stop-BeyinProcessTree -ProcessId $proc.Id; return @{ Ok = $false; Kesin = $false; Backend = $b; Detay = 'zaman asimi (kontrol sonuclanmadi)' } }
@@ -3945,6 +3955,7 @@ function Invoke-BeyinClaude {
     $psi.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
     $psi.StandardErrorEncoding  = New-Object System.Text.UTF8Encoding($false)
     $psi.EnvironmentVariables['BEYIN_CHILD'] = '1'   # kancalar alt surecte calismasin
+    $psi.EnvironmentVariables['AGENTCHEF_ROUTING_HINT'] = 'off'   # AgentChef yonlendirme satiri motorun kendi model cagrilarinda gereksiz
 
     $proc = $null
     try {
@@ -4789,7 +4800,19 @@ function Get-BeyinHandoffAcik {
     param([hashtable]$Paths, [string]$Kime = '', [string]$Proje = '')
     $acik = @(Get-BeyinHandoffListe -Paths $Paths)
     if ($Kime)  { $acik = @($acik | Where-Object { [string]$_.to -eq $Kime }) }
-    if ($Proje) { $acik = @($acik | Where-Object { [string]$_.from.project -eq $Proje }) }
+    # TESLIM SUZGECI (2026-10-07): eskiden vault disinda yalniz from.project == bu proje
+    # gosteriliyordu; bir ajana ACIKCA yazilmis mesaj, gonderenin klasoru farkliysa HIC
+    # ulasmiyordu (olculdu: Claude'un Beyin/agentchef etiketli iki aktarimini codex-chef
+    # klasorundeki Codex hic gormedi). Simdi: devir yalniz kendi projesinde; diger turler
+    # toProject verilmisse yalniz o projede, verilmemisse ('' ya da '*') her yerde.
+    if ($Proje) {
+        $acik = @($acik | Where-Object {
+            $hp = $(if ($_.PSObject.Properties['toProject']) { [string]$_.toProject } else { '' })
+            if ([string]$_.kind -eq 'devir') { [string]$_.from.project -eq $Proje }
+            elseif ($hp -and $hp -ne '*') { $hp -eq $Proje }
+            else { $true }
+        })
+    }
     return $acik
 }
 
@@ -4818,7 +4841,9 @@ function Update-BeyinAktarimlarMd {
         $kapali = @($hepsi | Where-Object { $_.status -eq 'tamam' } | Sort-Object -Property doneTs -Descending | Select-Object -First 30)
         $r.Acik = $acik.Count; $r.Kapali = $kapali.Count
         $inv = [Globalization.CultureInfo]::InvariantCulture
-        function Kisa([string]$T, [int]$N) { $t = [string]$T; if ($t.Length -gt $N) { $t = $t.Substring(0, $N - 3) + '...' }; return ($t -replace '\|', '/') }
+        # Guvenilmez metin vault notuna yaziliyor: tablo ayiricisi, satir sonu, wikilink ve
+        # HTML acilisi notrlestirilir (Obsidian'da baglanti/etiket uretmesin).
+        function Kisa([string]$T, [int]$N) { $t = [string]$T; if ($t.Length -gt $N) { $t = $t.Substring(0, $N - 3) + '...' }; return ((($t -replace '\|', '/') -replace '\r?\n', ' ') -replace '\[\[', '[ [' -replace '\]\]', '] ]' -replace '<', '&lt;') }
         function Zaman([string]$T) { try { return ([datetime]::Parse($T, $inv)).ToString('yyyy-MM-dd HH:mm', $inv) } catch { return '' } }
         $sb = New-Object System.Text.StringBuilder
         [void]$sb.AppendLine('---')
@@ -4862,24 +4887,39 @@ function Add-BeyinHandoff {
     # Donus: @{ Ok; Id; Hata; Kod; Maske }  Kod: KAYDEDILDI | BOS | REDAKSIYON_DUSTU | YAZILAMADI
     param([hashtable]$Paths, [string]$Metin, [string]$Kime, [string]$Kanit = '', [string]$Kapsam = '', [string]$Risk = '',
           [string]$Sonraki = '', [string]$Proje = '', [string]$Kind = 'soru', [string]$Ref = '', [string]$Coordinator = '',
-          [string]$FromAgent = '', [string]$FromSession = '', [switch]$GorunumYok)
+          [string]$FromAgent = '', [string]$FromSession = '', [switch]$GorunumYok, [string]$HedefProje = '')
     $r = @{ Ok = $false; Id = ''; Hata = ''; Kod = ''; Maske = 0 }
     $kisalt = { param([string]$T, [int]$Max) $t = ([string]$T -replace '\s+', ' ').Trim(); if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max - 3) + '...' }; $t }
-    $alanlar = [ordered]@{ question = (& $kisalt $Metin 600); evidence = (& $kisalt $Kanit 300); scope = (& $kisalt $Kapsam 300); risk = (& $kisalt $Risk 300); next = (& $kisalt $Sonraki 300) }
-    if (-not $alanlar.question) { $r.Kod = 'BOS'; $r.Hata = 'bos soru/handoff metni'; return $r }
-    foreach ($ad in @($alanlar.Keys)) {
-        if (-not $alanlar[$ad]) { continue }
-        $prot = Protect-BeyinSecrets -Text $alanlar[$ad] -Vault $Paths.Vault
-        if ([int]$prot.Failed -gt 0) { $r.Kod = 'REDAKSIYON_DUSTU'; $r.Hata = "$($prot.Failed) desen uygulanamadi"; return $r }
-        $alanlar[$ad] = $prot.Text
-        $r.Maske += [int]$prot.Redactions
+    # HEDEF DOGRULAMASI (2026-10-07): claude|codex disinda bir hedefe yazilan aktarimi hic
+    # kimse almazdi (ornek: BEYIN_BRIFING_KIME yazim hatasi).
+    $Kime = ([string]$Kime).Trim().ToLowerInvariant()
+    if ($Kime -ne 'claude' -and $Kime -ne 'codex') { $r.Kod = 'HEDEF_GECERSIZ'; $r.Hata = "hedef ajan claude ya da codex olmali: '$Kime'"; return $r }
+    # Kisa alanlar: yalniz guvenli karakterler, sinirli uzunluk (gorunumde ve baglamda basilir).
+    $temiz = { param([string]$T, [int]$Max) $t = ([string]$T -replace '[^\p{L}\p{Nd} ._@*:()-]', '').Trim(); if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max) }; $t }
+    $Proje = & $temiz $Proje 64; $HedefProje = & $temiz $HedefProje 64; $Ref = & $temiz $Ref 120
+    $Coordinator = & $temiz $Coordinator 64; $FromAgent = & $temiz $FromAgent 16; $FromSession = & $temiz $FromSession 64
+    # MASKE ONCE, KISALTMA SONRA (2026-10-07): eskiden once 600/300'e kesiliyordu; sinirda
+    # kesilen bir anahtar desenin asgari uzunlugunun altina dusup kismen kaciyordu.
+    $hamAlan = [ordered]@{ question = $Metin; evidence = $Kanit; scope = $Kapsam; risk = $Risk; next = $Sonraki }
+    $sinir = @{ question = 600; evidence = 300; scope = 300; risk = 300; next = 300 }
+    $alanlar = [ordered]@{}
+    foreach ($ad in @($hamAlan.Keys)) {
+        $deger = ([string]$hamAlan[$ad] -replace '\s+', ' ').Trim()
+        if ($deger) {
+            $prot = Protect-BeyinSecrets -Text $deger -Vault $Paths.Vault
+            if ([int]$prot.Failed -gt 0) { $r.Kod = 'REDAKSIYON_DUSTU'; $r.Hata = "$($prot.Failed) desen uygulanamadi"; return $r }
+            $deger = [string]$prot.Text
+            $r.Maske += [int]$prot.Redactions
+        }
+        $alanlar[$ad] = (& $kisalt $deger $sinir[$ad])
     }
+    if (-not $alanlar.question) { $r.Kod = 'BOS'; $r.Hata = 'bos soru/handoff metni'; return $r }
     $inv = [Globalization.CultureInfo]::InvariantCulture
     $id = (Get-Date).ToString('yyyyMMddTHHmmss', $inv) + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 4))
     $kayit = [ordered]@{
         v = 2; id = $id; ts = (Get-Date).ToString('o', $inv)
         from = [ordered]@{ agent = $FromAgent; session = $FromSession; project = $Proje }
-        to = $Kime; kind = $(if ($Kind) { $Kind } else { 'soru' }); ref = $Ref; coordinator = $Coordinator
+        to = $Kime; toProject = $HedefProje; kind = $(if ($Kind) { $Kind } else { 'soru' }); ref = $Ref; coordinator = $Coordinator
         question = $alanlar.question; evidence = $alanlar.evidence; scope = $alanlar.scope; risk = $alanlar.risk; next = $alanlar.next
         status = 'acik'; doneBy = ''; doneTs = ''
     }
@@ -4944,6 +4984,42 @@ function Get-BeyinKorunanPid {
         }
     } catch { }
     return $h
+}
+
+# ============================================================================
+# TESLIM HAKKI (2026-10-07): ayni oturumda bir aktarim TEK KEZ gosterilir. Uc teslim yolu
+# (session-start, prompt-counter, kill-guard-on.mjs) ayni depoyu kullanir:
+# .state\handoff-teslim\<oturum>\<id> isaret dosyasi ATOMIK olusturulur (CreateNew /
+# Node 'wx'); olusturabilen gosterir, digerleri atlar. Eskiden her yolun kendi "goruldu"
+# listesi vardi: acilista gosterilen ilk arac cagrisinda tekrar geliyordu, paralel arac
+# cagrilari ayni mesaji iki kez veriyordu (kod incelemesi, 2026-10-07).
+# ============================================================================
+function Get-BeyinTeslimDizini {
+    param([hashtable]$Paths, [string]$SessionKey)
+    return (Join-Path (Join-Path $Paths.ScrState 'handoff-teslim') $SessionKey)
+}
+
+function Get-BeyinTeslimEdilen {
+    # Bu oturumda gosterilmis aktarim kimlikleri (isaret dosyalari).
+    param([hashtable]$Paths, [string]$SessionKey)
+    try {
+        $d = Get-BeyinTeslimDizini -Paths $Paths -SessionKey $SessionKey
+        if (-not (Test-Path -LiteralPath $d)) { return @() }
+        return @(Get-ChildItem -LiteralPath $d -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike '*.damga' } | ForEach-Object { $_.Name })
+    } catch { return @() }
+}
+
+function Request-BeyinTeslimHakki {
+    # $true: isaret bu cagriyla olusturuldu, goster. $false: baskasi zaten gosterdi ya da hata.
+    param([hashtable]$Paths, [string]$SessionKey, [string]$Id)
+    try {
+        if (-not (Test-BeyinHandoffId -Id $Id) -or -not $SessionKey) { return $false }
+        $d = Get-BeyinTeslimDizini -Paths $Paths -SessionKey $SessionKey
+        New-Item -ItemType Directory -Force -Path $d -ErrorAction Stop | Out-Null
+        $fs = [IO.File]::Open((Join-Path $d $Id), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $fs.Dispose()
+        return $true
+    } catch { return $false }
 }
 
 function Close-BeyinHandoff {
@@ -5021,7 +5097,8 @@ function Sync-BeyinPanoBrifing {
             }
         }
         $varsayilanKime = 'claude'
-        try { $varsayilanKime = [string](Get-BeyinAyar 'BEYIN_BRIFING_KIME' (Get-BeyinAyarVars 'BEYIN_BRIFING_KIME')) } catch { }
+        try { $varsayilanKime = ([string](Get-BeyinAyar 'BEYIN_BRIFING_KIME' (Get-BeyinAyarVars 'BEYIN_BRIFING_KIME'))).Trim().ToLowerInvariant() } catch { }
+        if ($varsayilanKime -ne 'claude' -and $varsayilanKime -ne 'codex') { $varsayilanKime = 'claude' }   # yazim hatasi: brifing kaybolmasin
         foreach ($k in @($st.tasks)) {
             if (-not $k) { continue }
             $durum = [string]$k.status
@@ -5113,6 +5190,32 @@ function Use-BeyinOnay {
 # isletim satiri ("Pano: N acik, M bu projede"), sahiplik uyarisi (acik kartin
 # yazma kapsami bu repoya dusuyorsa) ve turetilmis pano.md. Node BASLATILMAZ.
 # ============================================================================
+function Get-BeyinAgentChefKok {
+    # AGENTCHEF YOLU (2026-10-07): ayar (BEYIN_AGENTCHEF_KOK) gecerli bir checkout'u gosteriyorsa
+    # o; degilse ~\agentchef* altinda coordination-board.mjs tasiyan kurulumlardan package.json
+    # surumu en yuksek olan; o da yoksa Desktop\codex-chef. Eskiden yol tek bir surum klasorune
+    # sabitti: AgentChef baska klasore kurulunca pano ve bekci SESSIZCE koparlardi (denetim).
+    # Donus: @{ Yol; Kaynak (ayar|tarama|varsayilan|yok); Surum }
+    $r = @{ Yol = ''; Kaynak = 'yok'; Surum = '' }
+    $gecerli = { param([string]$K) $K -and (Test-Path -LiteralPath (Join-Path $K 'scripts\coordination-board.mjs') -PathType Leaf) }
+    $surum = { param([string]$K) try { [string]((Get-Content -LiteralPath (Join-Path $K 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version) } catch { '' } }
+    $ayar = ''
+    try { $ayar = [string](Get-BeyinAyar 'BEYIN_AGENTCHEF_KOK' '') } catch { }
+    if (& $gecerli $ayar) { $r.Yol = $ayar; $r.Kaynak = 'ayar'; $r.Surum = (& $surum $ayar); return $r }
+    $adaylar = @(Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Filter 'agentchef*' -ErrorAction SilentlyContinue | Where-Object { & $gecerli $_.FullName })
+    $enIyi = $null; $enIyiV = $null
+    foreach ($a in $adaylar) {
+        $s = & $surum $a.FullName
+        $v = $null; try { $v = [version](($s -split '[-+]')[0]) } catch { }
+        if (-not $enIyi -or ($v -and (-not $enIyiV -or $v -gt $enIyiV))) { $enIyi = $a.FullName; $enIyiV = $v; $r.Surum = $s }
+    }
+    if ($enIyi) { $r.Yol = $enIyi; $r.Kaynak = 'tarama'; return $r }
+    $vars = Join-Path $env:USERPROFILE 'Desktop\codex-chef'
+    if (& $gecerli $vars) { $r.Yol = $vars; $r.Kaynak = 'varsayilan'; $r.Surum = (& $surum $vars); return $r }
+    $r.Yol = $(if ($ayar) { $ayar } else { $vars })
+    return $r
+}
+
 function Get-BeyinPanoDurum {
     param([hashtable]$Paths, [string]$Proje = '')
     $r = @{ Var = $false; Toplam = 0; Acik = 0; Todo = 0; Surecte = 0; Inceleme = 0; Bekleyen = 0; BekleyenKartlar = @(); Kartlar = @(); BuProje = @(); Satir = '' }
@@ -5502,6 +5605,7 @@ function Start-BeyinEmbedWarmup {
         $psi.Arguments = '-s -m 180 -o NUL -H "Content-Type: application/json" -d "@' + $govde + '" "' + $script:BeyinOllamaUrl + '/api/embed"'
         $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
         $psi.EnvironmentVariables['BEYIN_CHILD'] = '1'
+        $psi.EnvironmentVariables['AGENTCHEF_ROUTING_HINT'] = 'off'   # AgentChef yonlendirme satiri motorun kendi model cagrilarinda gereksiz
         [void][System.Diagnostics.Process]::Start($psi)
     } catch { }
 }

@@ -105,13 +105,20 @@ Her anlamli oturum iz birakir: ya bir not, ya bir karar, ya guncellenmis bir dos
   kaydeder (7 gun boyunca acilista enjekte edilir; `[Hafiza: Niyet]` blogu),
   `canli` su an ne oluyor, `makbuz` motor ne yazdi, `bahcivan` hangi kavram
   kullaniliyor, `copcu` disk raporu, `gom` vektor gomme, `zamanla` gece gorevleri,
-  `aktar "soru" -Kime claude|codex` ajanlar arasi soru/handoff kanali (hedef ajanin
-  yeni oturumunda `[Hafiza: Aktarim]` blogu; `-Tamam <id>` kapatir), `bekci` kaynak
+  `aktar "soru" -Kime claude|codex` ajanlar arasi soru/handoff kanali. Teslim
+  (2026-10-07): hedef ajan calisiyorsa bir sonraki Bash/PowerShell cagrisinda (PreToolUse
+  baglami), degilse bir sonraki kullanici mesajinda ya da acilista gorur; gonderen
+  `-Hedef <proje>` ile sinirlamadikca HER proje klasorunde. Yanit: `aktar "..." -Yanit <id>`;
+  kendi turunda yanit beklemek: `aktar -Bekle <id>` ya da gonder-bekle `-VeBekle`;
+  `-Tamam <id>` kapatir. Tamamen bosta duran ajani uyandiran kanal yoktur. `bekci` kaynak
   bekcisi (commit/RAM, bosta oturumlar, yetim doktor, Codex MCP birikimi; YALNIZ
   gosterir, kapatma komutlarini panoya kopyalar), `pano <komut>` ortak gorev panosu
   (AgentChef coordination-board sema v3/v4 sarmalayicisi; tek state `.state/board.json`;
-  yazma kapsami iceren her delegasyondan ONCE kart acilir, `todo -> in_progress` icin
-  brief + canli kira gerekir; acilista `Pano: N acik, M bu projede` ve bu repoya yazan
+  panoya YALNIZ `beyin pano` ile dokunulur - coordination-board'u dogrudan cagirmak onay
+  kapisini ve brifingi atlar, kartlari ayri bir dosyaya yazar. Kart, kullanici bir pano isi
+  istediginde acilir (AgentChef calisma sozlesmesi); acik karttaki yazma kapsamli is kart
+  uzerinden yurur. `todo -> in_progress` icin brief + canli kira gerekir; `done` icin hem
+  isi yapmayan bir ajanin `--verified-by` dogrulamasi hem kullanicinin `onayla TASK-x` satiri; acilista `Pano: N acik, M bu projede` ve bu repoya yazan
   kartlar icin `[Hafiza] UYARI pano:`; gorunum `10-command-center/pano.md`),
   `kullanim [gun]` enjekte edilen kavram notu sonradan gercekten acildi mi (retrieval
   makbuzu x Claude transkripti; "baglama geldi != kullanildi"), `geri-getirme-olc`

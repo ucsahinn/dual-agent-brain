@@ -21,6 +21,35 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.2.1 - Claude ile Codex konusabiliyor
+
+**Duzelen (sessizce yanlis davraniyordu):**
+
+- **Codex, Claude'un aktarimlarini hic gormuyordu.** Vault disinda bir ajan yalniz gonderenin
+  proje adi kendi klasoruyle ayni olan aktarimlari goruyordu; Beyin klasorunden Codex'e yazilan
+  mesaj codex-chef klasorundeki Codex'e hic ulasmadi. Artik aktarim hedef ajanin her proje
+  klasorunde gorunur; gonderen isterse `-Hedef <proje>` ile sinirlar.
+- **Ayni mesaj iki kez geliyordu.** Acilista gosterilen aktarim ilk komutta tekrar
+  cikiyordu, paralel komutlarda cift geliyordu. Artik bir mesaj bir oturumda tek kez gosterilir.
+- **Acilista uzun mesaj kayboluyordu.** Bloga sigmayan mesaj gosterilmeden "goruldu"
+  sayiliyordu. Artik ilki kisaltilarak gosterilir, sigmayan sonraki sefere kalir.
+- **Ajanlar `beyin` ciktisinda Turkce karakterleri bozuk goruyordu.** Komut ciktisi bir
+  ajana gidince artik duz UTF-8; terminal ayarlarina dokunulmaz.
+- Bos metinle gonderim, kapali ya da baska ajana yazilmis soruya yanit ve celisen bayraklar
+  sessizce gecmek yerine acik hatayla reddedilir. Sinirda kesilen bir anahtarin maskeden
+  kacmasi giderildi (maske artik kisaltmadan once).
+
+**Yeni:**
+
+- **Calisirken teslim:** hedef ajan calisiyorsa yeni aktarimi bir sonraki komutunda gorur;
+  kullanici mesajini beklemez. Kill guard'in zaten kayitli kancasini kullanir: yeni kayit ya
+  da Codex'te yeniden `/hooks` onayi gerekmez (kill guard girdisi bir kez onaylanmissa).
+- `beyin aktar "..." -Yanit <id>`, `-Bekle <id>`, `-VeBekle`: ayni tur icinde soru-cevap.
+- Terminalde renkli cikti: yanit ve kimlikler camgobegi, basari yesil, uyari sari, hata kirmizi.
+- AgentChef yolu otomatik bulunur (gecerli ayar, yoksa en yeni `~\agentchef*` kurulumu).
+- Belgeler: pano yalniz `beyin pano` ile; kart kullanici isteyince acilir; `done` icin hem
+  isi yapmayan bir ajanin dogrulamasi hem kullanicinin `onayla TASK-x` satiri.
+
 ## 1.2.0 - insan onayi, maliyet, surec oldurme korumasi
 
 **Kirici degisiklikler:**

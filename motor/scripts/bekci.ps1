@@ -90,8 +90,7 @@ if ($yetimler.Count -gt 0) {
 }
 
 # 4) Codex MCP birikimi - AgentChef'in kendi tarayicisi (yeniden yazilmaz)
-$kok = ''
-try { $kok = [string](Get-BeyinAyar 'BEYIN_AGENTCHEF_KOK' (Join-Path $env:USERPROFILE 'Desktop\codex-chef')) } catch { $kok = Join-Path $env:USERPROFILE 'Desktop\codex-chef' }
+$kok = [string](Get-BeyinAgentChefKok).Yol
 $hyg = $null; $hygYol = ''
 foreach ($pl in @('agentchef', 'agentchef-workflows')) {
     $aday = Join-Path $kok "plugins\$pl\scripts\codex-process-hygiene.mjs"

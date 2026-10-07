@@ -189,6 +189,7 @@ try {
         $bsPsi.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
         $bsPsi.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
         $bsPsi.EnvironmentVariables['BEYIN_CHILD'] = '1'
+        $bsPsi.EnvironmentVariables['AGENTCHEF_ROUTING_HINT'] = 'off'   # AgentChef yonlendirme satiri motorun kendi model cagrilarinda gereksiz
         $bsProc = [System.Diagnostics.Process]::Start($bsPsi)
         $bsProc.StandardInput.Close()
         $bsOut = $bsProc.StandardOutput.ReadToEndAsync(); $bsErr = $bsProc.StandardError.ReadToEndAsync()

@@ -36,24 +36,24 @@ if (-not (Test-Path -LiteralPath (Join-Path $Vault 'motor\hooks\lib.ps1'))) { Wr
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
 $p = Get-BeyinPaths -Vault $Vault
 
-$kok = ''
-try { $kok = [string](Get-BeyinAyar 'BEYIN_AGENTCHEF_KOK' (Join-Path $env:USERPROFILE 'Desktop\codex-chef')) } catch { $kok = Join-Path $env:USERPROFILE 'Desktop\codex-chef' }
+$acKok = Get-BeyinAgentChefKok
+$kok = [string]$acKok.Yol
 $board = Join-Path $kok 'scripts\coordination-board.mjs'
 $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
 $args2 = @($Arg | Where-Object { $null -ne $_ })
 
 if ($args2.Count -eq 0) {
     $d = Get-BeyinPanoDurum -Paths $p
-    "PANO  state: $($p.Board)  |  AgentChef: $board $(if (Test-Path -LiteralPath $board) { '' } else { '(YOK - BEYIN_AGENTCHEF_KOK ayarini kontrol et)' })"
-    "  acik kart: $($d.Acik) (todo $($d.Todo), in_progress $($d.Surecte), review $($d.Inceleme)) · bekleyen (backlog) $($d.Bekleyen) · toplam $($d.Toplam)"
-    foreach ($k in $d.Kartlar) { "  - $($k.id) [$($k.status)] $($k.title)$(if ($k.owner) { " · $($k.owner.agent)" })$(if ($k.writeScope) { " · yazar: $($k.writeScope.repo): $(@($k.writeScope.paths) -join ', ')" })$(if ($k.leaseUntil) { " · kira $($k.leaseUntil)" })" }
+    "PANO  state: $($p.Board)  |  AgentChef: $board $(if (Test-Path -LiteralPath $board) { "(surum $($acKok.Surum), kaynak: $($acKok.Kaynak))" } else { '(YOK - BEYIN_AGENTCHEF_KOK ayarini kontrol et)' })"
+    "  acik kart: $($d.Acik) (todo $($d.Todo), in_progress $($d.Surecte), review $($d.Inceleme)) - bekleyen (backlog) $($d.Bekleyen) - toplam $($d.Toplam)"
+    foreach ($k in $d.Kartlar) { "  - $($k.id) [$($k.status)] $($k.title)$(if ($k.owner) { " - $($k.owner.agent)" })$(if ($k.writeScope) { " - yazar: $($k.writeScope.repo): $(@($k.writeScope.paths) -join ', ')" })$(if ($k.leaseUntil) { " - kira $($k.leaseUntil)" })" }
     ''
     'Komutlar AgentChef coordination-board ile birebir: init | create | brief | brief-check | assign | renew-lease | transition | add-evidence | handoff | resolve-handoff | handoff-check | attach-report | show'
     '  1.3.3+: in_progress icin sahip (assign) gerekir; review icin kanit; done icin --verified-by (sahip/oturum/koordinator DISINDA biri);'
     '  geri hareketler (review->in_progress, ->blocked, ->cancelled) --reason ister; show: --status open, --owner, leaseState/stale alanlari.'
     '  beyin pano create --id TASK-012 --title "..." --owner-coordinator backend_coordinator --owner-agent codex --write-repo Beyin --write-paths motor/x.ps1'
-    '  beyin pano brief-check --brief-file brief.md   ·   beyin pano brief --task TASK-012 --brief-file brief.md'
-    '  beyin pano renew-lease --task TASK-012 --minutes 90   ·   beyin pano transition --task TASK-012 --status in_progress'
+    '  beyin pano brief-check --brief-file brief.md   -   beyin pano brief --task TASK-012 --brief-file brief.md'
+    '  beyin pano renew-lease --task TASK-012 --minutes 90   -   beyin pano transition --task TASK-012 --status in_progress'
     '  beyin pano attach-report --task TASK-012 --report-id TASK-012-sonuc.md   (review -> done icin rapor zorunlu; kimlik "<TASK>-*.md" biciminde)'
     "Turetilmis gorunum: $(Join-Path (Join-Path $Vault '10-command-center') 'pano.md')"
     exit 0

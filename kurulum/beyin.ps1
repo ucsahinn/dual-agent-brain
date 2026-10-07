@@ -188,6 +188,41 @@ function Cagir([string]$Betik, $Args2) {
     # (ayar dalinda -BosDeger). Bkz. A4 duzeltmesi.
     $psArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $yol)
     foreach ($a in @($Args2)) { if ($null -ne $a) { $psArgs += [string]$a } }
+    # YONLENDIRILMIS CIKTI = UTF-8 (2026-10-07): cikti bir ajana/boruya gidiyorsa alt betik
+    # kendi gizli konsoluyla baslatilir ve UTF-8 yazar (lib.ps1: BEYIN_STDOUT_UTF8); baytlar
+    # burada DOKUNULMADAN iletilir. Eskiden konsol kod sayfasiyla (IBM437/857) yeniden
+    # kodlaniyordu: ajan 'ğ'->'g', '·'->'?' goruyordu. Kullanicinin/ajanin terminal kod
+    # sayfasi DEGISMEZ. Etkilesimli kullanim eskisi gibi.
+    $yonlu = $false
+    try { $yonlu = [Console]::IsOutputRedirected } catch { }
+    if ($yonlu -and $env:BEYIN_STDOUT_UTF8 -ne '1') {
+        $tirnak = {
+            param([string]$s)
+            if ($s -ne '' -and $s -notmatch '[\s"]') { return $s }
+            $b = New-Object System.Text.StringBuilder; [void]$b.Append('"'); $ters = 0
+            foreach ($c in $s.ToCharArray()) {
+                if ($c -eq '\') { $ters++; continue }
+                if ($c -eq '"') { [void]$b.Append('\' * ($ters * 2 + 1)); [void]$b.Append('"'); $ters = 0; continue }
+                if ($ters) { [void]$b.Append('\' * $ters); $ters = 0 }
+                [void]$b.Append($c)
+            }
+            if ($ters) { [void]$b.Append('\' * ($ters * 2)) }
+            [void]$b.Append('"'); return $b.ToString()
+        }
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = 'powershell.exe'
+        $psi.Arguments = (($psArgs | ForEach-Object { & $tirnak $_ }) -join ' ')
+        $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+        $psi.EnvironmentVariables['BEYIN_STDOUT_UTF8'] = '1'
+        $pr = [System.Diagnostics.Process]::Start($psi)
+        $hedefOut = [Console]::OpenStandardOutput(); $hedefErr = [Console]::OpenStandardError()
+        $t1 = $pr.StandardOutput.BaseStream.CopyToAsync($hedefOut)
+        $t2 = $pr.StandardError.BaseStream.CopyToAsync($hedefErr)
+        $pr.WaitForExit()
+        try { [void]$t1.Wait(10000); [void]$t2.Wait(10000); $hedefOut.Flush(); $hedefErr.Flush() } catch { }
+        exit $pr.ExitCode
+    }
     & powershell @psArgs
     exit $LASTEXITCODE
 }
@@ -596,7 +631,7 @@ switch ($KomutN) {
         # beyin aktar "soru" -Kime claude|codex [-Kanit ..] [-Kapsam ..] [-Risk ..] [-Sonraki ..] [-Proje x]
         # beyin aktar [-Hepsi]  |  beyin aktar -Tamam <id>
         # niyet rotasiyla ayni kural: adli degerler disindaki TUM konumsal parcalar metindir.
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur') -Bayrak @('-hepsi') -SinirsizSlot
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur', '-yanit', '-bekle', '-sure', '-hedef') -Bayrak @('-hepsi', '-vebekle') -SinirsizSlot
         $hArgs = @($a.Gecen)
         $hMetin = ((@($a.Konum)) -join ' ').Trim()
         $hMetinVar = $false

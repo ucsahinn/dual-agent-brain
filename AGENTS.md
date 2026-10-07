@@ -91,13 +91,21 @@ only in `CLAUDE.md`.
   engine receipts, `bahcivan` reports concept usage, `copcu` is the disk janitor
   report, `gom` embeds concepts for vector retrieval, `zamanla` registers the
   nightly tasks, `aktar "question" -Kime claude|codex`
-  cross-agent question/handoff channel (shows as a `[Hafiza: Aktarim]` block in the
-  target agent's next session; `-Tamam <id>` closes it), `bekci` resource watchdog
+  cross-agent question/handoff channel. Delivery (2026-10-07): while the target agent is
+  working it sees the message at its next Bash/PowerShell call (PreToolUse context), otherwise
+  at its next user message or session opening, in ANY project folder unless the sender
+  limits it with `-Hedef <project>`. Answer with `aktar "..." -Yanit <id>`; wait for an
+  answer inside your own turn with `aktar -Bekle <id>` or send-and-wait with `-VeBekle`;
+  `-Tamam <id>` closes. No channel wakes a fully idle agent. `bekci` resource watchdog
   (commit/RAM, idle sessions, orphan doctor processes, Codex MCP build-up; REPORT
   ONLY, copies kill commands to the clipboard), `pano <command>` shared task board
   (wrapper over AgentChef coordination-board schema v3/v4; single state
-  `.state/board.json`; open a card BEFORE any delegation that writes files;
-  `todo -> in_progress` needs a brief and a live lease; session start shows
+  `.state/board.json`; touch the board ONLY through `beyin pano` - calling
+  coordination-board directly skips the approval gate and briefings and writes cards to a
+  separate file. A card is opened when the user asks for board work (AgentChef working
+  agreement); write-scoped work on an open card runs through that card.
+  `todo -> in_progress` needs a brief and a live lease; `done` needs both a `--verified-by`
+  check by an agent that did not do the work and the user's `onayla TASK-x` line; session start shows
   `Pano: N open, M in this project` and `[Hafiza] UYARI pano:` for open cards
   writing into this repo; view `10-command-center/pano.md`), `kullanim [gun]` did an
   injected concept note actually get opened afterwards (retrieval receipt x Claude

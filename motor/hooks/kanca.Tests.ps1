@@ -479,6 +479,44 @@ Describe 'Faz B BB3 (2026-10-06): devir blogu' {
         [string]$acik[0].kind | Should Be 'devir'
         [string]$ilk.status | Should Be 'tamam'
     }
+    It 'teslim suzgeci: hedef projesiz soru her projede, -Hedef verilen yalniz o projede, devir yalniz kendi projesinde' {
+        $tv = Join-Path $env:TEMP ("beyin-teslim-" + [guid]::NewGuid().ToString('N'))
+        $tp = Get-BeyinPaths -Vault $tv
+        New-Item -ItemType Directory -Force -Path $tp.ScrState | Out-Null
+        try {
+            $a = Add-BeyinHandoff -Paths $tp -Metin 'her yere gidecek soru' -Kime 'codex' -Proje 'Beyin' -FromAgent 'claude' -GorunumYok
+            $b = Add-BeyinHandoff -Paths $tp -Metin 'yalniz x projesine' -Kime 'codex' -Proje 'Beyin' -HedefProje 'x' -FromAgent 'claude' -GorunumYok
+            $c = Add-BeyinHandoff -Paths $tp -Metin 'beyin devri metni' -Kime 'codex' -Proje 'Beyin' -Kind 'devir' -FromAgent 'codex' -GorunumYok
+            $codexChef = @(Get-BeyinHandoffAcik -Paths $tp -Kime 'codex' -Proje 'codex-chef' | ForEach-Object { [string]$_.id })
+            $xProje = @(Get-BeyinHandoffAcik -Paths $tp -Kime 'codex' -Proje 'x' | ForEach-Object { [string]$_.id })
+            $beyin = @(Get-BeyinHandoffAcik -Paths $tp -Kime 'codex' -Proje 'Beyin' | ForEach-Object { [string]$_.id })
+        } finally { Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue }
+        ($codexChef -contains $a.Id) | Should Be $true
+        ($codexChef -contains $b.Id) | Should Be $false
+        ($codexChef -contains $c.Id) | Should Be $false
+        ($xProje -contains $b.Id) | Should Be $true
+        ($beyin -contains $c.Id) | Should Be $true
+    }
+    It 'session-start: blogu asan uzun mesaj kaybolmaz - ilki kisaltilarak gosterilir, sigmayan isaretlenmez' {
+        $sid = "kanca-test-uzun-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+        $uzun = 'UZUNTEST ' + ('a' * 590)
+        $u1 = Add-BeyinHandoff -Paths $p -Metin ($uzun + ' BIR') -Kime 'claude' -Kanit ('k' * 290) -Sonraki ('s' * 290) -Proje 'Beyin' -FromAgent 'codex' -GorunumYok
+        Start-Sleep -Milliseconds 1100
+        $u2 = Add-BeyinHandoff -Paths $p -Metin ($uzun + ' IKI') -Kime 'claude' -Kanit ('k' * 290) -Sonraki ('s' * 290) -Proje 'Beyin' -FromAgent 'codex' -GorunumYok
+        try {
+            $ctx = Invoke-Kanca 'session-start.ps1' @{ session_id = $sid; cwd = $vault; hook_event_name = 'SessionStart'; source = 'startup' }
+            $teslim = @(Get-BeyinTeslimEdilen -Paths $p -SessionKey (Get-BeyinSessionKey -SessionId $sid))
+        } finally {
+            foreach ($i in @($u1.Id, $u2.Id)) { foreach ($dir in @($p.Handoff, (Join-Path $p.Handoff 'arsiv'))) { Remove-Item -LiteralPath (Join-Path $dir "$i.json") -Force -ErrorAction SilentlyContinue } }
+            Remove-Item -LiteralPath (Get-BeyinTeslimDizini -Paths $p -SessionKey (Get-BeyinSessionKey -SessionId $sid)) -Recurse -Force -ErrorAction SilentlyContinue
+            $null = Update-BeyinAktarimlarMd -Paths $p
+            Remove-Oturum $sid
+        }
+        # En yeni once: u2 gosterilir (kisaltilmis), u1 sigmaz ve ISARETLENMEZ (sonraki sefere kalir).
+        $ctx.Contains($u2.Id) | Should Be $true
+        ($teslim -contains $u2.Id) | Should Be $true
+        ($teslim -contains $u1.Id) | Should Be $false
+    }
     It 'session-start: devir yalniz ayni projede gosterilir ve gosterilince kapanir' {
         $sid = "kanca-test-devir-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
         $proje = Get-BeyinProjectLeaf -Path $vault -Paths $p

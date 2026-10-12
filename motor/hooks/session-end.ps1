@@ -43,6 +43,13 @@ $cwdLeaf    = if ($cwd) { Get-BeyinProjectLeaf -Path $cwd -Paths $p } else { '-'
 # oturum acilisinda toparlanir (temiz kapanmayan oturumlar kaybolmasin).
 # ============================================================================
 $isCodex = ((Get-BeyinAgent) -eq 'codex')
+# TAKIM ISCISI (2026-10-12): kosu/kart kimligi ortamdan, yoksa oturum durumundan. Kuyruk
+# nedeni 'takim-<TASK>' olur (gunluk log basligi [codex/kuyruk-takim-TASK-x]); sefe tek
+# 'isci bitti' brifingi yazilir (ref ile tekil); yansima isareti atlanir.
+$seKart = $(if ($env:AGENTCHEF_TEAM_TASK) { [string]$env:AGENTCHEF_TEAM_TASK } else { [string]$st.takimKart })
+$seRun  = $(if ($env:AGENTCHEF_TEAM_RUN)  { [string]$env:AGENTCHEF_TEAM_RUN }  else { [string]$st.takimRun })
+if ($seKart -cnotmatch '^TASK-\d+$') { $seKart = '' }
+$seNeden = $(if ($seKart) { "takim-$seKart" } else { 'session-end' })
 # Transkript diskte yoksa surec dogurma: bos bir flush claims\ altina olu bir
 # kilit dosyasi birakip cikiyordu (session-start kuyruk dongusu bu kontrolu
 # zaten yapiyor, iki kanca yapmiyordu).
@@ -64,7 +71,7 @@ if ($transcript -and $prompts -ge 2 -and $isCodex) {
     # atlanir (o da alt surec). hooks.json'daki timeout DEGISTIRILMEZ: Codex
     # guven hash'i timeout alanini da kapsar, degisen kanca /hooks ile yeniden
     # onaylanana kadar sessizce atlanir.
-    Add-BeyinQueue -Paths $p -TranscriptPath $transcript -Cwd $cwd -Reason 'session-end' -Agent 'codex'
+    Add-BeyinQueue -Paths $p -TranscriptPath $transcript -Cwd $cwd -Reason $seNeden -Agent 'codex'
     # Kanit damgasi: doktor 'Codex SessionEnd' satiri engine.log yerine bunu okur
     # (log 500 KB'de son 200 satira kirpiliyor; 7 gunluk sayim orada guvenilmez).
     Write-BeyinText -Path (Join-Path $p.ScrState 'last-codex-session-end.txt') -Text (Get-Date -Format 'o')
@@ -111,6 +118,27 @@ if ($transcript -and $prompts -ge 2 -and $isCodex) {
     Write-BeyinLog -Vault $vault -Message "session-end: $prompts prompt, is kuyruga alindi (proje=$cwdLeaf, ajan=$(Get-BeyinAgent))"
     Write-BeyinMakbuz -Paths $p -Script 'session-end' -Outcome 'KUYRUK' -Agent (Get-BeyinAgent) -Key (Get-BeyinSessionKey -SessionId $hook.session_id) `
         -Reason 'session-end' -DurationMs (Get-SeMs) -Note "$prompts prompt, proje=$cwdLeaf (kisa oturum: flush karar verir)"
+}
+
+# ============================================================================
+# 1b) TAKIM ISCISI BITTI (2026-10-12): sefe (claude) tek brifing. Ref 'takim:<run>:<TASK>'
+# ile tekil - ayni ref'li acik kayit varsa yazilmaz. Yalniz zaman kaldiysa (Codex 3 sn tavani).
+# Motor (team-run collect) zaten bilir; bu, sefin oturum icinde "isci bitti"yi bir kez gormesi
+# icin. Makbuz once yazilir: brifing atlansa da iz kalir.
+# ============================================================================
+if ($seKart) {
+    $seRef = "takim:$seRun`:$seKart"
+    Write-BeyinMakbuz -Paths $p -Script 'session-end' -Outcome 'TAKIM_ISCI_BITTI' -Agent (Get-BeyinAgent) -Key (Get-BeyinSessionKey -SessionId $hook.session_id) `
+        -Reason $seNeden -DurationMs (Get-SeMs) -Note "run=$seRun kart=$seKart prompts=$prompts"
+    if ((Get-SeMs) -lt 1500) {
+        try {
+            $seVar = @(Get-BeyinHandoffListe -Paths $p | Where-Object { [string]$_.ref -eq $seRef }).Count
+            if ($seVar -eq 0) {
+                $null = Add-BeyinHandoff -Paths $p -Metin "Isci bitti: $seKart (kosu $seRun, $prompts prompt). Topla: beyin takim collect --run $seRun" `
+                    -Kime 'claude' -Kind 'brifing' -Ref $seRef -FromAgent (Get-BeyinAgent) -FromWorker $seKart -Proje $cwdLeaf -GorunumYok
+            }
+        } catch { }
+    }
 }
 
 # ============================================================================
@@ -173,7 +201,7 @@ foreach ($n in @('current-context.md','active-threads.md','rules.md')) {
     }
 }
 
-if ($prompts -ge 5 -and -not $modified) {
+if ($prompts -ge 5 -and -not $modified -and -not $seKart) {   # isci oturumu yansima isareti birakmaz
     $key = Get-BeyinSessionKey -SessionId $hook.session_id
     $txt = "$((Get-Date).ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)) - $prompts mesaj"
     if ($cwdLeaf -ne '-') { $txt += " - proje: $cwdLeaf" }

@@ -119,9 +119,13 @@ BAKIM
                    resolve-handoff | handoff-check | attach-report | show   (AgentChef 1.3.3: sema v4, blocked/cancelled)
                    onayla TASK-x : insan onayi (yalniz etkilesimli terminal; sohbetten tek satir 'onayla TASK-x').
                    'done' gecisi onay ister (ayar BEYIN_PANO_ONAY); review/blocked gecisi koordinatore tek brifing yazar
+  takim <komut>    Takim kosusu (AgentChef team-run.mjs sarmalayicisi; sef = Claude oturumu, isciler = Codex):
+                   plan | start | status | collect | integrate | verify | merge | pause | resume | abort | cleanup | doctor
+                   durum [id] | baslat <id> | birlestir <id> (terminal onayi) | durdur <id> (abort) | maliyet <id>
+                   'start' onayi: sohbete tek satir 'baslat <runId>'; 'merge' onayi: 'birlestir <runId>'
   aktar [metin]    Ajanlar arasi aktarim: -Kime claude|codex ile soru/handoff kaydet (hedef ajanin yeni
                    oturumunda ve oturum icinde bir kez [Hafiza: Aktarim] blogu); -Tur soru|devir; argumansiz liste;
-                   -Tamam <id> kapatir; -Hepsi kapalilar
+                   -Tamam <id> kapatir; -Hepsi kapalilar; -Isci TASK-x yalniz o takim iscisine (sema v3)
   topla [gun]      Pencereden dusmus oturumlari topla (varsayilan kuru calisma, 3 gun)
   topla-uygula     Ayni, ama gercekten isle
   derle            Gunluk loglardan kavram notu uret
@@ -506,6 +510,13 @@ switch ($KomutN) {
         foreach ($x in $PA) { $pnArg += [string]$x.T }
         Cagir 'pano.ps1' $pnArg
     }
+    { $_ -in @('takim', 'team') } {
+        # HAM GECIS (pano gibi): komut ve --bayraklar AgentChef team-run.mjs'e aynen gider;
+        # Beyin fiilleri (durum|baslat|birlestir|durdur|maliyet) ve onay kapisi takim.ps1'de.
+        $tkArg = @()
+        foreach ($x in $PA) { $tkArg += [string]$x.T }
+        Cagir 'takim.ps1' $tkArg
+    }
     { $_ -in @('bekci', 'watchdog') } {
         # beyin bekci [-BostaDk n] [-Json] [-PanoyaKopyalama]  - yalniz gosterir, hicbir sureci kapatmaz
         $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-bostadk') -Bayrak @('-json', '-panoyakopyalama') -Slot 0
@@ -563,9 +574,9 @@ switch ($KomutN) {
         Cagir 'kullanim.ps1' (@($s.Gecen) + @($a.Gecen))
     }
     { $_ -in @('maliyet', 'cost') } {
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-gun') -Bayrak @('-json', '-yalniztara') -Slot 1
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-gun', '-run') -Bayrak @('-json', '-yalniztara') -Slot 1
         $s = Sayi-Konum '-Gun' $a.Konum
-        Konum-Reddet $Komut $s.Konum 'Kullanim: beyin maliyet [gun] [-Json] [-YalnizTara]'
+        Konum-Reddet $Komut $s.Konum 'Kullanim: beyin maliyet [gun] [-Json] [-YalnizTara] [-Run <takim kosusu>]'
         Cagir 'maliyet.ps1' (@($s.Gecen) + @($a.Gecen))
     }
     { $_ -in @('skill-aday', 'skill-adaylari') } {
@@ -631,7 +642,7 @@ switch ($KomutN) {
         # beyin aktar "soru" -Kime claude|codex [-Kanit ..] [-Kapsam ..] [-Risk ..] [-Sonraki ..] [-Proje x]
         # beyin aktar [-Hepsi]  |  beyin aktar -Tamam <id>
         # niyet rotasiyla ayni kural: adli degerler disindaki TUM konumsal parcalar metindir.
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur', '-yanit', '-bekle', '-sure', '-hedef') -Bayrak @('-hepsi', '-vebekle') -SinirsizSlot
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur', '-yanit', '-bekle', '-sure', '-hedef', '-isci', '-oturum') -Bayrak @('-hepsi', '-vebekle') -SinirsizSlot
         $hArgs = @($a.Gecen)
         $hMetin = ((@($a.Konum)) -join ' ').Trim()
         $hMetinVar = $false

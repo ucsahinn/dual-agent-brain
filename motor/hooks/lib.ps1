@@ -65,7 +65,17 @@ function Get-BeyinAgent {
     # Hangi ajan bu kancayi calistirdi. Launcher BEYIN_AGENT'i ayarlar.
     # Vault TEK BEYIN: Claude Code ve Codex ayni motoru cagiriyor, gunluk log
     # blogu hangisinin urettigini gosteriyor.
+    #
+    # AJANIN KENDI KABUGU (2026-10-07): kanca disinda, ajan 'beyin aktar' gibi bir komutu
+    # kendi kabugundan calistirdiginda BEYIN_AGENT yoktur. Eskiden bu durumda HER ZAMAN
+    # 'claude' donuyordu: Codex'in yazdigi aktarimlar 'claude' etiketiyle gidiyordu (canli
+    # olculdu: baska bir projenin oturumlari). Sira: BEYIN_AGENT > Claude Code isareti (CLAUDECODE) >
+    # Codex isaretleri (CODEX_SESSION_ID, CODEX_THREAD_ID, CODEX_MANAGED_BY_*, CODEX_SANDBOX) > claude.
     if ($env:BEYIN_AGENT -eq 'codex') { return 'codex' }
+    if ($env:BEYIN_AGENT -eq 'claude') { return 'claude' }
+    if ($env:CLAUDECODE -eq '1') { return 'claude' }
+    if ($env:CODEX_SESSION_ID -or $env:CODEX_THREAD_ID -or $env:CODEX_MANAGED_BY_NPM -or $env:CODEX_MANAGED_BY_BUN -or
+        $env:CODEX_MANAGED_BY_PNPM -or $env:CODEX_MANAGED_PACKAGE_ROOT -or $env:CODEX_SANDBOX) { return 'codex' }
     return 'claude'
 }
 
@@ -529,6 +539,8 @@ function Get-BeyinPaths {
         Makbuz   = Join-Path $Vault 'motor\scripts\.state\makbuz'   # kosu makbuzlari (JSONL)
         Handoff  = Join-Path $Vault 'motor\scripts\.state\handoff'  # ajanlar arasi aktarimlar (beyin aktar)
         Board    = Join-Path $Vault 'motor\scripts\.state\board.json' # ortak gorev panosu (beyin pano / AgentChef coordination-board)
+        TeamRuns = Join-Path $Vault 'motor\scripts\.state\team-runs'   # takim kosulari (AgentChef team-run.mjs yazar; beyin takim yalniz okur)
+        TakimOturum = Join-Path $Vault 'motor\scripts\.state\takim-oturum' # isci oturumu -> kart eslemesi (isci session-start yazar; maliyet okur)
         Archive  = Join-Path $Vault '90-archive'
     }
 }
@@ -689,6 +701,13 @@ function Get-BeyinSessionState {
             if ($o.PSObject.Properties['handoffDamga'] -and $o.handoffDamga) { $handoffDamga = [string]$o.handoffDamga }
             $oturumPid = 0
             if ($o.PSObject.Properties['pid'] -and $o.pid) { $oturumPid = [int]$o.pid }
+            # 'takimRun' / 'takimKart' (2026-10-12, takim modu): bu oturum bir takim iscisiyse
+            # (AGENTCHEF_TEAM_RUN/TASK ortami) kosu ve kart kimligi. Aktarim suzgeci, bekci ve
+            # session-end bunlari okur. Set- tarafiyla BIRLIKTE eklendi.
+            $takimRun = ''
+            if ($o.PSObject.Properties['takimRun'] -and $o.takimRun) { $takimRun = [string]$o.takimRun }
+            $takimKart = ''
+            if ($o.PSObject.Properties['takimKart'] -and $o.takimKart) { $takimKart = [string]$o.takimKart }
             return @{
                 start       = [int64]$o.start
                 prompts     = [int]$o.prompts
@@ -701,11 +720,13 @@ function Get-BeyinSessionState {
                 seenHandoff = $seenHandoff
                 handoffDamga = $handoffDamga
                 pid         = $oturumPid
+                takimRun    = $takimRun
+                takimKart   = $takimKart
                 key         = $key
             }
         } catch { }
     }
-    return @{ start = 0; prompts = 0; cwd = ''; kavram = @(); agent = ''; pcSayi = 0; pcGun = ''; herdrPane = ''; seenHandoff = @(); handoffDamga = ''; pid = 0; key = $key }
+    return @{ start = 0; prompts = 0; cwd = ''; kavram = @(); agent = ''; pcSayi = 0; pcGun = ''; herdrPane = ''; seenHandoff = @(); handoffDamga = ''; pid = 0; takimRun = ''; takimKart = ''; key = $key }
 }
 
 function Set-BeyinSessionState {
@@ -735,7 +756,11 @@ function Set-BeyinSessionState {
     if ($State.ContainsKey('handoffDamga') -and $State['handoffDamga']) { $handoffDamga = [string]$State['handoffDamga'] }
     $oturumPid = 0
     if ($State.ContainsKey('pid') -and $State['pid']) { $oturumPid = [int]$State['pid'] }
-    $json = @{ start = $State.start; prompts = $State.prompts; cwd = $State.cwd; kavram = $kavram; agent = $agent; pcSayi = $pcSayi; pcGun = $pcGun; herdrPane = $herdrPane; seenHandoff = $seenHandoff; handoffDamga = $handoffDamga; pid = $oturumPid } |
+    $takimRun = ''
+    if ($State.ContainsKey('takimRun') -and $State['takimRun']) { $takimRun = [string]$State['takimRun'] }
+    $takimKart = ''
+    if ($State.ContainsKey('takimKart') -and $State['takimKart']) { $takimKart = [string]$State['takimKart'] }
+    $json = @{ start = $State.start; prompts = $State.prompts; cwd = $State.cwd; kavram = $kavram; agent = $agent; pcSayi = $pcSayi; pcGun = $pcGun; herdrPane = $herdrPane; seenHandoff = $seenHandoff; handoffDamga = $handoffDamga; pid = $oturumPid; takimRun = $takimRun; takimKart = $takimKart } |
             ConvertTo-Json -Compress
     Write-BeyinText -Path $f -Text $json
 }
@@ -3487,6 +3512,17 @@ function Test-BeyinModelAuth {
     } catch { return @{ Ok = $false; Kesin = $false; Backend = $b; Detay = "kontrol hatasi: $($_.Exception.Message)" } }
 }
 
+function Test-BeyinOzetBicimi {
+    # Ozetleyici ciktisi istenen bicimde mi (2026-10-12)? Model bazen transkripti
+    # "prompt injection" sayip REDDEDIYOR ya da serbest metin donuyor; bu metin
+    # eskiden normal ozet gibi gunluk loga yaziliyor, watermark ilerliyor ve o
+    # transkript parcasi kayboluyordu (olculdu: 2026-10-06 ve 2026-10-09, iki blok).
+    # Gecerli ozet '**Ne konusuldu:**' basligini tasir (model 's' yerine 'ş' de yazar).
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
+    return [regex]::IsMatch($Text, '\*\*\s*Ne\s+konu[sş]uldu\s*:?\s*\*\*', $script:BeyinRxCI)
+}
+
 function Get-BeyinFailDetail {
     # Bir basarisiz Invoke-BeyinClaude sonucundan LOGA YAZILABILIR tek satirlik
     # sebep uretir.
@@ -4797,9 +4833,29 @@ function Get-BeyinHandoffListe {
 
 function Get-BeyinHandoffAcik {
     # Hedef ajana (ve istenirse projeye) gore acik aktarimlar.
-    param([hashtable]$Paths, [string]$Kime = '', [string]$Proje = '')
+    # -KonumProje: oturumun BULUNDUGU projenin adi (vault icinde de verilir). -Hedef'li bir mesaj
+    # yalniz o projede gosterilir; eskiden vault icinde ($Proje bos) bu suzgec hic uygulanmiyor,
+    # baska projeye yazilmis mesaj Beyin oturumuna dusuyordu (canli olculdu 2026-10-08).
+    # -Isci / -OturumKey (2026-10-12, takim modu, sema v3): isci oturumu (AGENTCHEF_TEAM_TASK)
+    # YALNIZ kendi kartina (toWorker) ya da kendi oturumuna (toSession) adresli mesaji alir;
+    # genel '-Kime codex' mesaji 4 isciye birden dusmesin. Isci olmayan oturum toWorker'li
+    # mesaji ALMAZ, toSession'li mesaji yalniz kendi anahtariysa alir. v2 kayitlar degismez.
+    param([hashtable]$Paths, [string]$Kime = '', [string]$Proje = '', [string]$KonumProje = '', [string]$Isci = '', [string]$OturumKey = '')
     $acik = @(Get-BeyinHandoffListe -Paths $Paths)
     if ($Kime)  { $acik = @($acik | Where-Object { [string]$_.to -eq $Kime }) }
+    $acik = @($acik | Where-Object {
+        $tw = $(if ($_.PSObject.Properties['toWorker'])  { [string]$_.toWorker }  else { '' })
+        $ts = $(if ($_.PSObject.Properties['toSession']) { [string]$_.toSession } else { '' })
+        if ($Isci) { ($tw -and $tw -eq $Isci) -or ($ts -and $OturumKey -and $ts -eq $OturumKey) }
+        else { (-not $tw) -and ((-not $ts) -or ($OturumKey -and $ts -eq $OturumKey)) }
+    })
+    $konum = $(if ($KonumProje) { $KonumProje } else { $Proje })
+    if ($konum) {
+        $acik = @($acik | Where-Object {
+            $hp = $(if ($_.PSObject.Properties['toProject']) { [string]$_.toProject } else { '' })
+            (-not $hp) -or $hp -eq '*' -or [string]::Equals($hp, $konum, [StringComparison]::OrdinalIgnoreCase)
+        })
+    }
     # TESLIM SUZGECI (2026-10-07): eskiden vault disinda yalniz from.project == bu proje
     # gosteriliyordu; bir ajana ACIKCA yazilmis mesaj, gonderenin klasoru farkliysa HIC
     # ulasmiyordu (olculdu: Claude'un Beyin/agentchef etiketli iki aktarimini codex-chef
@@ -4845,6 +4901,12 @@ function Update-BeyinAktarimlarMd {
         # HTML acilisi notrlestirilir (Obsidian'da baglanti/etiket uretmesin).
         function Kisa([string]$T, [int]$N) { $t = [string]$T; if ($t.Length -gt $N) { $t = $t.Substring(0, $N - 3) + '...' }; return ((($t -replace '\|', '/') -replace '\r?\n', ' ') -replace '\[\[', '[ [' -replace '\]\]', '] ]' -replace '<', '&lt;') }
         function Zaman([string]$T) { try { return ([datetime]::Parse($T, $inv)).ToString('yyyy-MM-dd HH:mm', $inv) } catch { return '' } }
+        # v3 (takim): isciden gelen 'codex/TASK-012', isciye giden 'codex@TASK-012'.
+        function Taraf($H) {
+            $f = [string]$H.from.agent; if ($H.from.PSObject.Properties['worker'] -and $H.from.worker) { $f += '/' + [string]$H.from.worker }
+            $t = [string]$H.to; if ($H.PSObject.Properties['toWorker'] -and $H.toWorker) { $t += '@' + [string]$H.toWorker }
+            return "$f -> $t"
+        }
         $sb = New-Object System.Text.StringBuilder
         [void]$sb.AppendLine('---')
         [void]$sb.AppendLine('type: "derived"')
@@ -4862,7 +4924,7 @@ function Update-BeyinAktarimlarMd {
         else {
             [void]$sb.AppendLine('| Kimlik | Kimden -> Kime | Proje | Zaman | Soru / handoff | Kanit | Sonraki |')
             [void]$sb.AppendLine('| --- | --- | --- | --- | --- | --- | --- |')
-            foreach ($h in $acik) { [void]$sb.AppendLine("| ``$($h.id)`` | $($h.from.agent) -> $($h.to) | $(Kisa $h.from.project 24) | $(Zaman $h.ts) | $(Kisa $h.question 220) | $(Kisa $h.evidence 120) | $(Kisa $h.next 120) |") }
+            foreach ($h in $acik) { [void]$sb.AppendLine("| ``$($h.id)`` | $(Taraf $h) |$(Kisa $h.from.project 24) | $(Zaman $h.ts) | $(Kisa $h.question 220) | $(Kisa $h.evidence 120) | $(Kisa $h.next 120) |") }
         }
         [void]$sb.AppendLine('')
         [void]$sb.AppendLine("## Kapali (son $($kapali.Count))")
@@ -4871,7 +4933,7 @@ function Update-BeyinAktarimlarMd {
         else {
             [void]$sb.AppendLine('| Kimlik | Kimden -> Kime | Proje | Kapatan | Kapanis | Soru / handoff |')
             [void]$sb.AppendLine('| --- | --- | --- | --- | --- | --- |')
-            foreach ($h in $kapali) { [void]$sb.AppendLine("| ``$($h.id)`` | $($h.from.agent) -> $($h.to) | $(Kisa $h.from.project 24) | $($h.doneBy) | $(Zaman $h.doneTs) | $(Kisa $h.question 160) |") }
+            foreach ($h in $kapali) { [void]$sb.AppendLine("| ``$($h.id)`` | $(Taraf $h) |$(Kisa $h.from.project 24) | $($h.doneBy) | $(Zaman $h.doneTs) | $(Kisa $h.question 160) |") }
         }
         $yol = Join-Path (Join-Path $Paths.Vault '10-command-center') 'aktarimlar.md'
         Write-BeyinText -Path $yol -Text $sb.ToString()
@@ -4887,17 +4949,25 @@ function Add-BeyinHandoff {
     # Donus: @{ Ok; Id; Hata; Kod; Maske }  Kod: KAYDEDILDI | BOS | REDAKSIYON_DUSTU | YAZILAMADI
     param([hashtable]$Paths, [string]$Metin, [string]$Kime, [string]$Kanit = '', [string]$Kapsam = '', [string]$Risk = '',
           [string]$Sonraki = '', [string]$Proje = '', [string]$Kind = 'soru', [string]$Ref = '', [string]$Coordinator = '',
-          [string]$FromAgent = '', [string]$FromSession = '', [switch]$GorunumYok, [string]$HedefProje = '')
+          [string]$FromAgent = '', [string]$FromSession = '', [switch]$GorunumYok, [string]$HedefProje = '',
+          [string]$ToWorker = '', [string]$ToSession = '', [string]$FromWorker = '')
     $r = @{ Ok = $false; Id = ''; Hata = ''; Kod = ''; Maske = 0 }
     $kisalt = { param([string]$T, [int]$Max) $t = ([string]$T -replace '\s+', ' ').Trim(); if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max - 3) + '...' }; $t }
     # HEDEF DOGRULAMASI (2026-10-07): claude|codex disinda bir hedefe yazilan aktarimi hic
     # kimse almazdi (ornek: BEYIN_BRIFING_KIME yazim hatasi).
     $Kime = ([string]$Kime).Trim().ToLowerInvariant()
     if ($Kime -ne 'claude' -and $Kime -ne 'codex') { $r.Kod = 'HEDEF_GECERSIZ'; $r.Hata = "hedef ajan claude ya da codex olmali: '$Kime'"; return $r }
+    # ISCI ADRESI (2026-10-12, sema v3): -ToWorker TASK-x yalniz codex iscisine; Get-BeyinHandoffAcik
+    # suzgeci bu alani okur. -FromWorker isciden gelen mesaji etiketler (gorunumde codex/TASK-x).
+    $ToWorker = ([string]$ToWorker).Trim().ToUpperInvariant(); $FromWorker = ([string]$FromWorker).Trim().ToUpperInvariant()
+    if ($ToWorker -and $ToWorker -cnotmatch '^TASK-\d+$') { $r.Kod = 'HEDEF_GECERSIZ'; $r.Hata = "isci kimligi TASK-<sayi> olmali: '$ToWorker'"; return $r }
+    if ($ToWorker -and $Kime -ne 'codex') { $r.Kod = 'HEDEF_GECERSIZ'; $r.Hata = 'isciye adresli mesaj yalniz codex hedefine gider'; return $r }
+    if ($FromWorker -and $FromWorker -cnotmatch '^TASK-\d+$') { $FromWorker = '' }
     # Kisa alanlar: yalniz guvenli karakterler, sinirli uzunluk (gorunumde ve baglamda basilir).
     $temiz = { param([string]$T, [int]$Max) $t = ([string]$T -replace '[^\p{L}\p{Nd} ._@*:()-]', '').Trim(); if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max) }; $t }
     $Proje = & $temiz $Proje 64; $HedefProje = & $temiz $HedefProje 64; $Ref = & $temiz $Ref 120
     $Coordinator = & $temiz $Coordinator 64; $FromAgent = & $temiz $FromAgent 16; $FromSession = & $temiz $FromSession 64
+    $ToSession = & $temiz $ToSession 64
     # MASKE ONCE, KISALTMA SONRA (2026-10-07): eskiden once 600/300'e kesiliyordu; sinirda
     # kesilen bir anahtar desenin asgari uzunlugunun altina dusup kismen kaciyordu.
     $hamAlan = [ordered]@{ question = $Metin; evidence = $Kanit; scope = $Kapsam; risk = $Risk; next = $Sonraki }
@@ -4916,10 +4986,12 @@ function Add-BeyinHandoff {
     if (-not $alanlar.question) { $r.Kod = 'BOS'; $r.Hata = 'bos soru/handoff metni'; return $r }
     $inv = [Globalization.CultureInfo]::InvariantCulture
     $id = (Get-Date).ToString('yyyyMMddTHHmmss', $inv) + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 4))
+    $surum = $(if ($ToWorker -or $ToSession -or $FromWorker) { 3 } else { 2 })
     $kayit = [ordered]@{
-        v = 2; id = $id; ts = (Get-Date).ToString('o', $inv)
-        from = [ordered]@{ agent = $FromAgent; session = $FromSession; project = $Proje }
-        to = $Kime; toProject = $HedefProje; kind = $(if ($Kind) { $Kind } else { 'soru' }); ref = $Ref; coordinator = $Coordinator
+        v = $surum; id = $id; ts = (Get-Date).ToString('o', $inv)
+        from = [ordered]@{ agent = $FromAgent; session = $FromSession; project = $Proje; worker = $FromWorker }
+        to = $Kime; toProject = $HedefProje; toWorker = $ToWorker; toSession = $ToSession
+        kind = $(if ($Kind) { $Kind } else { 'soru' }); ref = $Ref; coordinator = $Coordinator
         question = $alanlar.question; evidence = $alanlar.evidence; scope = $alanlar.scope; risk = $alanlar.risk; next = $alanlar.next
         status = 'acik'; doneBy = ''; doneTs = ''
     }
@@ -5137,17 +5209,41 @@ function Sync-BeyinPanoBrifing {
 # klasoru). Yazan yalniz iki insan kanali: kullanicinin GERCEK mesajinda tek satir
 # 'onayla TASK-x' (prompt-counter) ve etkilesimli terminalde 'beyin pano onayla'.
 # 7 gun gecerli, tek kullanimlik (done gecisinde 'kullanildi' damgalanir).
+# ONAY TURU (2026-10-12, takim modu): -Tur '' pano karti (TASK-x -> <TASK>.json, v=1,
+# bayt-bayt eski bicim; AgentChef K12 ayni dosyayi okur). -Tur baslat|birlestir takim
+# kosusu onayi (<runId>.<tur>.json, v=2, 'tur' alani; AgentChef team-run.mjs okur,
+# ASLA uretmez). runId: ^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$ - dosya adi bundan turer.
+function Test-BeyinOnayKimligi {
+    param([string]$Id, [string]$Tur = '')
+    if (-not $Tur) { return [bool]($Id -cmatch '^TASK-\d+$') }
+    if ($Tur -ne 'baslat' -and $Tur -ne 'birlestir') { return $false }
+    return [bool]($Id -cmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$')
+}
+
+function Get-BeyinOnayYolu {
+    param([hashtable]$Paths, [string]$Id, [string]$Tur = '')
+    $dir = Join-Path $Paths.ScrState 'approvals'
+    if ($Tur) { return (Join-Path $dir "$Id.$Tur.json") }
+    return (Join-Path $dir "$Id.json")
+}
+
 function Add-BeyinOnay {
-    param([hashtable]$Paths, [string]$TaskId, [string]$Kanal = 'sohbet', [string]$Ajan = '', [string]$Session = '')
+    param([hashtable]$Paths, [string]$TaskId, [string]$Kanal = 'sohbet', [string]$Ajan = '', [string]$Session = '', [string]$Tur = '')
     $r = @{ Ok = $false; Hata = ''; Yol = '' }
     try {
-        if ($TaskId -cnotmatch '^TASK-\d+$') { $r.Hata = "gecersiz kart kimligi: $TaskId"; return $r }
+        if ($Tur -and $Tur -ne 'baslat' -and $Tur -ne 'birlestir') { $r.Hata = "gecersiz onay turu: $Tur"; return $r }
+        if (-not (Test-BeyinOnayKimligi -Id $TaskId -Tur $Tur)) { $r.Hata = $(if ($Tur) { "gecersiz kosu kimligi: $TaskId" } else { "gecersiz kart kimligi: $TaskId" }); return $r }
         $dir = Join-Path $Paths.ScrState 'approvals'
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         $inv = [Globalization.CultureInfo]::InvariantCulture
-        $o = [ordered]@{ v = 1; taskId = $TaskId; nonce = [guid]::NewGuid().ToString('N').Substring(0, 12); approvedAt = (Get-Date).ToString('o', $inv)
-                         kanal = $Kanal; ajan = $Ajan; session = $Session; kullanildi = ''; kullanan = '' }
-        $f = Join-Path $dir "$TaskId.json"
+        if ($Tur) {
+            $o = [ordered]@{ v = 2; taskId = $TaskId; runId = $TaskId; tur = $Tur; nonce = [guid]::NewGuid().ToString('N').Substring(0, 12); approvedAt = (Get-Date).ToString('o', $inv)
+                             kanal = $Kanal; ajan = $Ajan; session = $Session; kullanildi = ''; kullanan = '' }
+        } else {
+            $o = [ordered]@{ v = 1; taskId = $TaskId; nonce = [guid]::NewGuid().ToString('N').Substring(0, 12); approvedAt = (Get-Date).ToString('o', $inv)
+                             kanal = $Kanal; ajan = $Ajan; session = $Session; kullanildi = ''; kullanan = '' }
+        }
+        $f = Get-BeyinOnayYolu -Paths $Paths -Id $TaskId -Tur $Tur
         Write-BeyinText -Path $f -Text (ConvertTo-Json -InputObject $o -Compress)
         $r.Ok = [bool](Test-Path -LiteralPath $f); $r.Yol = $f
     } catch { $r.Hata = $_.Exception.Message }
@@ -5156,13 +5252,14 @@ function Add-BeyinOnay {
 
 function Get-BeyinOnay {
     # Gecerli (Gun icinde, kullanilmamis) onay kaydi ya da $null.
-    param([hashtable]$Paths, [string]$TaskId, [int]$Gun = 7)
+    param([hashtable]$Paths, [string]$TaskId, [int]$Gun = 7, [string]$Tur = '')
     try {
-        if ($TaskId -cnotmatch '^TASK-\d+$') { return $null }
-        $f = Join-Path (Join-Path $Paths.ScrState 'approvals') "$TaskId.json"
+        if (-not (Test-BeyinOnayKimligi -Id $TaskId -Tur $Tur)) { return $null }
+        $f = Get-BeyinOnayYolu -Paths $Paths -Id $TaskId -Tur $Tur
         if (-not (Test-Path -LiteralPath $f)) { return $null }
         $o = Get-Content -LiteralPath $f -Raw -Encoding UTF8 | ConvertFrom-Json
         if ([string]$o.taskId -cne $TaskId -or [string]$o.kullanildi) { return $null }
+        if ($Tur -and $o.PSObject.Properties['tur'] -and [string]$o.tur -ne $Tur) { return $null }
         $ts = [datetime]::Parse([string]$o.approvedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
         if ($ts.Kind -eq [DateTimeKind]::Utc) { $ts = $ts.ToLocalTime() }
         if (((Get-Date) - $ts).TotalDays -gt $Gun) { return $null }
@@ -5171,15 +5268,33 @@ function Get-BeyinOnay {
 }
 
 function Use-BeyinOnay {
-    param([hashtable]$Paths, [string]$TaskId, [string]$Kullanan = '')
+    param([hashtable]$Paths, [string]$TaskId, [string]$Kullanan = '', [string]$Tur = '')
     try {
-        $o = Get-BeyinOnay -Paths $Paths -TaskId $TaskId
+        $o = Get-BeyinOnay -Paths $Paths -TaskId $TaskId -Tur $Tur
         if (-not $o) { return $false }
         $o.kullanildi = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
         $o.kullanan = $Kullanan
-        Write-BeyinText -Path (Join-Path (Join-Path $Paths.ScrState 'approvals') "$TaskId.json") -Text (ConvertTo-Json -InputObject $o -Compress)
+        Write-BeyinText -Path (Get-BeyinOnayYolu -Paths $Paths -Id $TaskId -Tur $Tur) -Text (ConvertTo-Json -InputObject $o -Compress)
         return $true
     } catch { return $false }
+}
+
+function Get-BeyinOnayBekleyen {
+    # Verilmis ama henuz KULLANILMAMIS gecerli onaylar (doktor ve takim.md icin).
+    # Donus: @( @{ Id; Tur; Kanal; ApprovedAt; Yol } )
+    param([hashtable]$Paths, [int]$Gun = 7)
+    $liste = New-Object System.Collections.Generic.List[object]
+    try {
+        $dir = Join-Path $Paths.ScrState 'approvals'
+        if (-not (Test-Path -LiteralPath $dir)) { return @() }
+        foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+            $tur = ''; $id = [IO.Path]::GetFileNameWithoutExtension($f.Name)
+            if ($f.Name -match '^(.+)\.(baslat|birlestir)\.json$') { $id = $Matches[1]; $tur = $Matches[2] }
+            $o = Get-BeyinOnay -Paths $Paths -TaskId $id -Gun $Gun -Tur $tur
+            if ($o) { $liste.Add(@{ Id = $id; Tur = $tur; Kanal = [string]$o.kanal; ApprovedAt = [string]$o.approvedAt; Yol = $f.FullName }) }
+        }
+    } catch { }
+    return $liste.ToArray()
 }
 
 # ============================================================================
@@ -5357,6 +5472,172 @@ function Update-BeyinPanoMd {
         $yol = Join-Path (Join-Path $Paths.Vault '10-command-center') 'pano.md'
         Write-BeyinText -Path $yol -Text $sb.ToString()
         $r.Yol = $yol; $r.Acik = $d.Acik; $r.Ok = (Test-Path -LiteralPath $yol)
+    } catch { }
+    return $r
+}
+
+# ============================================================================
+# TAKIM KOSUSU - OKUMA KATMANI  (2026-10-12, takim modu)  -  beyin takim
+# ----------------------------------------------------------------------------
+# <state>\team-runs\<runId>.json AgentChef scripts/team-run.mjs tarafindan yazilir
+# (sef = kullanicinin Claude oturumu, 1-4 Codex iscisi; her isci bir pano karti).
+# Burasi yalniz OKUR: session-start isletim satiri ("Takim: ..."), turetilmis
+# takim.md, isci oturumu -> kart eslemesi (maliyet). Node BASLATILMAZ.
+# Esleme iki kaynaktan: motorun workers[].codexThreadId (bildirim) ve isci
+# session-start'in yazdigi takim-oturum\<runId>.jsonl (gozlem; celiskide kazanir).
+# Durum sozlugu motorun sozlesmesinden; yeniden adlandirma tek yerden.
+# ============================================================================
+$script:BeyinTakimAcik = @('planned', 'running', 'paused', 'collected', 'integrated', 'verified')
+$script:BeyinTakimCalisan = @('spawning', 'running')
+$script:BeyinTakimOnayGerek = @{ baslat = @('planned'); birlestir = @('verified') }
+
+function Get-BeyinTakimKosular {
+    param([hashtable]$Paths)
+    $liste = New-Object System.Collections.Generic.List[object]
+    try {
+        if (-not (Test-Path -LiteralPath $Paths.TeamRuns)) { return @() }
+        foreach ($f in @(Get-ChildItem -LiteralPath $Paths.TeamRuns -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+            try {
+                $o = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($o -and $o.runId) { $liste.Add($o) }
+            } catch { }
+        }
+    } catch { }
+    return @($liste | Sort-Object -Property @{ Expression = { [string]$_.updatedAt } } -Descending)
+}
+
+function Get-BeyinTakimDurum {
+    # Donus: @{ Var; Kosular; Acik; Isci; OnayBekleyen=@(@{RunId;Tur}); Satir (<=200) }
+    param([hashtable]$Paths)
+    $r = @{ Var = $false; Kosular = @(); Acik = @(); Isci = 0; OnayBekleyen = @(); Satir = '' }
+    try {
+        $r.Var = [bool](Test-Path -LiteralPath $Paths.TeamRuns)
+        $r.Kosular = @(Get-BeyinTakimKosular -Paths $Paths)
+        $r.Acik = @($r.Kosular | Where-Object { $script:BeyinTakimAcik -contains [string]$_.status })
+        $bekleyen = New-Object System.Collections.Generic.List[object]
+        $parca = New-Object System.Collections.Generic.List[string]
+        foreach ($k in $r.Acik) {
+            $calisan = @($k.workers | Where-Object { $script:BeyinTakimCalisan -contains [string]$_.status }).Count
+            $r.Isci += $calisan
+            foreach ($tur in @('baslat', 'birlestir')) {
+                if ($script:BeyinTakimOnayGerek[$tur] -contains [string]$k.status) {
+                    if (-not (Get-BeyinOnay -Paths $Paths -TaskId ([string]$k.runId) -Tur $tur)) { $bekleyen.Add(@{ RunId = [string]$k.runId; Tur = $tur }) }
+                }
+            }
+            $parca.Add("$($k.runId) $($k.status)" + $(if (@($k.workers).Count) { " $calisan/$(@($k.workers).Count) isci" } else { '' }))
+        }
+        $r.OnayBekleyen = $bekleyen.ToArray()
+        if ($r.Acik.Count -gt 0) {
+            $s = "Takim: $($r.Acik.Count) kosu acik (" + ($parca -join '; ') + ')'
+            if ($r.OnayBekleyen.Count) { $s += '; onay bekliyor: ' + (@($r.OnayBekleyen | ForEach-Object { "$($_.Tur) $($_.RunId)" }) -join ', ') }
+            $s += '.'
+            if ($s.Length -gt 200) { $s = $s.Substring(0, 197) + '...' }
+            $r.Satir = $s
+        }
+    } catch { }
+    return $r
+}
+
+function Get-BeyinTakimIsciler {
+    # Codex oturum kimligi -> @{ RunId; Kart; Kaynak (motor|gozlem) }
+    param([hashtable]$Paths)
+    $map = @{}
+    try {
+        foreach ($k in @(Get-BeyinTakimKosular -Paths $Paths)) {
+            foreach ($w in @($k.workers)) {
+                if (-not $w) { continue }
+                $sid = ''
+                if ($w.PSObject.Properties['codexThreadId'] -and $w.codexThreadId) { $sid = [string]$w.codexThreadId }
+                elseif ($w.PSObject.Properties['sessionId'] -and $w.sessionId) { $sid = [string]$w.sessionId }
+                if ($sid) { $map[$sid] = @{ RunId = [string]$k.runId; Kart = [string]$w.taskId; Kaynak = 'motor' } }
+            }
+        }
+        if (Test-Path -LiteralPath $Paths.TakimOturum) {
+            foreach ($f in @(Get-ChildItem -LiteralPath $Paths.TakimOturum -Filter '*.jsonl' -File -ErrorAction SilentlyContinue)) {
+                $run = [IO.Path]::GetFileNameWithoutExtension($f.Name)
+                foreach ($satir in @(Get-Content -LiteralPath $f.FullName -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+                    if (-not ([string]$satir).Trim()) { continue }
+                    try {
+                        $o = $satir | ConvertFrom-Json
+                        if ($o.sessionId -and $o.kart) { $map[[string]$o.sessionId] = @{ RunId = $run; Kart = [string]$o.kart; Kaynak = 'gozlem' } }
+                    } catch { }
+                }
+            }
+        }
+    } catch { }
+    return $map
+}
+
+function Update-BeyinTakimMd {
+    # Turetilmis gorunum: 10-command-center\takim.md. Kuratorlu alana yazmaz.
+    param([hashtable]$Paths)
+    $r = @{ Ok = $false; Yol = ''; Acik = 0 }
+    try {
+        $d = Get-BeyinTakimDurum -Paths $Paths
+        $inv = [Globalization.CultureInfo]::InvariantCulture
+        function Kisa([string]$T, [int]$N) { $t = [string]$T; if ($t.Length -gt $N) { $t = $t.Substring(0, $N - 3) + '...' }; return ($t -replace '\|', '/') -replace '\r?\n', ' ' }
+        function Zaman([string]$T) { if (-not $T) { return '-' }; try { return ([datetime]::Parse($T, $inv)).ToLocalTime().ToString('MM-dd HH:mm', $inv) } catch { return $T } }
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.AppendLine('---')
+        [void]$sb.AppendLine('type: "derived"')
+        [void]$sb.AppendLine('title: "Takim kosulari"')
+        [void]$sb.AppendLine("updated: `"$((Get-Date).ToString('o', $inv))`"")
+        [void]$sb.AppendLine('---')
+        [void]$sb.AppendLine('# Takim kosulari')
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('> **Turetilmis dosya** - `beyin takim` her degisiklikte yeniden yazar; elle duzenleme. Kaynak: `motor/scripts/.state/team-runs/` (AgentChef team-run.mjs).')
+        [void]$sb.AppendLine('> Sef = Claude oturumu, isciler = Codex (`codex exec`, worktree basina bir kart). Insan onayi sohbete tek satir: `baslat <runId>` (isciler baslasin), `birlestir <runId>` (ara dal senin dalina girsin).')
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine("## Acik kosular ($($d.Acik.Count))")
+        [void]$sb.AppendLine('')
+        if ($d.Acik.Count -eq 0) { [void]$sb.AppendLine('(acik kosu yok)') }
+        else {
+            [void]$sb.AppendLine('| Kosu | Durum | Repo / dal | Isci (calisan/toplam) | Onay | Guncelleme |')
+            [void]$sb.AppendLine('| --- | --- | --- | --- | --- | --- |')
+            foreach ($k in $d.Acik) {
+                $calisan = @($k.workers | Where-Object { $script:BeyinTakimCalisan -contains [string]$_.status }).Count
+                $onay = @($d.OnayBekleyen | Where-Object { $_.RunId -eq [string]$k.runId } | ForEach-Object { "**$($_.Tur) bekliyor**" }) -join ', '
+                if (-not $onay) { $onay = '-' }
+                $repo = $(if ($k.PSObject.Properties['repoName'] -and $k.repoName) { [string]$k.repoName } else { Split-Path -Leaf ([string]$k.repo) })
+                [void]$sb.AppendLine("| ``$($k.runId)`` | $($k.status) | $(Kisa $repo 24) / $(Kisa ([string]$k.integrationBranch) 40) | $calisan/$(@($k.workers).Count) | $onay | $(Zaman $k.updatedAt) |")
+            }
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine('## Isciler')
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine('| Kosu | Kart | Rol | Durum | Worktree | PID | Baslangic | Bitis | Verdict |')
+            [void]$sb.AppendLine('| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
+            foreach ($k in $d.Acik) {
+                foreach ($w in @($k.workers)) {
+                    if (-not $w) { continue }
+                    $wt = $(if ($w.worktree) { Split-Path -Leaf ([string]$w.worktree) } else { '-' })
+                    $pidTxt = $(if ($w.pid) { [string]$w.pid } else { '-' })
+                    $verdict = $(if ($w.PSObject.Properties['verdict'] -and $w.verdict) { [string]$w.verdict } else { '-' })
+                    [void]$sb.AppendLine("| ``$($k.runId)`` | ``$($w.taskId)`` | $($w.role) | $($w.status) | $(Kisa $wt 30) | $pidTxt | $(Zaman $w.startedAt) | $(Zaman $w.finishedAt) | $verdict |")
+                }
+            }
+        }
+        $verilmis = @(Get-BeyinOnayBekleyen -Paths $Paths)
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('## Onaylar')
+        [void]$sb.AppendLine('')
+        if ($d.OnayBekleyen.Count -eq 0 -and $verilmis.Count -eq 0) { [void]$sb.AppendLine('(bekleyen ya da kullanilmamis onay yok)') }
+        else {
+            foreach ($b in $d.OnayBekleyen) { [void]$sb.AppendLine("- BEKLIYOR: ``$($b.Tur) $($b.RunId)`` (sohbete tek satir yaz)") }
+            foreach ($v in $verilmis) { [void]$sb.AppendLine("- verilmis, kullanilmamis: ``$(if ($v.Tur) { $v.Tur + ' ' } else { 'onayla ' })$($v.Id)`` ($($v.Kanal), $(Zaman $v.ApprovedAt))") }
+        }
+        $bitti = @($d.Kosular | Where-Object { [string]$_.status -in @('merged', 'aborted', 'failed') } | Select-Object -First 10)
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine("## Bitti (son $($bitti.Count))")
+        [void]$sb.AppendLine('')
+        if ($bitti.Count -eq 0) { [void]$sb.AppendLine('(henuz biten kosu yok)') }
+        else {
+            [void]$sb.AppendLine('| Kosu | Durum | Isci | Guncelleme |')
+            [void]$sb.AppendLine('| --- | --- | --- | --- |')
+            foreach ($k in $bitti) { [void]$sb.AppendLine("| ``$($k.runId)`` | $($k.status) | $(@($k.workers).Count) | $(Zaman $k.updatedAt) |") }
+        }
+        $yol = Join-Path (Join-Path $Paths.Vault '10-command-center') 'takim.md'
+        Write-BeyinText -Path $yol -Text $sb.ToString()
+        $r.Yol = $yol; $r.Acik = $d.Acik.Count; $r.Ok = (Test-Path -LiteralPath $yol)
     } catch { }
     return $r
 }

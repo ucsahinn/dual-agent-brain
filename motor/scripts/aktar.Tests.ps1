@@ -30,6 +30,37 @@ function Invoke-Aktar([string]$Tv, [string]$Ajan, [string[]]$Arg) {
 }
 function Id-Bul([string]$Metin) { return ([regex]::Match($Metin, '\d{8}T\d{6}-[a-f0-9]{4}')).Value }
 
+Describe 'ajan tespiti ve vault ici hedef suzgeci (2026-10-08)' {
+    It 'Codex kabugundan (CODEX_SESSION_ID, BEYIN_AGENT yok) gonderen codex etiketlenir; CLAUDECODE claude' {
+        . (Join-Path $vault 'motor\hooks\lib.ps1')
+        $eski = @{}
+        foreach ($ad in @('BEYIN_AGENT', 'CLAUDECODE', 'CODEX_SESSION_ID', 'CODEX_THREAD_ID', 'CODEX_MANAGED_BY_NPM', 'CODEX_MANAGED_BY_BUN', 'CODEX_MANAGED_BY_PNPM', 'CODEX_MANAGED_PACKAGE_ROOT', 'CODEX_SANDBOX')) {
+            $eski[$ad] = [Environment]::GetEnvironmentVariable($ad); [Environment]::SetEnvironmentVariable($ad, $null)
+        }
+        try {
+            $env:CODEX_SESSION_ID = 'x'; $a = Get-BeyinAgent
+            $env:CODEX_SESSION_ID = $null; $env:CLAUDECODE = '1'; $b = Get-BeyinAgent
+            $env:CLAUDECODE = $null; $c = Get-BeyinAgent
+            $env:CODEX_SESSION_ID = 'x'; $env:BEYIN_AGENT = 'claude'; $d = Get-BeyinAgent
+        } finally { foreach ($ad in $eski.Keys) { [Environment]::SetEnvironmentVariable($ad, $eski[$ad]) } }
+        "$a|$b|$c|$d" | Should Be 'codex|claude|claude|claude'
+    }
+    It '-Hedef verilmis mesaj vault icindeki oturuma (KonumProje Beyin) dusmez; hedefsiz duser' {
+        . (Join-Path $vault 'motor\hooks\lib.ps1')
+        $tv = New-AktarVault
+        $tp = Get-BeyinPaths -Vault $tv
+        try {
+            $h1 = Add-BeyinHandoff -Paths $tp -Metin 'proje-a icin' -Kime 'claude' -Proje 'x' -HedefProje 'proje-a' -FromAgent 'codex' -GorunumYok
+            $h2 = Add-BeyinHandoff -Paths $tp -Metin 'herkese' -Kime 'claude' -Proje 'x' -FromAgent 'codex' -GorunumYok
+            $vaultta = @(Get-BeyinHandoffAcik -Paths $tp -Kime 'claude' -Proje '' -KonumProje 'Beyin' | ForEach-Object { [string]$_.id })
+            $projeA = @(Get-BeyinHandoffAcik -Paths $tp -Kime 'claude' -Proje 'proje-a' -KonumProje 'proje-a' | ForEach-Object { [string]$_.id })
+        } finally { Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue }
+        ($vaultta -contains $h1.Id) | Should Be $false
+        ($vaultta -contains $h2.Id) | Should Be $true
+        ($projeA -contains $h1.Id) | Should Be $true
+    }
+}
+
 Describe 'beyin aktar CLI (2026-10-07)' {
     It 'bos metin + gonderim bayragi sessizce liste basmaz: HATA, exit 2' {
         $tv = New-AktarVault

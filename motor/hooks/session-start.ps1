@@ -41,6 +41,14 @@ $ssDevam = $devam
 $ssCwd   = $cwd
 $ssAgent = Get-BeyinAgent
 $ssPane  = [string]$env:HERDR_PANE_ID
+# TAKIM ISCISI (2026-10-12, takim modu): motor (AgentChef team-run.mjs) her Codex iscisini
+# AGENTCHEF_TEAM_RUN/_TASK ortamiyla acar. Isci modunda vault baglami yuklenmez (asagida),
+# toparlama atlanir (maliyet dongusu: 4 isci x 3 flush spawn'i), kart kimligi oturum
+# durumuna yazilir (aktarim suzgeci, bekci, session-end okur).
+$ssTakimRun  = [string]$env:AGENTCHEF_TEAM_RUN
+$ssTakimKart = ([string]$env:AGENTCHEF_TEAM_TASK).Trim().ToUpperInvariant()
+if ($ssTakimKart -cnotmatch '^TASK-\d+$') { $ssTakimKart = '' }
+$isciMod = [bool]($ssTakimRun -and $ssTakimKart -and $ssAgent -eq 'codex')
 # AJAN PID (BB5, 2026-10-06): kill guard bu oturumun ajan surecini (ata zincirinde
 # ilk claude/codex/node) korunan sayar. Yalniz alan bossa ya da surec olmusse olculur.
 $ssPid = 0
@@ -58,6 +66,7 @@ $stY = Update-BeyinSessionState -Paths $p -SessionId $hook.session_id -Degistir 
     $s.agent = $ssAgent
     # Herdr pane kimligi (plan #8): bekci bosta oturumu 'herdr pane close' ile gosterebilsin.
     if ($ssPane) { $s.herdrPane = $ssPane }
+    if ($isciMod) { $s.takimRun = $ssTakimRun; $s.takimKart = $ssTakimKart }
     return $s
 }
 if ($stY) { $st = $stY } else { $st = Get-BeyinSessionState -Paths $p -SessionId $hook.session_id }
@@ -78,6 +87,19 @@ try {
     $hAnlikEski = Join-Path $p.ScrState 'handoff-anlik'
     if (Test-Path -LiteralPath $hAnlikEski) { [IO.Directory]::Delete($hAnlikEski, $true) }
 } catch { }
+
+# --- TAKIM ISCISI KAYDI (2026-10-12): oturum kimligi -> kart eslemesi (maliyet kart basina
+#     jeton icin; motorun bildirdigi codexThreadId ile birlikte, gozlem kazanir). Toparlama
+#     (kuyruk/yetim flush) isci oturumunda ATLANIR: sef oturumu zaten drenaj eder.
+if ($isciMod) {
+    try {
+        New-Item -ItemType Directory -Force -Path $p.TakimOturum | Out-Null
+        $tkKayit = @{ ts = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture); kart = $ssTakimKart; sessionId = [string]$hook.session_id; cwd = [string]$cwd; pid = $ssPid } | ConvertTo-Json -Compress
+        [IO.File]::AppendAllText((Join-Path $p.TakimOturum "$ssTakimRun.jsonl"), $tkKayit + "`n", (New-Object Text.UTF8Encoding $false))
+    } catch { }
+    Write-BeyinLog -Vault $vault -Message "session-start: takim iscisi ($ssTakimRun/$ssTakimKart), toparlama atlandi"
+    $script:BeyinToparlamaAtlandi = $true
+}
 
 # ============================================================================
 # TOPARLAMA (catch-up)
@@ -553,7 +575,10 @@ try {
         $pnDurum = Get-BeyinPanoDurum -Paths $p -Proje $pnProje
         if ($pnDurum.Satir) { $pnTxt = ' ' + $pnDurum.Satir }
     } catch { }
-    $parts.Add("[Hafiza] Beyin hafiza motoru aktif (iki ajanda da ayni vault: $vault).$mvTxt$btTxt$pnTxt " +
+    # Takim (2026-10-12): sef oturumu acik kosulari ve bekleyen onaylari tek satirda gorur (<=200).
+    $tkTxt = ''
+    if (-not $isciMod) { try { $tkD = Get-BeyinTakimDurum -Paths $p; if ($tkD.Satir) { $tkTxt = ' ' + $tkD.Satir } } catch { } }
+    $parts.Add("[Hafiza] Beyin hafiza motoru aktif (iki ajanda da ayni vault: $vault).$mvTxt$btTxt$pnTxt$tkTxt " +
                "Tani/durum: powershell -NoProfile -ExecutionPolicy Bypass -File $vault\motor\scripts\doktor.ps1 -Ozet " +
                "(tam tarama icin -Ozet'i kaldir; -Derin gunluk butceden bir claude -p harcar).")
 } catch { }
@@ -562,7 +587,7 @@ try {
 #        iki ajanda; isletim satirinin hemen ardinda, dusme listesine girmez.
 try {
     $ny = Get-BeyinNiyet -Paths $p -MaxGun 7
-    if ($ny -and $ny.Text) {
+    if ($ny -and $ny.Text -and -not $isciMod) {
         $nyTxt = [string]$ny.Text
         if ($nyTxt.Length -gt 300) { $nyTxt = $nyTxt.Substring(0, 297) + '...' }
         $nyYas = if ($ny.AgeDays -lt 1) { 'bugun' } else { "$([int][math]::Floor($ny.AgeDays)) gun once" }
@@ -586,7 +611,8 @@ try { $null = Sync-BeyinPanoBrifing -Paths $p -Tetik 'session-start' } catch { }
 try {
     $akAjan = Get-BeyinAgent
     $akProje = $(if ($inVault) { '' } else { Get-BeyinProjectLeaf -Path $cwd -Paths $p })
-    $akAcik = @(Get-BeyinHandoffAcik -Paths $p -Kime $akAjan -Proje $akProje)
+    # -Isci (v3, 2026-10-12): isci yalniz kendi kartina adresli mesaji alir; sef toWorker'li mesaji almaz.
+    $akAcik = @(Get-BeyinHandoffAcik -Paths $p -Kime $akAjan -Proje $akProje -KonumProje (Get-BeyinProjectLeaf -Path $cwd -Paths $p) -Isci $ssTakimKart -OturumKey $st.key)
     $akGorulen = @(@($st.seenHandoff) + @(Get-BeyinTeslimEdilen -Paths $p -SessionKey $st.key))
     $akYeni = @($akAcik | Where-Object { $akGorulen -notcontains [string]$_.id })
     # DEVIR (BB3): ayni ajanin onceki oturumundan; yalniz AYNI projenin acilisinda
@@ -604,7 +630,8 @@ try {
         foreach ($h in $akYeni) {
             $z = ''
             try { $z = ([datetime]::Parse([string]$h.ts, $inv)).ToString('MM-dd HH:mm', $inv) } catch { }
-            $satir = "- $($h.id) ($(if ([string]$h.kind -eq 'devir') { 'DEVIR: onceki oturumun' } else { $h.from.agent }), proje: $(if ($h.from.project) { $h.from.project } else { '-' }), $z): $($h.question)"
+            $akKimden = $(if ([string]$h.kind -eq 'devir') { 'DEVIR: onceki oturumun' } else { [string]$h.from.agent + $(if ($h.from.PSObject.Properties['worker'] -and $h.from.worker) { '/' + [string]$h.from.worker } else { '' }) })
+            $satir = "- $($h.id) ($akKimden, proje: $(if ($h.from.project) { $h.from.project } else { '-' }), $z): $($h.question)"
             if ($h.evidence) { $satir += " | kanit: $($h.evidence)" }
             if ($h.next)     { $satir += " | sonraki: $($h.next)" }
             if ($akGosterilen.Count -eq 0 -and ($akSb.Length + $satir.Length) -gt 820) { $satir = $satir.Substring(0, [math]::Max(80, 817 - $akSb.Length)) + '...' }
@@ -633,6 +660,9 @@ try {
 #           asil cozum; kilit editoru/alt ajani durdurmaz, bayat kilit insani bloklar).
 #           (a) ayni cwd'de son 120 dk icinde yazilmis BASKA oturum dosyalari;
 #           (b) acik pano kartlarinin yazma kapsami bu repoya dusuyorsa kart + yollar + kira.
+# ISCI MODUNDA 0b1b, 0b2 ve 0c ATLANIR (2026-10-12): isci kendi worktree'sindedir, pano
+# uyarilari ve bekci satiri sefe aittir; embedding isitmasi 4 isciden tekrar gelmesin.
+if (-not $isciMod) {
 try {
     $esProje = Get-BeyinProjectLeaf -Path $cwd -Paths $p
     $esAyni = New-Object System.Collections.Generic.List[string]
@@ -686,6 +716,7 @@ try {
 
 # --- 0c) Embedding isitma (Faz 4F): vektor indeksi varsa Ollama'ya ates-et-unut istegi. ---
 try { Start-BeyinEmbedWarmup -Paths $p } catch { }
+}   # isci modu kapisi sonu (0b1b-0c)
 
 # --- 1) Motor saglik uyarisi (sessiz bozulma gorunur olsun) ---
 try {
@@ -732,6 +763,8 @@ try {
 # gun ozetleniyor. Bu bilgi yalniz engine.log'daydi; model "neyi gormedigimi"
 # bilmiyordu ve eksik hafizayi tam sanabiliyordu. Kayip degil, GECIKME - ama
 # gorunur olmali.
+# ISCI MODUNDA 1b ve 2 ATLANIR (2026-10-12): kuyruk uyarisi ve yansima isaretleri sefe aittir.
+if (-not $isciMod) {
 try {
     # Esik 3 -> 1 (plan #7, 2026-10-04): tek bekleyen is de "o oturum hafizada
     # yok" demektir. Gurultu onlemi: 30 dk'dan yeni kuyruk ogeleri sayilmaz -
@@ -762,6 +795,7 @@ if ($reflects.Count -gt 0) {
                    "`nAnlamli bir sey olduysa 80-memory dosyalarini ONIZLEME ile guncellemeyi oner.")
     }
 }
+}   # isci modu kapisi sonu (1b-2)
 
 # --- 3) Kurallar (her iki modda: davranis kurallari her yerde gecerli) ---
 # TAVANLAR (olculdu 2026-08-31, frontmatter sonrasi GOVDE uzerinden)
@@ -808,7 +842,27 @@ if ($capRules -gt 0 -and $rules -and $rules.Length -gt $capRules) {
 }
 if ($rules) { $parts.Add("[Hafiza: Kurallar]`n$rules") }
 
-if ($inVault) {
+if ($isciMod) {
+    # ------------------------------ ISCI MODU ------------------------------
+    # (2026-10-12, takim modu) Bu oturum motorun actigi bir Codex iscisidir: brief'i motor
+    # verir. Vault baglami (Guncel Baglam, Aktif Basliklar, oturum bloklari, Devam Noktalari)
+    # YUKLENMEZ: 4 isci x tam baglam bosa jeton, ustelik baska projelerin adlari isci
+    # promptuna sizmasin. Kalan: isletim satiri, Kurallar, Aktarim (-Isci suzgecli), bu blok.
+    try {
+        $tkBaslik = ''
+        try {
+            $tkPano = Get-BeyinPanoDurum -Paths $p
+            $tkKartObj = @(@(@($tkPano.Kartlar) + @($tkPano.BekleyenKartlar)) | Where-Object { $_ -and [string]$_.id -eq $ssTakimKart } | Select-Object -First 1)
+            if ($tkKartObj.Count -gt 0) { $tkBaslik = [string]$tkKartObj[0].title; if ($tkBaslik.Length -gt 70) { $tkBaslik = $tkBaslik.Substring(0, 67) + '...' } }
+        } catch { }
+        $tkWt = $(if ($env:AGENTCHEF_TEAM_WORKTREE) { [string]$env:AGENTCHEF_TEAM_WORKTREE } else { [string]$cwd })
+        $parts.Add("[Hafiza: Takim | kosu $ssTakimRun | kart $ssTakimKart | isci] Bu oturum bir takim iscisidir (sef: Claude oturumu). " +
+                   "Calisma agaci: $tkWt - YALNIZ bu agacta ve brief'teki yazma kapsaminda yaz; git commit/push/checkout/worktree/branch YAPMA (motor commit eder); " +
+                   "baska kartin dosyasina dokunma; ajan/alt-ajan acma (gerekirse 'needs: <rol> - <neden>' yaz); kurulum ve global ayar degistirme; sureci oldurme." +
+                   $(if ($tkBaslik) { " Kart: $tkBaslik." } else { '' }) +
+                   " Soru: beyin aktar `"...`" -Kime claude -VeBekle. Bitince: kanit ekle (beyin pano add-evidence --task $ssTakimKart --evidence `"<komut/yol>`") ve SON mesajin yalniz handoff JSON olsun (motor toplar).")
+    } catch { }
+} elseif ($inVault) {
     # ------------------------------ TAM MOD ------------------------------
     # ASIL KAYIP BURADAYDI: 82 satirlik govdenin 37'si dusuyordu.
     #
@@ -1000,7 +1054,7 @@ else {
 # cekilir; not her kosulda sigar.
 if ($capToplam -gt 0) {
     $korunan   = @('[Hafiza] Beyin', '[Hafiza: Niyet', '[Hafiza: Aktarim', '[Hafiza: Kurallar]', '[Hafiza: Guncel Baglam]',
-                   '[Hafiza Protokolu]', '[Hafiza] Vault DISINDA', '[Hafiza] UYARI', '[Hafiza] Onceki oturum')
+                   '[Hafiza Protokolu]', '[Hafiza] Vault DISINDA', '[Hafiza] UYARI', '[Hafiza] Onceki oturum', '[Hafiza: Takim')
     # DUSME SIRASI (2026-10-05): once Aktif Basliklar (en buyuk ve en bayat tablo;
     # 25 satiri bile ~3.700 karakter), sonra oturum bloklari, EN SON Devam
     # Noktalari. Her dusebilir blok once SIGDIGI KADAR kirpilir (>= 400 karakter
@@ -1076,7 +1130,7 @@ try {
     if ($capToplam -gt 0 -and $dusenler -and $dusenler.Count -gt 0) { $ssDusen = ($dusenler -join ', ') }
     $ssSonuc = if ($capToplam -gt 0 -and $ssCtx.Length -gt $capToplam) { 'TAVAN_ASILDI' } else { 'ENJEKSIYON' }
     Write-BeyinMakbuz -Paths $p -Script 'session-start' -Outcome $ssSonuc -Agent (Get-BeyinAgent) `
-        -Key (Get-BeyinSessionKey -SessionId $hook.session_id) -Reason $(if ($inVault) { 'tam' } else { 'hafif' }) `
+        -Key (Get-BeyinSessionKey -SessionId $hook.session_id) -Reason $(if ($isciMod) { 'isci' } elseif ($inVault) { 'tam' } else { 'hafif' }) `
         -Note "uzunluk=$($ssCtx.Length); tavan=$capToplam; dusen=$ssDusen; maske=$($script:BeyinMaskeSayac); maskeDusen=$($script:BeyinMaskeDusen)"
 } catch { }
 

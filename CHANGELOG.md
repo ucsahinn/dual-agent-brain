@@ -21,6 +21,37 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.3.0 - Takim kosusu: Claude sef, Codex isciler
+
+**Yeni:**
+
+- **`beyin takim <komut>`** - AgentChef `team-run.mjs` sarmalayicisi (AgentChef 1.5.0+ gerekir).
+  Sef = kullanicinin konustugu Claude oturumu; 1-4 Codex iscisi (`codex exec`) her biri kendi git
+  worktree'sinde, kendi pano kartiyla, gorunur terminal sekmesinde calisir. Komutlar motorla
+  birebir (`plan | start | status | collect | integrate | verify | merge | pause | resume | abort |
+  cleanup | doctor`); Beyin fiilleri `durum`, `baslat`, `birlestir`, `durdur`, `maliyet`.
+- **Iki insan onayi, sohbete tek satir:** `baslat <runId>` (isciler baslasin) ve `birlestir <runId>`
+  (ara dal `takim/<runId>` senin daline girsin). `onayla TASK-x` gibi: kullanicinin GERCEK
+  mesajinda yakalanir, dosyaya duser, 7 gun gecerli, tek kullanimlik; ajan mesaji, sentetik tur ve
+  isci oturumu onay SAYMAZ. Motor onay uretemez; `start`/`merge` onaysiz exit 5.
+- **Isciye adresli aktarim (sema v3):** `beyin aktar "..." -Isci TASK-x` yalniz o isciye gider;
+  genel `-Kime codex` mesaji iscilere dusmez. Isciden gelen mesaj `codex/TASK-x` etiketli.
+- **Isci oturumu:** acilista vault baglami yerine kisa `[Hafiza: Takim]` blogu (worktree, push yok,
+  kapsam disi dosya yok); toparlama atlanir (4 isci x 3 flush dongusu yok); kapanista sefe tek
+  "isci bitti" brifingi; `beyin takim maliyet <runId>` kart basina jeton.
+- Turetilmis gorunum `10-command-center/takim.md`; `beyin doktor` `takim` satiri; `bekci` iscileri
+  kosu/kart ile listeler ve kapatmayi yalniz `beyin takim durdur` ile onerir (taskkill asla).
+
+**Duzelen (1.2.1'den sonra bulunan):**
+
+- **Ozetleyici reddedince serbest metin gunluk loga yaziliyordu.** Ozet biciminde
+  (`**Ne konusuldu:**`) degilse artik loga YAZILMAZ, isaret ilerlemez, is en fazla 3 kez yeniden denenir.
+- **Kanca testleri gercek makbuza sahte onay satiri yaziyordu** (52 satir temizlendi); testler
+  artik gecici vault'ta kosar.
+- **Doktor `injection uyarisi`** gozden gecirilmis gunleri (yanlis pozitif) sorun saymaz.
+
+---
+
 ## 1.2.1 - Claude ile Codex konusabiliyor
 
 **Duzelen (sessizce yanlis davraniyordu):**

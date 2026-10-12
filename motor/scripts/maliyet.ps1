@@ -24,7 +24,10 @@ param(
     [string]$Vault = $(if ($env:BEYIN_VAULT) { $env:BEYIN_VAULT } else { Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }),
     [int]$Gun = 7,
     [switch]$Json,
-    [switch]$YalnizTara
+    [switch]$YalnizTara,
+    # TAKIM KOSUSU (2026-10-12): -Run <runId> kart basina jeton (isci oturumu -> kart eslemesi
+    # Get-BeyinTakimIsciler: motorun codexThreadId'si + isci session-start'in takim-oturum kaydi).
+    [string]$Run = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -169,6 +172,37 @@ for ($i = $Gun - 1; $i -ge 0; $i--) {
 function Jeton([double]$x) { if ($x -ge 1e9) { '{0:N1}G' -f ($x / 1e9) } elseif ($x -ge 1e6) { '{0:N1}M' -f ($x / 1e6) } elseif ($x -ge 1e3) { '{0:N0}K' -f ($x / 1e3) } else { '{0:N0}' -f $x } }
 function Usd([double]$x) { '${0:N2}' -f $x }
 
+# TAKIM ETIKETI (2026-10-12): Codex isci oturumlari kosu/kart ile etiketlenir (fiyat yok: jeton).
+$isciMap = @{}
+try { $isciMap = Get-BeyinTakimIsciler -Paths $p } catch { $isciMap = @{} }
+foreach ($s in $satirlar) {
+    $tk = $null
+    if ($s.Ajan -eq 'codex' -and $isciMap.ContainsKey([string]$s.Oturum)) { $tk = $isciMap[[string]$s.Oturum] }
+    $s | Add-Member -NotePropertyName TakimRun -NotePropertyValue $(if ($tk) { [string]$tk.RunId } else { '' }) -Force
+    $s | Add-Member -NotePropertyName TakimKart -NotePropertyValue $(if ($tk) { [string]$tk.Kart } else { '' }) -Force
+}
+$takimSatir = @($satirlar | Where-Object { $_.TakimRun })
+function Takim-Tablo([object[]]$Satir) {
+    foreach ($kart in @($Satir | Group-Object TakimKart | Sort-Object Name)) {
+        $t = @{ In = 0.0; Out = 0.0; Cr = 0.0 }
+        foreach ($x in $kart.Group) { $t.In += $x.In; $t.Out += $x.Out; $t.Cr += $x.Cr }
+        $ot = @($kart.Group | Select-Object -ExpandProperty Oturum -Unique)
+        "  {0,-10} {1,-12} in {2,-8} out {3,-8} cache {4,-8} toplam {5}" -f $kart.Name, ($ot[0].Substring(0, [math]::Min(12, $ot[0].Length))), (Jeton $t.In), (Jeton $t.Out), (Jeton $t.Cr), (Jeton ($t.In + $t.Out + $t.Cr))
+    }
+}
+if ($Run) {
+    try { $mtx.ReleaseMutex() } catch { }
+    $rs = @($takimSatir | Where-Object { $_.TakimRun -eq $Run })
+    if ($Json) {
+        ConvertTo-Json -Compress -InputObject @{ run = $Run; gun = $Gun; kartlar = @($rs | Group-Object TakimKart | ForEach-Object { @{ kart = $_.Name; oturum = @($_.Group | Select-Object -ExpandProperty Oturum -Unique); in = [int64]($_.Group | Measure-Object -Property In -Sum).Sum; out = [int64]($_.Group | Measure-Object -Property Out -Sum).Sum; cache = [int64]($_.Group | Measure-Object -Property Cr -Sum).Sum } }) }
+        exit 0
+    }
+    "TAKIM $Run - kart basina Codex jetonu (son $Gun gun; fiyat yok: abonelik, API esdegeri hesaplanmaz)"
+    if ($rs.Count -eq 0) { "  (bu kosuya bagli isci oturumu olculmedi: kosu henuz calismadi, rollout tarama gunu disinda ya da esleme yok - beyin takim durum $Run)" }
+    else { Takim-Tablo $rs; $tt = ($rs | ForEach-Object { $_.In + $_.Out + $_.Cr } | Measure-Object -Sum).Sum; "  toplam: $(Jeton $tt) jeton, $(@($rs | Select-Object -ExpandProperty Oturum -Unique).Count) isci oturumu" }
+    exit 0
+}
+
 $cl = @($satirlar | Where-Object { $_.Ajan -eq 'claude' })
 $cx = @($satirlar | Where-Object { $_.Ajan -eq 'codex' })
 $clUsd = ($cl | Measure-Object -Property Usd -Sum).Sum; if (-not $clUsd) { $clUsd = 0 }
@@ -218,6 +252,12 @@ foreach ($o in @($oturumlar | Sort-Object Usd -Descending | Select-Object -First
 if ($buyukOt.Count) {
     "200K baglami asan oturum: $($buyukOt.Count) - bu cagrilarin maliyeti $(Usd $buyukUsd). Bu oturumlar /compact ya da yeni oturumla tazelenmeliydi."
 } else { "200K baglami asan oturum yok." }
+if ($takimSatir.Count) {
+    ""
+    "Takim kosulari (Codex isci oturumlari, kart basina jeton):"
+    foreach ($rg in @($takimSatir | Group-Object TakimRun | Sort-Object Name)) { "  kosu $($rg.Name):"; Takim-Tablo $rg.Group }
+    "  ayrinti: beyin takim maliyet <runId>"
+}
 if ($cx.Count) { "Codex notu: sayac kumulatif; bir oturumun ILK olcumu o ana kadarki toplamin tamamini olcum gunune yazar (ilk taramada eski gunler sisik gorunur)." }
 if ($taninmayan -gt 0 -or $hatali -gt 0) { "OLCEMEDIM: $taninmayan satir taninmayan bicimde, $hatali dosya okunamadi (bu kisim toplama girmedi)." }
 "($taranan dosya tarandi, $yeniKayit yeni kayit, $([int]$sw.Elapsed.TotalSeconds) sn)"

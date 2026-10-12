@@ -842,9 +842,20 @@ foreach ($f in $dayFiles) {
     $c = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8
     if ($c -and (Test-BeyinMatch -Text $c -Pattern 'UYARI - supheli talimat metni')) { $injFiles += $f.BaseName }
 }
-Add-Row 'injection uyarisi' ($injFiles.Count -eq 0) `
-    $(if ($injFiles.Count) { "$($injFiles.Count) gunde uyari: $($injFiles -join ', ')" } else { 'uyari yok' }) `
-    'o gunlerin loglarini gozden gecir'
+# Gozden gecirilmis gunler (2026-10-12): satir eskiden bir kez uyari dusen gun icin
+# KALICI kirmizi kaliyordu (yanlis pozitif bile olsa kapatma yolu yoktu). Inceleyen
+# gunu .state\injection-gozden-gecirildi.txt dosyasina bir satir (yyyy-MM-dd) yazar.
+$injKabul = Join-Path $p.ScrState 'injection-gozden-gecirildi.txt'
+$injGecilen = @()
+if (Test-Path -LiteralPath $injKabul) {
+    $injGecilen = @(Get-Content -LiteralPath $injKabul -Encoding UTF8 | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ -match '^\d{4}-\d{2}-\d{2}' } | ForEach-Object { $_.Substring(0, 10) })
+}
+$injAcik = @($injFiles | Where-Object { $injGecilen -notcontains $_ })
+$injGecildiSay = $injFiles.Count - $injAcik.Count
+Add-Row 'injection uyarisi' ($injAcik.Count -eq 0) `
+    $(if ($injAcik.Count) { "$($injAcik.Count) gozden gecirilmemis gunde uyari: $($injAcik -join ', ')" + $(if ($injGecildiSay) { " (+$injGecildiSay gozden gecirildi)" } else { '' }) }
+      elseif ($injGecildiSay) { "uyari yok ($injGecildiSay gun gozden gecirildi)" } else { 'uyari yok' }) `
+    "o gunlerin loglarini gozden gecir; yanlis pozitifse gunu $injKabul dosyasina ekle"
 
 # ============================================================================
 # MOTOR LOGU  (basarisizlik gorunur olsun)
@@ -1935,6 +1946,29 @@ try {
           else { "$($akListe.Count) acik (claude'a $akClaude, codex'e $akCodex)$(if ($akEski.Count) { " · $($akEski.Count) tanesi 3 gunden eski: $(($akEski | Select-Object -First 3 | ForEach-Object { $_.id }) -join ', ')" })" }) `
         'beyin aktar (liste) · kapat: beyin aktar -Tamam <id> · gorunum: 10-command-center/aktarimlar.md'
 } catch { }
+# takim (2026-10-12, takim modu): acik kosular, calisan isci, bekleyen insan onayi. SORUN: 24
+# saattir ilerlemeyen acik kosu ya da 1 gunden eski bekleyen onay (kullanici cevap vermemis ya
+# da sef unutmus). OLCULEMEDI: motor (team-run.mjs) var ama hic kosu yapilmamis.
+try {
+    $tkInv = [Globalization.CultureInfo]::InvariantCulture
+    $tkD = Get-BeyinTakimDurum -Paths $p
+    $tkMotor = $false
+    try { $tkKok = Get-BeyinAgentChefKok; $tkMotor = [bool](Test-Path -LiteralPath (Join-Path ([string]$tkKok.Yol) 'scripts\team-run.mjs')) } catch { }
+    if (@($tkD.Kosular).Count -eq 0) {
+        if ($tkMotor) { Add-Row 'takim' $true 'motor var (team-run.mjs) ama henuz hic kosu yok' 'beyin takim plan ... (bkz. KILAVUZ takim)' -Durum 'OLCULEMEDI' }
+        else { Add-Row 'takim' $true 'takim modu kurulu degil (AgentChef 1.5.0+ team-run.mjs yok); kosu yok' 'AgentChef 1.5.0 kurulunca: beyin takim doctor' }
+    } else {
+        $tkBayat = @($tkD.Acik | Where-Object { try { ((Get-Date) - [datetime]::Parse([string]$_.updatedAt, $tkInv)).TotalHours -gt 24 } catch { $false } })
+        $tkEskiOnay = @(Get-BeyinOnayBekleyen -Paths $p | Where-Object { $_.Tur -and $(try { ((Get-Date) - [datetime]::Parse([string]$_.ApprovedAt, $tkInv)).TotalDays -gt 1 } catch { $false }) })
+        $tkBekleyenOnay = @($tkD.OnayBekleyen | ForEach-Object { "$($_.Tur) $($_.RunId)" })
+        Add-Row 'takim' ($tkBayat.Count -eq 0 -and $tkEskiOnay.Count -eq 0) `
+            ("$(@($tkD.Acik).Count) kosu acik, $($tkD.Isci) isci calisiyor" +
+             $(if ($tkBekleyenOnay.Count) { " · onay bekliyor: $($tkBekleyenOnay -join ', ')" } else { '' }) +
+             $(if ($tkBayat.Count) { " · 24 saattir ilerlemeyen: $(($tkBayat | ForEach-Object { $_.runId }) -join ', ')" } else { '' }) +
+             $(if ($tkEskiOnay.Count) { " · 1 gunden eski kullanilmamis onay: $(($tkEskiOnay | ForEach-Object { "$($_.Tur) $($_.Id)" }) -join ', ')" } else { '' })) `
+            'beyin takim durum · onay: sohbete tek satir "baslat <runId>" / "birlestir <runId>" · takili kosu: beyin takim durdur <runId> · gorunum: 10-command-center/takim.md'
+    }
+} catch { Add-Row 'takim' $true "olculemedi: $($_.Exception.Message)" '' -Durum 'OLCULEMEDI' }
 
 # ============================================================================
 # OLU KAVRAM  (Faz 2C, 2026-09-15)  -  bahcivan.ps1'in kavram bolumu
@@ -2628,6 +2662,7 @@ if ($Ozet) {
     "  Makbuz      : $(Detay 'makbuz (24 saat)') · $(Detay 'sifir bayt yazimi')"
     "  Niyet       : $(Detay 'niyet')"
     "  Aktarim     : $(Detay 'aktarim')"
+    "  Takim       : $(Detay 'takim')"
     "  Kaynak      : $(Detay 'kaynak')"
     "  Bahcivan    : $(Detay 'olu kavram')"
     "  Disk        : $(Detay 'disk')"

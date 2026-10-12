@@ -107,7 +107,11 @@ only in `CLAUDE.md`.
   `todo -> in_progress` needs a brief and a live lease; `done` needs both a `--verified-by`
   check by an agent that did not do the work and the user's `onayla TASK-x` line; session start shows
   `Pano: N open, M in this project` and `[Hafiza] UYARI pano:` for open cards
-  writing into this repo; view `10-command-center/pano.md`), `kullanim [gun]` did an
+  writing into this repo; view `10-command-center/pano.md`), `takim <command>` team run
+  (wrapper over AgentChef team-run.mjs; conductor = the user's Claude session, workers =
+  Codex, one worktree per card; human approval is one chat line: `baslat <runId>` before
+  start, `birlestir <runId>` before merge; message one worker with
+  `aktar "..." -Isci TASK-x`; view `10-command-center/takim.md`), `kullanim [gun]` did an
   injected concept note actually get opened afterwards (retrieval receipt x Claude
   transcript; "reached context != used"), `geri-getirme-olc` retrieval regression gate
   (frozen holdout, vector/keyword rank-1; `-Dondur` regenerates the fixture), `kirp`

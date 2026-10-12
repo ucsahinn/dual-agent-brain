@@ -78,8 +78,14 @@ try {
         }
     }
 
+    # ISCI MODU (2026-10-12, takim modu): bu oturum bir takim iscisiyse (AGENTCHEF_TEAM_TASK +
+    # _RUN, motor codex exec'i boyle acar) gelen "kullanici promptu" aslinda motorun brief'idir:
+    # kavram aramasi yapilmaz (bosa Ollama), insan onayi YAKALANMAZ (brief icindeki 'onayla
+    # TASK-x' satiri onay basamaz). Aktarim gosterimi -Isci suzgeciyle calisir.
+    $isciMod = [bool]($env:AGENTCHEF_TEAM_TASK -and $env:AGENTCHEF_TEAM_RUN)
+
     # Cok kisa mesajlarda ("devam", "evet", "tamam") sinyal yok; arama bile yapma.
-    if ($prompt -and $prompt.Length -ge 24 -and -not $sentetik) {
+    if ($prompt -and $prompt.Length -ge 24 -and -not $sentetik -and -not $isciMod) {
 
         # AYNI KAVRAMI TEKRAR BASMA. Bir kavram bir oturumda bir kez hatirlatilir;
         # her mesajda tekrarlanan ayni blok kisa surede gorulmez hale gelir ve
@@ -196,7 +202,10 @@ try {
             $pcKey = Get-BeyinSessionKey -SessionId $hook.session_id
             $pcGor += @(Get-BeyinTeslimEdilen -Paths $p -SessionKey $pcKey)
             # Devir (BB3) yalniz oturum ACILISINDA gosterilir; oturum icinde gosterilmez.
-            $pcYeni = @(Get-BeyinHandoffAcik -Paths $p -Kime $pcAjan -Proje $pcProje | Where-Object { $pcGor -notcontains [string]$_.id -and [string]$_.kind -ne 'devir' })
+            $pcKonum = $(if ($pcCwd) { Get-BeyinProjectLeaf -Path $pcCwd -Paths $p } else { '' })
+            # -Isci (v3): isci yalniz kendi kartina adresli mesaji alir; sef toWorker'li mesaji almaz.
+            $pcIsci = $(if ($isciMod) { [string]$env:AGENTCHEF_TEAM_TASK } else { [string]$st.takimKart })
+            $pcYeni = @(Get-BeyinHandoffAcik -Paths $p -Kime $pcAjan -Proje $pcProje -KonumProje $pcKonum -Isci $pcIsci -OturumKey $pcKey | Where-Object { $pcGor -notcontains [string]$_.id -and [string]$_.kind -ne 'devir' })
             # EN YENI ONCE (2026-10-07): eski uzun aktarimlar 560 karakterlik blogu doldurup
             # yeni geleni (ornek: yanit) disarida birakiyordu (olculdu).
             $pcYeni = @($pcYeni | Sort-Object -Property ts -Descending)
@@ -208,7 +217,9 @@ try {
                     $tur = $(if ($h.PSObject.Properties['kind'] -and $h.kind) { [string]$h.kind } else { 'soru' })
                     $soru = [string]$h.question
                     if ($soru.Length -gt 300) { $soru = $soru.Substring(0, 297) + '...' }
-                    $satir = "- $($h.id) [$tur] ($($h.from.agent)): $soru"
+                    $kimden = [string]$h.from.agent
+                    if ($h.from.PSObject.Properties['worker'] -and $h.from.worker) { $kimden += '/' + [string]$h.from.worker }
+                    $satir = "- $($h.id) [$tur] ($kimden): $soru"
                     if ($h.next) { $satir += " | sonraki: $($h.next)" }
                     if ($gosterilenId.Count -gt 0 -and ($hsb.Length + $satir.Length) -gt 560) { [void]$hsb.Append("(+$($pcYeni.Count - $gosterilenId.Count) tane daha: beyin aktar) "); break }
                     if (-not (Request-BeyinTeslimHakki -Paths $p -SessionKey $pcKey -Id ([string]$h.id))) { continue }
@@ -236,7 +247,31 @@ try {
 # yazar. Ajan kullanici mesaji uretemez; sentetik turlar (ajan raporu, oturumlar arasi
 # mesaj, sistem bildirimi) ve cumle icinde gecen ifade SAYILMAZ. Kisa istem de gecerli.
 try {
-    if ($prompt -and -not $sentetik) {
+    if ($prompt -and -not $sentetik -and -not $isciMod) {
+        # TAKIM ONAYLARI (2026-10-12): 'baslat <runId>' -> isciler baslasin, 'birlestir <runId>' ->
+        # ara dal kullanicinin daline girsin. Yalniz VAR OLAN bir kosu icin yazilir: siradan bir
+        # "baslat ..." cumlesi (kosu yoksa) onay uretmez, makbuza ONAY_ATLANDI duser.
+        # runId alnum ile BITER: 'baslat R-1.' satirindaki nokta kimlige yapismasin (olculdu: 'R-T1.' -> kosu yok).
+        $takimM = [regex]::Matches($prompt, '(?im)^[ \t]*(?:takim[ \t]+)?(baslat|birlestir)[ \t]+([A-Za-z0-9](?:[A-Za-z0-9._-]{1,62}[A-Za-z0-9])?)[ \t]*[.!]?[ \t]*$')
+        $takimOnay = New-Object System.Collections.Generic.List[string]
+        foreach ($tmc in $takimM) {
+            $tkTur = $tmc.Groups[1].Value.ToLowerInvariant(); $tkRun = $tmc.Groups[2].Value
+            if ($takimOnay -contains "$tkTur $tkRun") { continue }
+            if (-not (Test-Path -LiteralPath (Join-Path $p.TeamRuns "$tkRun.json"))) {
+                Write-BeyinMakbuz -Paths $p -Script 'takim' -Outcome 'ONAY_ATLANDI' -Agent (Get-BeyinAgent) -Reason 'sohbet' -Note "$tkTur $tkRun kosu yok"
+                continue
+            }
+            $tkKayit = Add-BeyinOnay -Paths $p -TaskId $tkRun -Kanal 'sohbet' -Ajan (Get-BeyinAgent) -Session (Get-BeyinSessionKey -SessionId $hook.session_id) -Tur $tkTur
+            if ($tkKayit.Ok) {
+                $takimOnay.Add("$tkTur $tkRun")
+                Write-BeyinMakbuz -Paths $p -Script 'takim' -Outcome 'ONAY_KAYDEDILDI' -Agent (Get-BeyinAgent) `
+                    -Key (Get-BeyinSessionKey -SessionId $hook.session_id) -Reason 'sohbet' -Note "$tkTur $tkRun"
+            }
+        }
+        if ($takimOnay.Count -gt 0) {
+            $tkSonraki = @($takimOnay | ForEach-Object { $tkp = $_ -split ' '; "beyin takim $(if ($tkp[0] -eq 'baslat') { 'start' } else { 'merge' }) --run $($tkp[1])" }) -join '; '
+            $parcalar.Add("[Hafiza] Insan onayi kaydedildi: $($takimOnay -join ', ') (7 gun gecerli, tek kullanimlik). Simdi: $tkSonraki")
+        }
         $onayM = [regex]::Matches($prompt, '(?im)^[ \t]*onayla[ \t]+(TASK-\d+(?:[ \t]*,?[ \t]*TASK-\d+)*)[ \t]*[.!]?[ \t]*$')
         $onaylanan = New-Object System.Collections.Generic.List[string]
         foreach ($om in $onayM) {

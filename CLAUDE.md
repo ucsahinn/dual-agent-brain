@@ -120,6 +120,10 @@ Her anlamli oturum iz birakir: ya bir not, ya bir karar, ya guncellenmis bir dos
   uzerinden yurur. `todo -> in_progress` icin brief + canli kira gerekir; `done` icin hem
   isi yapmayan bir ajanin `--verified-by` dogrulamasi hem kullanicinin `onayla TASK-x` satiri; acilista `Pano: N acik, M bu projede` ve bu repoya yazan
   kartlar icin `[Hafiza] UYARI pano:`; gorunum `10-command-center/pano.md`),
+  `takim <komut>` takim kosusu (AgentChef team-run.mjs sarmalayicisi; sef = kullanicinin
+  Claude oturumu, isciler = Codex, kart basina worktree; insan onayi sohbete tek satir:
+  `baslat <runId>` start'tan once, `birlestir <runId>` merge'den once; isciye mesaj
+  `aktar "..." -Isci TASK-x`; gorunum `10-command-center/takim.md`),
   `kullanim [gun]` enjekte edilen kavram notu sonradan gercekten acildi mi (retrieval
   makbuzu x Claude transkripti; "baglama geldi != kullanildi"), `geri-getirme-olc`
   geri getirme regresyon kapisi (dondurulmus holdout, vektor/kelime rank-1; `-Dondur`

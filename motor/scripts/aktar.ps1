@@ -44,7 +44,11 @@ param(
     [switch]$VeBekle,
     [int]$Sure = 100,
     # TESLIM YERI (2026-10-07): bos = hedef ajanin HER acilisinda/mesajinda; '<proje>' = yalniz o projede.
-    [string]$Hedef = ''
+    [string]$Hedef = '',
+    # ISCI ADRESI (2026-10-12, takim modu, sema v3): -Isci TASK-x yalniz o takim iscisine (Codex)
+    # gider; genel '-Kime codex' mesaji isciye DUSMEZ. -Oturum <anahtar> belirli bir oturuma.
+    [string]$Isci = '',
+    [string]$Oturum = ''
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -77,6 +81,12 @@ if (-not (Vault-Mi $Vault)) { Hata "vault degil (motor\hooks\lib.ps1 yok): '$Vau
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
 $p = Get-BeyinPaths -Vault $Vault
 $ajan = Get-BeyinAgent
+# GONDEREN OTURUM/ISCI (2026-10-12): Herdr pane yoksa Codex thread kimligi; isci oturumu kart kimligini tasir.
+$gonderenOturum = $(if ($env:HERDR_PANE_ID) { [string]$env:HERDR_PANE_ID } elseif ($env:CODEX_THREAD_ID) { [string]$env:CODEX_THREAD_ID } else { '' })
+$gonderenIsci = ([string]$env:AGENTCHEF_TEAM_TASK).Trim().ToUpperInvariant()
+if ($gonderenIsci -cnotmatch '^TASK-\d+$') { $gonderenIsci = '' }
+$Isci = ([string]$Isci).Trim().ToUpperInvariant()
+if ($Isci -and $Isci -cnotmatch '^TASK-\d+$') { Hata "-Isci TASK-<sayi> olmali (verilen: '$Isci')" }
 
 # Celisen bayraklar acikca reddedilir (eskiden biri sessizce yok sayiliyordu).
 if ($Bekle -and $Yanit) { Hata '-Bekle ve -Yanit birlikte verilemez (once yanitla, bekleme soranin isidir).' }
@@ -129,8 +139,11 @@ if ($Yanit) {
     # ezip yaniti 'codex' adli bir projeye sinirliyordu (olculdu 2026-10-07).
     $yanitKime = [string]$soru.from.agent
     if ($yanitKime -ne 'claude' -and $yanitKime -ne 'codex') { $yanitKime = $(if ($ajan -eq 'codex') { 'claude' } else { 'codex' }) }
+    # Isciden gelen soruya yanit o isciye geri adreslenir (v3 from.worker); sef genel kanala yazmaz.
+    $yanitIsci = $(if ($soru.from.PSObject.Properties['worker'] -and $soru.from.worker -and $yanitKime -eq 'codex') { [string]$soru.from.worker } else { '' })
     $yr = Add-BeyinHandoff -Paths $p -Metin $Metin -Kime $yanitKime -Kanit $Kanit -Kapsam $Kapsam -Risk $Risk -Sonraki $Sonraki `
-        -Proje ([string]$soru.from.project) -Kind 'yanit' -Ref $Yanit -FromAgent $ajan -FromSession ([string]$env:HERDR_PANE_ID) -HedefProje $Hedef
+        -Proje ([string]$soru.from.project) -Kind 'yanit' -Ref $Yanit -FromAgent $ajan -FromSession $gonderenOturum -HedefProje $Hedef `
+        -ToWorker $yanitIsci -FromWorker $gonderenIsci
     if (-not $yr.Ok) { Hata "yanit yazilamadi ($($yr.Kod): $($yr.Hata))" 3 }
     $kapandi = Close-BeyinHandoff -Paths $p -Id $Yanit -DoneBy "$ajan (yanitladi: $($yr.Id))"
     Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_YANITLANDI' -Agent $ajan -Note "$Yanit -> $($yr.Id)"
@@ -164,7 +177,7 @@ if ($Tamam) {
 if (-not $Metin) {
     # Gonderim bayragi verilip metin bos kaldiysa SESSIZCE liste basma: cagiranin metin
     # degiskeni bos kalmis olabilir, basarili gorunur ama hicbir sey gitmez (denetim 2026-10-07).
-    $gonderimBayragi = @('Kime', 'Kanit', 'Kapsam', 'Risk', 'Sonraki', 'Proje', 'Hedef', 'Tur', 'VeBekle') | Where-Object { $PSBoundParameters.ContainsKey($_) }
+    $gonderimBayragi = @('Kime', 'Kanit', 'Kapsam', 'Risk', 'Sonraki', 'Proje', 'Hedef', 'Tur', 'VeBekle', 'Isci', 'Oturum') | Where-Object { $PSBoundParameters.ContainsKey($_) }
     if (@($gonderimBayragi).Count -gt 0) { Hata "gonderilecek metin bos (verilen: -$((@($gonderimBayragi)) -join ', -')). Kullanim: beyin aktar `"soru`" -Kime claude|codex" }
     # '$hepsi' adi KULLANILAMAZ: [switch]$Hepsi parametresiyle ayni degiskendir (PS adlari harf
     # duyarsiz); diziyi switch'e atama sessizce duser ve foreach $false uzerinde doner (olculdu:
@@ -181,7 +194,10 @@ if (-not $Metin) {
         $durum = $(if ($acik) { 'ACIK' } else { "TAMAM ($($h.doneBy))" })
         $tur = $(if ($h.PSObject.Properties['kind'] -and $h.kind) { [string]$h.kind } else { 'soru' })
         $hedefP = $(if ($h.PSObject.Properties['toProject'] -and $h.toProject) { "  hedef: $($h.toProject)" } else { '' })
-        Yaz "$($h.id)  [$durum]  [$tur]  $($h.from.agent) -> $($h.to)  proje: $($h.from.project)$hedefP  $ts" $(if ($acik) { 'Cyan' } else { 'DarkGray' })
+        if ($h.PSObject.Properties['toWorker'] -and $h.toWorker) { $hedefP += "  hedef isci: $($h.toWorker)" }
+        $kimden = [string]$h.from.agent
+        if ($h.from.PSObject.Properties['worker'] -and $h.from.worker) { $kimden += "/$($h.from.worker)" }
+        Yaz "$($h.id)  [$durum]  [$tur]  $kimden -> $($h.to)  proje: $($h.from.project)$hedefP  $ts" $(if ($acik) { 'Cyan' } else { 'DarkGray' })
         Yaz "  soru   : $($h.question)"
         if ($h.ref)      { Yaz "  yanitladigi: $($h.ref)" }
         if ($h.evidence) { Yaz "  kanit  : $($h.evidence)" }
@@ -196,8 +212,9 @@ if (-not $Metin) {
 
 # --- Kaydet ---
 $kime = ([string]$Kime).Trim().ToLowerInvariant()
-if (-not $kime) { $kime = $(if ($ajan -eq 'codex') { 'claude' } else { 'codex' }) }
+if (-not $kime) { $kime = $(if ($Isci) { 'codex' } elseif ($ajan -eq 'codex') { 'claude' } else { 'codex' }) }
 if ($kime -ne 'claude' -and $kime -ne 'codex') { Hata "-Kime claude ya da codex olmali (verilen: '$Kime')" }
+if ($Isci -and $kime -ne 'codex') { Hata "-Isci yalniz codex iscisine gider (-Kime codex ya da bos birak; verilen: '$Kime')" }
 
 # KAYIT TEK YOLDAN (2026-10-06): lib Add-BeyinHandoff (pano brifingi de ayni fonksiyonu
 # kullanir). Sozlesme ayni: alanlar fail-closed maskelenir, yazim geri okunur.
@@ -213,7 +230,8 @@ if ($tur -eq 'devir' -and $kime -ne $ajan) {
     Hata "-Tur devir yalniz ayni ajana yazilir (gonderen: $ajan, hedef: $kime). Baska ajana bildirim icin -Tur'u verme (soru/handoff)."
 }
 $sonuc = Add-BeyinHandoff -Paths $p -Metin $Metin -Kime $kime -Kanit $Kanit -Kapsam $Kapsam -Risk $Risk -Sonraki $Sonraki `
-    -Proje $proje -Kind $tur -FromAgent $ajan -FromSession ([string]$env:HERDR_PANE_ID) -HedefProje $Hedef
+    -Proje $proje -Kind $tur -FromAgent $ajan -FromSession $gonderenOturum -HedefProje $Hedef `
+    -ToWorker $Isci -ToSession ([string]$Oturum) -FromWorker $gonderenIsci
 if ($sonuc.Kod -eq 'BOS') { Hata 'bos soru/handoff metni' }
 if ($sonuc.Kod -eq 'REDAKSIYON_DUSTU') {
     Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_REDAKSIYON_DUSTU' -Note $sonuc.Hata
@@ -230,9 +248,9 @@ if (([string]$Metin).Trim().Length -gt 600) { $kesilen += 'metin 600' }
 foreach ($alan in @(@{ A = 'kanit'; D = $Kanit }, @{ A = 'kapsam'; D = $Kapsam }, @{ A = 'risk'; D = $Risk }, @{ A = 'sonraki'; D = $Sonraki })) { if (([string]$alan.D).Trim().Length -gt 300) { $kesilen += "$($alan.A) 300" } }
 if ($kesilen.Count -gt 0) { Yaz "UYARI: kisaltildi ($($kesilen -join ', ') karakter). Uzun icerik icin dosya yolunu -Kanit'e yaz." 'Yellow' }
 $id = $sonuc.Id
-Write-BeyinLog -Vault $Vault -Message "aktar: kaydedildi $id ($ajan -> $kime, tur=$tur, proje=$proje, hedef=$Hedef)"
-Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_KAYDEDILDI' -Agent $ajan -Note "$id -> $kime ($tur)"
-Yaz "Aktarim kaydedildi: $id  ($ajan -> $kime, proje: $(if ($proje) { $proje } else { '-' }), teslim: $(if ($Hedef) { "yalniz '$Hedef' projesinde" } else { 'her proje klasorunde' }))" 'Green'
+Write-BeyinLog -Vault $Vault -Message "aktar: kaydedildi $id ($ajan -> $kime$(if ($Isci) { "@$Isci" }), tur=$tur, proje=$proje, hedef=$Hedef)"
+Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_KAYDEDILDI' -Agent $ajan -Note "$id -> $kime$(if ($Isci) { "@$Isci" }) ($tur)"
+Yaz "Aktarim kaydedildi: $id  ($ajan -> $kime$(if ($Isci) { " (yalniz isci $Isci)" }), proje: $(if ($proje) { $proje } else { '-' }), teslim: $(if ($Hedef) { "yalniz '$Hedef' projesinde" } else { 'her proje klasorunde' }))" 'Green'
 Yaz "  Hedef ajan calisiyorsa bir sonraki komutunda, degilse bir sonraki mesajinda ya da acilista [Hafiza: Aktarim] blogu olarak gorur."
 Yaz "  Yanit: beyin aktar `"...`" -Yanit $id   |   bekle: beyin aktar -Bekle $id   |   kapat: beyin aktar -Tamam $id" 'Cyan'
 Yaz "  Turetilmis gorunum: $(Join-Path (Join-Path $Vault '10-command-center') 'aktarimlar.md')" 'DarkGray'

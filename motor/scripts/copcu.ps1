@@ -407,9 +407,16 @@ if ($Uygula) {
             if ($CopKutusu) {
                 [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($a.tamYol, 'OnlyErrorDialogs', 'SendToRecycleBin')
             } else {
-                Remove-Item -LiteralPath $a.tamYol -Recurse -Force -ErrorAction Stop
+                try { Remove-Item -LiteralPath $a.tamYol -Recurse -Force -ErrorAction Stop }
+                catch {
+                    # UZUN YOL (2026-10-08): Next.js derleme klasorlerinde yol 260 karakteri asiyor;
+                    # Remove-Item 'Could not find a part of the path' ile yarim birakiyordu (9 klasor
+                    # olculdu). .NET '\\?\' onekiyle uzun yolu siler. Kapilar zaten gecilmisti.
+                    if (Test-Path -LiteralPath $a.tamYol) { [IO.Directory]::Delete('\\?\' + $a.tamYol, $true) }
+                }
             }
-            $silindi = $true
+            $silindi = -not (Test-Path -LiteralPath $a.tamYol)
+            if (-not $silindi) { throw 'silme sonrasi klasor hala duruyor' }
         } catch { $hatalar.Add("silinemedi: $($a.tamYol) - $($_.Exception.Message)") }
         if ($silindi) { $silinen.Add(@{ p = $mkYol; b = [long]($a.MB * 1MB); a = -1 }) }
     }

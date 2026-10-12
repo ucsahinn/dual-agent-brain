@@ -446,6 +446,18 @@ FLUSH_BOS
         Stop-Flush -Code 'FLUSH_BOS' -Log 'flush: model FLUSH_BOS dedi (kayda deger sey yok)'
     }
 
+    # BICIM KAPISI (2026-10-12): ret ya da serbest metin gunluk loga OZET diye
+    # yazilmaz. Watermark ilerlemez; is en fazla 3 deneme kuyruga doner.
+    if (-not (Test-BeyinOzetBicimi -Text $summary)) {
+        $bcMark = Get-BeyinMark -Paths $p -TranscriptPath $TranscriptPath
+        Set-BeyinAttempt -Paths $p -TranscriptPath $TranscriptPath -Reason "ozet-bicimi"
+        if ($bcMark.Skips -lt 3) { Add-BeyinQueue -Paths $p -TranscriptPath $TranscriptPath -Cwd $ProjectPath -Reason $Reason -Agent $Agent }
+        $bcOrnek = (([string]$summary) -replace '\s+', ' ').Trim()
+        if ($bcOrnek.Length -gt 100) { $bcOrnek = $bcOrnek.Substring(0, 100) + '...' }
+        $bcOrnek = (Protect-BeyinSecrets -Text $bcOrnek -Vault $Vault).Text
+        Stop-Flush -Code 'FLUSH_RET' -Log "flush: DURDU - ozetleyici ciktisi bicim disi (ret/serbest metin: '$bcOrnek'); gunluk loga YAZILMADI, watermark ilerlemedi (deneme $($bcMark.Skips + 1)/3)"
+    }
+
     # ========================================================================
     # 5) Cikti redaksiyonu + mutlak yol temizligi
     # ========================================================================

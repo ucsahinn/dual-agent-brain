@@ -240,6 +240,12 @@ foreach ($k in $konusmalar) {
     # TAM ANKRAJ: 'FLUSH_BOS' kelimesi ozetin ICINDE gecerse (ornek: motorun
     # kendi belgelerini konusan bir sohbet) blok sessizce dusuyordu.
     if (-not $ozet -or ($ozet -cmatch '^\s*FLUSH_BOS\s*$')) { $atlanan++; continue }
+    # Bicim kapisi (2026-10-12): model reddederse ret metni ozet diye yazilmaz.
+    if (-not (Test-BeyinOzetBicimi -Text $ozet)) {
+        $basarisiz++
+        Write-BeyinLog -Vault $Vault -Message "gecmis-import: $($k.Tarih) ozeti YAZILMADI - model ciktisi bicim disi (ret/serbest metin)"
+        continue
+    }
 
     $post = Protect-BeyinSecrets -Text $ozet -Vault $Vault
     if ($post.Failed -gt 0) {

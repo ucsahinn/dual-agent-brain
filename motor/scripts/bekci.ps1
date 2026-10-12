@@ -54,10 +54,14 @@ foreach ($f in @(Get-ChildItem -LiteralPath $p.Sessions -Filter '*.json' -File -
         $proje = ''
         try { $proje = Get-BeyinProjectLeaf -Path ([string]$o.cwd) -Paths $p } catch { }
         $pane = $(if ($o.PSObject.Properties['herdrPane']) { [string]$o.herdrPane } else { '' })
+        # TAKIM ISCISI (2026-10-12): kosu/kart etiketi; kapatma komutu motorun abort'u (taskkill ASLA).
+        $tkRun = $(if ($o.PSObject.Properties['takimRun']) { [string]$o.takimRun } else { '' })
+        $tkKart = $(if ($o.PSObject.Properties['takimKart']) { [string]$o.takimKart } else { '' })
         $otr.Add([ordered]@{
             oturum = $f.BaseName.Substring(0, [Math]::Min(12, $f.BaseName.Length)); ajan = [string]$o.agent; proje = $proje
             prompt = [int]$o.prompts; sonGorulmeDk = $dk; bosta = ($dk -ge $BostaDk); pane = $pane
-            kapat = $(if ($pane) { "herdr pane close $pane" } else { '' })
+            takim = $(if ($tkRun) { "$tkRun/$tkKart" } else { '' })
+            kapat = $(if ($tkRun) { "beyin takim durdur $tkRun" } elseif ($pane) { "herdr pane close $pane" } else { '' })
         })
     } catch { }
 }
@@ -65,6 +69,10 @@ foreach ($f in @(Get-ChildItem -LiteralPath $p.Sessions -Filter '*.json' -File -
 # SESSIZCE dusuyor (olculdu: -Json ciktisinda oturumlar []); pscustomobject'e cevrilir.
 $rapor.oturumlar = @($otr | ForEach-Object { [pscustomobject]$_ })
 $bosta = @($otr | Where-Object { $_.bosta })
+# 2b) Takim kosulari (team-runs; motor yazar, burasi okur): acik kosu, calisan isci, bekleyen onay.
+$takimD = $null
+try { $takimD = Get-BeyinTakimDurum -Paths $p } catch { }
+$rapor.takim = $(if ($takimD) { [ordered]@{ acikKosu = @($takimD.Acik).Count; calisanIsci = [int]$takimD.Isci; onayBekleyen = @($takimD.OnayBekleyen | ForEach-Object { "$($_.Tur) $($_.RunId)" }); satir = [string]$takimD.Satir } } else { $null })
 if ($bosta.Count -ge 5) { $rapor.uyarilar += "$($bosta.Count) oturum dosyasi $BostaDk+ dakikadir sessiz (son 14 gun; kapanmis olabilir)" }
 
 # 3) Yetim doktor PowerShell'leri (ebeveyni olu)
@@ -144,8 +152,16 @@ $(if ($k.OnerilenAjan -gt 0) { "ONERI    es zamanli ajan: $($k.OnerilenAjan) (bo
 ''
 "OTURUMLAR (son 14 gun: $($otr.Count); $BostaDk+ dk sessiz: $($bosta.Count))"
 if ($otr.Count) {
-    $otr | Select-Object -First 25 | ForEach-Object { [pscustomobject]@{ oturum = $_.oturum; ajan = $_.ajan; proje = $_.proje; prompt = $_.prompt; sessiz_dk = $_.sonGorulmeDk; pane = $_.pane; kapat = $_.kapat } } | Format-Table -AutoSize | Out-String -Width 200
+    $otr | Select-Object -First 25 | ForEach-Object { [pscustomobject]@{ oturum = $_.oturum; ajan = $_.ajan; proje = $_.proje; prompt = $_.prompt; sessiz_dk = $_.sonGorulmeDk; takim = $_.takim; pane = $_.pane; kapat = $_.kapat } } | Format-Table -AutoSize | Out-String -Width 200
 } else { '  (oturum dosyasi yok)' }
+if ($takimD -and @($takimD.Acik).Count) {
+    "TAKIM  $($takimD.Satir)"
+    foreach ($kr in $takimD.Acik) {
+        foreach ($w in @($kr.workers)) { if ($w) { "  $($kr.runId) $($w.taskId) $($w.role) [$($w.status)]$(if ($w.pid) { " pid $($w.pid)$(if (Get-Process -Id ([int]$w.pid) -ErrorAction SilentlyContinue) { ' canli' } else { ' olu' })" })" } }
+    }
+    "  isci durdurma yalniz motor uzerinden: beyin takim durdur <runId>  (taskkill/Stop-Process ASLA: kill guard reddeder)"
+    ''
+}
 "YETIM DOKTOR ($($yetimler.Count))"
 if ($yd.Count) { $yd | ForEach-Object { [pscustomobject]$_ } | Format-Table pid, ebeveyn, ebeveynYasiyor, wsMB, baslangic -AutoSize | Out-String -Width 160 } else { '  (doktor sureci yok)' }
 "CODEX / MCP"

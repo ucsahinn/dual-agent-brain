@@ -184,6 +184,10 @@ if ($komut -eq 'start' -and $panelMod -ne 'motor' -and -not $env:AGENTCHEF_TEAM_
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $eapEski = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
+# Deneysel opt-in (2026-10-13): motor `AGENTCHEF_TEAM_MODE=experimental` yoksa start'i "team-mode-disabled" ile
+# reddeder ve doctor "opt-in" FAIL verir. Kullanici karari (2026-10-12) "once bize": sarmalayici bu bayragi
+# kendi surecinde verir; disaridan baska bir deger gelmisse (ornek: kapatmak icin 'off') ona dokunmaz.
+if (-not $env:AGENTCHEF_TEAM_MODE) { $env:AGENTCHEF_TEAM_MODE = 'experimental' }
 $cikti = & $nodeExe $engine @gecilen 2>&1
 $kod = $LASTEXITCODE
 $ErrorActionPreference = $eapEski

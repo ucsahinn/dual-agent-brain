@@ -42,6 +42,9 @@ onu ve yayindaki surumu birlikte basar.
 - Acilis ipucu: motor kuruluysa ve acik kosu yoksa sef oturumu `[Hafiza]` satirinda "Takim modu hazir" gorur
   (iki+ yazma kapsamina yayilan isi `beyin takim plan` ile iscilere bolme hatirlatmasi; baslatma yine kullanicinin
   `baslat <runId>` satiriyla). Isci oturumlarinda gosterilmez.
+- `beyin takim` motorun deneysel opt-in bayragini (`AGENTCHEF_TEAM_MODE=experimental`) kendi surecinde verir:
+  bayraksiz terminalden `start` "team-mode-disabled" ile dusuyor, `doctor` 9/10 veriyordu. Ortamdaki farkli bir
+  degere dokunmaz.
 
 ## 1.3.0 - Takim kosusu: Claude sef, Codex isciler
 

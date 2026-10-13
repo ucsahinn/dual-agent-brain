@@ -34,7 +34,7 @@ if (state) {
     fs.writeFileSync(f, JSON.stringify(cur, null, 2));
   }
 }
-process.stdout.write(JSON.stringify({ ok: true, echo: args, pane: process.env.AGENTCHEF_TEAM_PANE || null }) + "\n");
+process.stdout.write(JSON.stringify({ ok: true, echo: args, pane: process.env.AGENTCHEF_TEAM_PANE || null, optin: process.env.AGENTCHEF_TEAM_MODE || null }) + "\n");
 '@
     [IO.File]::WriteAllText((Join-Path $Kok 'scripts\team-run.mjs'), $js, (New-Object Text.UTF8Encoding $false))
     # Get-BeyinAgentChefKok checkout'u coordination-board.mjs ile tanir; sahte kok onu da tasir.
@@ -156,6 +156,17 @@ Describe 'beyin takim sarmalayicisi (2026-10-12)' {
         $o2 | Should Match 'kosu yok'
     }
 
+    It 'deneysel opt-in: sarmalayici AGENTCHEF_TEAM_MODE=experimental verir, ortamdaki farkli degere dokunmaz' {
+        $onceki = $env:AGENTCHEF_TEAM_MODE
+        try {
+            $env:AGENTCHEF_TEAM_MODE = $null
+            $o = Invoke-Takim $script:tv @('doctor')
+            $o | Should Match '"optin":\s*"experimental"'
+            $env:AGENTCHEF_TEAM_MODE = 'off'
+            $o2 = Invoke-Takim $script:tv @('doctor')
+            $o2 | Should Match '"optin":\s*"off"'
+        } finally { $env:AGENTCHEF_TEAM_MODE = $onceki }
+    }
     It 'durum (argumansiz) motoru cagirmadan dosyadan ozetler; motor yokken komutlar exit 2' {
         $null = Invoke-Takim $script:tv @('plan', '--run', 'R-5')
         $tp = Get-BeyinPaths -Vault $script:tv

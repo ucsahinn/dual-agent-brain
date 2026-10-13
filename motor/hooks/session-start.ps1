@@ -578,6 +578,8 @@ try {
     # Takim (2026-10-12): sef oturumu acik kosulari ve bekleyen onaylari tek satirda gorur (<=200).
     $tkTxt = ''
     if (-not $isciMod) { try { $tkD = Get-BeyinTakimDurum -Paths $p; if ($tkD.Satir) { $tkTxt = ' ' + $tkD.Satir } } catch { } }
+    # Takim modu ipucu (2026-10-13): motor kuruluysa ve acik kosu yoksa sef oturumu takimi bilsin (otomatik baslatma yok; `baslat` kullanicinin)
+    if (-not $isciMod -and -not $tkTxt) { try { $acK = Get-BeyinAgentChefKok; if ($acK -and $acK.Yol -and (Test-Path -LiteralPath (Join-Path ([string]$acK.Yol) 'scripts/team-run.mjs'))) { $tkTxt = ' Takim modu hazir: iki+ yazma kapsamina yayilan isi 1-4 Codex isciye bol (beyin takim plan -> kullanici `baslat <runId>`; sef bu oturum).' } } catch { } }
     $parts.Add("[Hafiza] Beyin hafiza motoru aktif (iki ajanda da ayni vault: $vault).$mvTxt$btTxt$pnTxt$tkTxt " +
                "Tani/durum: powershell -NoProfile -ExecutionPolicy Bypass -File $vault\motor\scripts\doktor.ps1 -Ozet " +
                "(tam tarama icin -Ozet'i kaldir; -Derin gunluk butceden bir claude -p harcar).")
@@ -860,7 +862,7 @@ if ($isciMod) {
                    "Calisma agaci: $tkWt - YALNIZ bu agacta ve brief'teki yazma kapsaminda yaz; git commit/push/checkout/worktree/branch YAPMA (motor commit eder); " +
                    "baska kartin dosyasina dokunma; ajan/alt-ajan acma (gerekirse 'needs: <rol> - <neden>' yaz); kurulum ve global ayar degistirme; sureci oldurme." +
                    $(if ($tkBaslik) { " Kart: $tkBaslik." } else { '' }) +
-                   " Soru: beyin aktar `"...`" -Kime claude -VeBekle. Bitince: kanit ekle (beyin pano add-evidence --task $ssTakimKart --evidence `"<komut/yol>`") ve SON mesajin yalniz handoff JSON olsun (motor toplar).")
+                   " Soru: beyin aktar `"...`" -Kime claude -VeBekle. beyin pano KULLANMA (vault panosu sefindir; kartin kaydi motorun kendi panosundadir ve kaniti motor toplar). Bitince SON mesajin yalniz handoff JSON olsun.")
     } catch { }
 } elseif ($inVault) {
     # ------------------------------ TAM MOD ------------------------------

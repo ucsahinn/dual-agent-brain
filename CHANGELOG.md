@@ -21,6 +21,28 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.3.1 - Isci paneli
+
+- `beyin takim start` artik her isci icin **premium isci panelini** (`motor/scripts/takim-izle.ps1`) Windows
+  Terminal sekmesinde acar; motorun ham `watch` sekmesi kapatilir (`AGENTCHEF_TEAM_PANE=off`). Panel motorun
+  kosu kaydini ve iscinin `events.jsonl`'ini YALNIZ okur: durum bandi, su an + son soz, dogrulamalar | dosyalar,
+  cozulmemis hata, sade akis; `t` dusunme, `e` akis, bosluk dondur, `q` cikar. Sekmeyi kapatmak isciyi durdurmaz.
+- Yeni fiil: `beyin takim izle <runId> [TASK ...]` panelleri (yeniden) acar. Ayar `BEYIN_TAKIM_PANEL`:
+  `on` (varsayilan) | `motor` (motorun kendi izleyicisi) | `off` (sekme acma; testler boyle kosar).
+- Ilk gercek cok rollu kosuda (2026-10-13, 3 isci) ogrenilenler: Codex'in Windows `unelevated` sandbox'i
+  `node --test` alt sureclerini `spawn EPERM` ile engeller (openai/codex #47868); isciler testlerini
+  `node --test --test-isolation=none` ile kosmali, son soz motorun entegrasyon kontrolunde.
+- **Kosu panosu** (ayni betik, yalniz `-Run`): tum takim tek ekranda - durum bandi, isci tablosu (TASK, rol,
+  durum, sure, son olay, dosya, verdict), asama cizgisi (plan > start > collect > integrate > verify > merge) ve
+  `SIRADA` satirinda sefin bir sonraki komutu. `beyin takim start` once kosu panosu sekmesini, sonra isci
+  sekmelerini acar; `izle <runId> pano` yalniz kosu panosunu acar.
+- Panel v12: Catppuccin Mocha paleti (tek vurgu rengi + uc durum rengi), cerceveye gomulu bolum basliklari,
+  durum = glif + sozcuk (calisiyor sari, bitti yesil, hata kirmizi, `rejected_content` = icerik reddi),
+  Turkce is adlari, Latin disi isci notlari gizlenir (`Yabanci`), kare degismediyse yeniden cizilmez (titreme yok).
+- Acilis ipucu: motor kuruluysa ve acik kosu yoksa sef oturumu `[Hafiza]` satirinda "Takim modu hazir" gorur
+  (iki+ yazma kapsamina yayilan isi `beyin takim plan` ile iscilere bolme hatirlatmasi; baslatma yine kullanicinin
+  `baslat <runId>` satiriyla). Isci oturumlarinda gosterilmez.
+
 ## 1.3.0 - Takim kosusu: Claude sef, Codex isciler
 
 **Yeni:**

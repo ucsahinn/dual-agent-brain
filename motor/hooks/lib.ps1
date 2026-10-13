@@ -5506,6 +5506,41 @@ function Get-BeyinTakimKosular {
     return @($liste | Sort-Object -Property @{ Expression = { [string]$_.updatedAt } } -Descending)
 }
 
+# Takim isci paneli (2026-10-13): beyin takim start motorun ham `watch` sekmesini kapatir (AGENTCHEF_TEAM_PANE=off)
+# ve her isci icin motor/scripts/takim-izle.ps1 panelini Windows Terminal sekmesinde acar. Ayar BEYIN_TAKIM_PANEL:
+# on (varsayilan, premium panel) | motor (motorun kendi izleyicisi) | off (sekme acma). wt argv'sinde ';' olmaz
+# (wt ';' gorunce yeni sekme komutu sanir ve yardim penceresi acar).
+function Get-BeyinTakimPanelArgv {
+    param([Parameter(Mandatory=$true)]$Paths, [Parameter(Mandatory=$true)][string]$RunId, [Parameter(Mandatory=$true)][string]$TaskId, [string]$Role = '')
+    $izle = Join-Path $Paths.Scripts 'takim-izle.ps1'
+    $baslik = ("$TaskId $Role $RunId".Trim() -replace '[;"]', ' ')
+    return @('-w', '0', 'new-tab', '--title', $baslik, 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $izle, '-Vault', [string]$Paths.Vault, '-Run', $RunId, '-Kart', $TaskId)
+}
+function Open-BeyinTakimPanel {
+    param([Parameter(Mandatory=$true)]$Paths, [Parameter(Mandatory=$true)][string]$RunId, [string[]]$TaskIds = @())
+    $mod = [string]$(if ($env:BEYIN_TAKIM_PANEL) { $env:BEYIN_TAKIM_PANEL } else { 'on' })
+    if ($mod -ne 'on') { return @{ Ok = $true; Acilan = 0; Neden = "BEYIN_TAKIM_PANEL=$mod" } }
+    $wt = (Get-Command wt.exe -ErrorAction SilentlyContinue).Source
+    if (-not $wt) { return @{ Ok = $false; Acilan = 0; Neden = 'wt.exe yok' } }
+    $kayit = Join-Path $Paths.TeamRuns "$RunId.json"
+    if (-not (Test-Path -LiteralPath $kayit)) { return @{ Ok = $false; Acilan = 0; Neden = 'kosu kaydi yok' } }
+    $rr = Get-Content -LiteralPath $kayit -Raw -Encoding UTF8 | ConvertFrom-Json
+    $n = 0
+    $sadecePano = [bool]($TaskIds -contains 'pano'); if ($sadecePano) { $TaskIds = @() }
+    if (-not $TaskIds.Count) {
+        # once kosu panosu (tum kosu tek ekranda), sonra isci panelleri
+        $argv0 = @('-w', '0', 'new-tab', '--title', ("$RunId koşu panosu" -replace '[;"]', ' '), 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $Paths.Scripts 'takim-izle.ps1'), '-Vault', [string]$Paths.Vault, '-Run', $RunId)
+        try { Start-Process -FilePath $wt -ArgumentList (@($argv0 | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' ') | Out-Null; $n++ } catch { }
+    }
+    foreach ($w in @($rr.workers)) {
+        if (-not $w -or $sadecePano) { continue }
+        if ($TaskIds.Count -and ($TaskIds -notcontains [string]$w.taskId)) { continue }
+        $argv = Get-BeyinTakimPanelArgv -Paths $Paths -RunId $RunId -TaskId ([string]$w.taskId) -Role ([string]$w.role)
+        try { Start-Process -FilePath $wt -ArgumentList (@($argv | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' ') | Out-Null; $n++ } catch { }
+    }
+    return @{ Ok = $true; Acilan = $n; Neden = '' }
+}
+
 function Get-BeyinTakimDurum {
     # Donus: @{ Var; Kosular; Acik; Isci; OnayBekleyen=@(@{RunId;Tur}); Satir (<=200) }
     param([hashtable]$Paths)

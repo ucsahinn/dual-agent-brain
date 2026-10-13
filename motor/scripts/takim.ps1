@@ -23,7 +23,10 @@
 #   beyin takim merge --run <runId>      onay kapisi -> motor ara dali kullanicinin daline alir
 #   beyin takim durdur <runId>           motor abort: yalniz kendi cocuklarini durdurur (taskkill YOK)
 #   beyin takim maliyet <runId>          kart basina jeton (maliyet.ps1 -Run)
+#   beyin takim izle <runId> [TASK ...|pano]  kosu panosu + isci panellerini wt sekmelerinde (yeniden) acar (pano: yalniz kosu panosu)
 #   beyin takim pause|resume|abort|cleanup|doctor|watch ...   aynen gecer
+# Isci paneli (2026-10-13): start basarili olunca her isci icin premium panel sekmesi acilir; motorun ham
+# `watch` sekmesi kapatilir (AGENTCHEF_TEAM_PANE=off). Ayar BEYIN_TAKIM_PANEL: on (varsayilan) | motor | off.
 # Komutlarda runId '--run <id>', '--run=<id>' ya da ikinci konumsal arguman olarak verilebilir.
 #
 # Ayar: BEYIN_AGENTCHEF_KOK (AgentChef checkout). Hata: node CLI stderr'e {"ok":false,"error":"..."}
@@ -70,7 +73,7 @@ if ($args2.Count -eq 0) {
     '  beyin takim start --run <id>     (insan onayi: sohbete "baslat <id>")   isciler kendi worktree ve terminal sekmesinde'
     '  beyin takim collect|integrate|verify --run <id>             topla -> ara dala birlestir -> test_verifier dogrular'
     '  beyin takim merge --run <id>     (insan onayi: sohbete "birlestir <id>")  ara dal senin daline girer; push/PR ayri'
-    'Beyin fiilleri: durum [id] | baslat <id> | birlestir <id> (terminal onayi) | durdur <id> (abort) | maliyet <id>'
+    'Beyin fiilleri: durum [id] | baslat <id> | birlestir <id> (terminal onayi) | durdur <id> (abort) | maliyet <id> | izle <id> [TASK] (isci panelleri)'
     "Turetilmis gorunum: $(Join-Path (Join-Path $Vault '10-command-center') 'takim.md')"
     exit 0
 }
@@ -127,6 +130,15 @@ if ($komut -eq 'baslat' -or $komut -eq 'birlestir') {
     exit 0
 }
 
+if ($komut -eq 'izle') {
+    $runId = $(if ($args2.Count -ge 2) { [string]$args2[1] } else { '' })
+    if (-not $runId) { Write-Output 'Kullanim: beyin takim izle <runId> [TASK ...]'; exit 2 }
+    if (-not (Test-Path -LiteralPath (Join-Path $p.TeamRuns "$runId.json"))) { Write-Output "HATA: kosu yok: $runId"; exit 2 }
+    $sonuc = Open-BeyinTakimPanel -Paths $p -RunId $runId -TaskIds @($args2 | Select-Object -Skip 2)
+    if ($sonuc.Ok) { "Panel acildi: $($sonuc.Acilan) sekme ($runId)$(if ($sonuc.Neden) { " - $($sonuc.Neden)" })" } else { Write-Output "HATA: panel acilamadi - $($sonuc.Neden)"; exit 1 }
+    exit 0
+}
+
 if ($komut -eq 'maliyet') {
     $runId = $(if ($args2.Count -ge 2) { [string]$args2[1] } else { '' })
     if (-not $runId) { Write-Output 'Kullanim: beyin takim maliyet <runId>'; exit 2 }
@@ -165,6 +177,10 @@ if ($onayTur) {
     }
 }
 
+# Isci paneli: premium panel (takim-izle.ps1) acilacaksa motorun ham izleyici sekmesi kapatilir.
+$panelMod = [string]$(if ($env:BEYIN_TAKIM_PANEL) { $env:BEYIN_TAKIM_PANEL } else { 'on' })
+if ($komut -eq 'start' -and $panelMod -ne 'motor' -and -not $env:AGENTCHEF_TEAM_PANE) { $env:AGENTCHEF_TEAM_PANE = 'off' }
+
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $eapEski = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
@@ -178,6 +194,11 @@ if ($kod -eq 0 -and $onayTur) {
     if (Use-BeyinOnay -Paths $p -TaskId $runId -Tur $onayTur -Kullanan 'takim') {
         Write-BeyinMakbuz -Paths $p -Script 'takim' -Outcome 'ONAY_KULLANILDI' -Note "$onayTur $runId -> $komut"
     }
+}
+$panelNot = ''
+if ($kod -eq 0 -and $komut -eq 'start' -and $panelMod -eq 'on') {
+    try { $ps = Open-BeyinTakimPanel -Paths $p -RunId $runId; $panelNot = $(if ($ps.Ok) { "panel $($ps.Acilan) sekme" } else { "panel acilamadi ($($ps.Neden))" }) } catch { $panelNot = 'panel acilamadi' }
+    Write-Host "[takim] $panelNot" -ForegroundColor DarkGray
 }
 
 $mutasyon = @('plan', 'start', 'collect', 'integrate', 'verify', 'merge', 'pause', 'resume', 'abort', 'cleanup')

@@ -34,7 +34,7 @@ if (state) {
     fs.writeFileSync(f, JSON.stringify(cur, null, 2));
   }
 }
-process.stdout.write(JSON.stringify({ ok: true, echo: args }) + "\n");
+process.stdout.write(JSON.stringify({ ok: true, echo: args, pane: process.env.AGENTCHEF_TEAM_PANE || null }) + "\n");
 '@
     [IO.File]::WriteAllText((Join-Path $Kok 'scripts\team-run.mjs'), $js, (New-Object Text.UTF8Encoding $false))
     # Get-BeyinAgentChefKok checkout'u coordination-board.mjs ile tanir; sahte kok onu da tasir.
@@ -52,10 +52,40 @@ Describe 'beyin takim sarmalayicisi (2026-10-12)' {
         New-Item -ItemType Directory -Force -Path (Join-Path $script:tv 'motor\hooks'), (Join-Path $script:tv 'motor\scripts\.state'), (Join-Path $script:tv '10-command-center') | Out-Null
         Copy-Item (Join-Path $vault 'motor\hooks\lib.ps1') (Join-Path $script:tv 'motor\hooks\lib.ps1')
         Copy-Item $takimScript (Join-Path $script:tv 'motor\scripts\takim.ps1')
+        Copy-Item (Join-Path $PSScriptRoot 'takim-izle.ps1') (Join-Path $script:tv 'motor\scripts\takim-izle.ps1')
         Set-Content -Path (Join-Path $script:tv '.beyin-version') -Value '1.0.0'
         $env:BEYIN_AGENTCHEF_KOK = $script:kok
+        $env:BEYIN_TAKIM_PANEL = 'off'   # testler Windows Terminal sekmesi ACMAZ
+        $env:AGENTCHEF_TEAM_PANE = $null
     }
-    AfterEach { $env:BEYIN_AGENTCHEF_KOK = $null }
+    AfterEach { $env:BEYIN_AGENTCHEF_KOK = $null; $env:BEYIN_TAKIM_PANEL = $null; $env:AGENTCHEF_TEAM_PANE = $null }
+
+    It 'isci paneli: start motorun ham sekmesini kapatir (AGENTCHEF_TEAM_PANE=off), motor modunda dokunmaz; izle argv guvenli; off modunda sekme acmaz' {
+        $tp = Get-BeyinPaths -Vault $script:tv
+        $argv = Get-BeyinTakimPanelArgv -Paths $tp -RunId 'R-7' -TaskId 'TASK-1' -Role 'docs_author'
+        ($argv -join ' ') | Should Match 'takim-izle\.ps1'
+        $argv[($argv.IndexOf('-Run') + 1)] | Should Be 'R-7'
+        $argv[($argv.IndexOf('-Kart') + 1)] | Should Be 'TASK-1'
+        (($argv -join ' ') -match ';') | Should Be $false
+        $null = Invoke-Takim $script:tv @('plan', '--run', 'R-7')
+        $null = Add-BeyinOnay -Paths $tp -TaskId 'R-7' -Kanal 'sohbet' -Tur 'baslat'
+        $o = Invoke-Takim $script:tv @('start', '--run', 'R-7')
+        $LASTEXITCODE | Should Be 0
+        (Echo-Json $o).pane | Should Be 'off'
+        $s = Open-BeyinTakimPanel -Paths $tp -RunId 'R-7'
+        $s.Ok | Should Be $true
+        $s.Acilan | Should Be 0
+        $o2 = Invoke-Takim $script:tv @('izle', 'R-7')
+        $LASTEXITCODE | Should Be 0
+        $o2 | Should Match 'BEYIN_TAKIM_PANEL=off'
+        # motor modu: motorun kendi izleyicisi kalir, env'e dokunulmaz
+        $env:BEYIN_TAKIM_PANEL = 'motor'
+        $null = Invoke-Takim $script:tv @('plan', '--run', 'R-8')
+        $null = Add-BeyinOnay -Paths $tp -TaskId 'R-8' -Kanal 'sohbet' -Tur 'baslat'
+        $o3 = Invoke-Takim $script:tv @('start', '--run', 'R-8')
+        $LASTEXITCODE | Should Be 0
+        (Echo-Json $o3).pane | Should Be $null
+    }
 
     It '--state ve --json otomatik eklenir; plan sonrasi takim.md turetilir ve kosuyu listeler' {
         $out = Invoke-Takim $script:tv @('plan', '--repo', 'C:\x', '--run', 'R-1')

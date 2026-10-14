@@ -21,6 +21,22 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.3.5 - Kosu paneli sagligi, bildirim ve gomme karantinasi
+
+- **Windows bildirimi.** Kosu genel gorunumu (`beyin takim izle <runId>`) acikken kosu senden bir sey
+  bekledigi ya da bir sorun ciktigi anda tek bildirim gelir: onay bekliyor (`baslat` / `birlestir`), isci
+  bitti, kota siniri, dogrulama ya da butunlestirme dustu, gozetmen durdu. Panel acilirken zaten var olan
+  durumlar bildirilmez. Kapatmak icin: `beyin ayar BEYIN_BILDIRIM kapali`.
+- **Gozetmen durdu rozeti.** Uyku, cokme ya da yeniden baslatma sonrasi kosu `running` gorunup gozetmeni
+  yoksa (nabiz 60 sn'den eski, surec yok) panel "GOZETMEN DURDU" rozetini ve SIRADA satirinda
+  `beyin takim resume --run <runId>` komutunu gosterir (AgentChef 1.7.6 kurtarmasi).
+- **Panel hatasi artik gizlenmez.** Cizim hatasi eskiden sessizce yutuluyor, donmus panel canli gibi
+  gorunuyordu. Simdi son satirda hata sayisi ve son basarili cizimin yasi kirmizi rozetle gorunur.
+- **Gomme karantinasi.** `beyin gom` sirasinda bir parti dusunce notlar tek tek denenir; tek basina da
+  gomulemeyen not tum kosuyu durdurmaz. Eski vektoru varsa korunur ve bir sonraki kosu yeniden dener;
+  yoksa o kosuda indekse girmez. Cikti satiri `karantina=N (...)` ile hangi notlar oldugunu yazar.
+  Ollama tamamen yoksa davranis eskisi gibidir: kosu durur, eski indeks korunur.
+
 ## 1.3.4 - Kota sonrasi devam ve kill guard son acigi
 
 - **Kota dolunca koşu sürer.** AgentChef 1.7.3'un `resume` komutuyla: `beyin takim resume --run <runId>`.

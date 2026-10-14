@@ -804,6 +804,63 @@ function Paketle([string[]]$parcalar, [int]$gen, [int]$maxSatir) {
     if ($cur -and $sat.Count -lt $maxSatir) { $sat.Add($cur) }
     return @($sat)
 }
+# Windows bildirimi: kosu kullanicidan bir sey bekledigi ya da bir sorun ciktigi anda tek bildirim.
+# Ilk cizimde var olan durumlar bildirilmez (yalniz SONRADAN olusan olaylar). BEYIN_BILDIRIM=kapali susturur.
+$script:bildirimAcik = $(try { [string](Get-BeyinAyar 'BEYIN_BILDIRIM' (Get-BeyinAyarVars 'BEYIN_BILDIRIM')) -ne 'kapali' } catch { $true })
+$script:olayGoruldu = $null; $script:sonBildirim = [datetime]::MinValue
+function Bildir([string]$baslik, [string]$metin) {
+    if (-not $script:bildirimAcik) { return }
+    try {
+        [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+        [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
+        $x = New-Object Windows.Data.Xml.Dom.XmlDocument
+        $x.LoadXml("<toast><visual><binding template='ToastGeneric'><text>$([Security.SecurityElement]::Escape($baslik))</text><text>$([Security.SecurityElement]::Escape($metin))</text></binding></visual></toast>")
+        $app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+        [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show([Windows.UI.Notifications.ToastNotification]::new($x))
+    } catch { }
+}
+# Kosu kaydindan olay kumesi: anahtar -> okunur metin. Saf islev (test edilir).
+function KosuOlaylari($rr, [bool]$sahipsiz) {
+    $o = [ordered]@{}; $id = [string]$rr.runId; $st = [string]$rr.status
+    switch ($st) {
+        'planned'  { $o['durum:planned'] = "onay bekliyor: sohbete yaz  baslat $id" }
+        'verified' { $o['durum:verified'] = "doğrulandı, birleştirme onayı bekliyor: birlestir $id" }
+        'merged'   { $o['durum:merged'] = 'ana dala alındı' }
+        'failed'   { $o['durum:failed'] = 'koşu başarısız' }
+        'aborted'  { $o['durum:aborted'] = 'koşu iptal edildi' }
+    }
+    foreach ($wk in @($rr.workers | Where-Object { $null -ne $_ })) {
+        $t = [string]$wk.taskId; $d = [string]$wk.status
+        if ($d -eq 'paused_limit') { $o["kota:$t"] = "$t kota sınırına takıldı" }
+        elseif ($d -in @('failed', 'timed_out', 'scope_violation', 'rejected_content', 'conflict')) { $o["sorun:$t"] = "$t sorunlu bitti ($d)" }
+        elseif ($d -in @('finished', 'collected', 'integrated')) { $o["bitti:$t"] = "$t bitti" }
+    }
+    $ig = $rr.integration
+    if ($ig -and -not $ig.ok) { $o['sorun:butunlestirme'] = 'bütünleştirme kontrolü düştü ya da çakışma var' }
+    $v = $rr.verification
+    if ($v -and $v.verdict -and [string]$v.verdict -notin @('pass', 'warn')) { $o['sorun:dogrulama'] = "doğrulama geçmedi ($($v.verdict))" }
+    if ($sahipsiz) { $o['sahipsiz'] = "gözetmen durdu: beyin takim resume --run $id" }
+    return $o
+}
+function OlaylariBildir($rr, [bool]$sahipsiz) {
+    $o = KosuOlaylari $rr $sahipsiz
+    if ($null -eq $script:olayGoruldu) { $script:olayGoruldu = @{}; foreach ($k in $o.Keys) { $script:olayGoruldu[$k] = $true }; return }
+    # Kalkan durum yeniden kurulur: ayni isci ikinci kez kotaya takilirsa ya da gozetmen yine durursa yine bildirilir.
+    foreach ($k in @($script:olayGoruldu.Keys)) { if (-not $o.Contains($k)) { $script:olayGoruldu.Remove($k) } }
+    $yeni = @($o.Keys | Where-Object { -not $script:olayGoruldu.ContainsKey($_) })
+    if (-not $yeni.Count) { return }
+    foreach ($k in $yeni) { $script:olayGoruldu[$k] = $true }
+    Bildir "Beyin takım · $([string]$rr.runId)" (@($yeni | ForEach-Object { $o[$_] }) -join ' · ')
+}
+# Gozetmen nabzi: kayitli pid yasamiyor ve son nabiz 60 sn'den eski ise kosu sahipsiz kalmistir (uyku, cokme, yeniden baslatma).
+function GozetmenDurmus($rr) {
+    $sv = $rr.supervisor; if (-not $sv) { return $false }
+    $yas = [double]::PositiveInfinity
+    if ($sv.heartbeatAt) { try { $yas = ((Get-Date).ToUniversalTime() - ([datetime]::Parse([string]$sv.heartbeatAt)).ToUniversalTime()).TotalSeconds } catch { } }
+    if ($yas -lt 60) { return $false }
+    $canli = $false; if ($sv.pid) { $canli = [bool](Get-Process -Id ([int]$sv.pid) -ErrorAction SilentlyContinue) }
+    return -not $canli
+}
 function RenderRun([int]$tick) {
     $w = $Host.UI.RawUI.WindowSize.Width; $h = $Host.UI.RawUI.WindowSize.Height
     if ($w -lt 80) { $w = 80 }
@@ -827,11 +884,14 @@ function RenderRun([int]$tick) {
     $dogrulamaDustu = [bool]($v -and $v.verdict -and $v.verdict -notin @('pass', 'warn'))
     $uyari = [bool]($v -and $v.verdict -eq 'warn')
     $id = [string]$rr.runId
+    $sahipsiz = [bool]($st2 -eq 'running' -and $calisan -gt 0 -and (GozetmenDurmus $rr))
+    try { OlaylariBildir $rr $sahipsiz } catch { }
 
     # ---- rozet ----
     if ($st2 -eq 'aborted') { $badge = "$bgBad$BOLD ✖ İPTAL $RS"; $glyph = '✖' }
     elseif ($st2 -eq 'failed') { $badge = "$bgBad$BOLD ✖ BAŞARISIZ $RS"; $glyph = '✖' }
     elseif ($st2 -eq 'merged') { $badge = "$bgRun$BOLD ✔ ANA DALDA $RS"; $glyph = '✔' }
+    elseif ($sahipsiz) { $badge = "$bgBad$BOLD ⚠ GÖZETMEN DURDU $RS"; $glyph = '⚠' }
     elseif ($calisan -gt 0) { $glyph = $spin[$tick % $spin.Count]; $badge = "$bgPart$BOLD $glyph ÇALIŞIYOR $RS" }
     elseif ($cakisma) { $badge = "$bgBad$BOLD ✖ ÇAKIŞMA $RS"; $glyph = '✖' }
     elseif ($kontrolDustu) { $badge = "$bgBad$BOLD ✖ KONTROL DÜŞTÜ $RS"; $glyph = '✖' }
@@ -1027,6 +1087,7 @@ function RenderRun([int]$tick) {
     elseif ($st2 -eq 'failed') { $adim = "koşu başarısız · işçi panellerine bak · temizlik: beyin takim cleanup $id" }
     elseif ($st2 -eq 'merged') { $adim = 'bitti: ek adım yok'; $neden = 'kartlar için sohbete onayla <TASK>; push/PR ayrı karar' }
     elseif ($st2 -eq 'planned') { $adim = "başlat: sohbete yaz  baslat $id"; $neden = 'işçiler ancak senin onayınla açılır' }
+    elseif ($sahipsiz) { $adim = "gözetmen durmuş (uyku/çökme?): beyin takim resume --run $id"; $neden = 'işçiler kayıtlı Codex oturumlarından devam eder; canlı işçi varsa önce o biter'; $nedenCol = $cWarn }
     elseif ($calisan -gt 0) { $nCal = @($ws | Where-Object { $_.status -in @('spawning', 'running') }).Count; $nSir = $calisan - $nCal; $adim = "bekle: $nCal işçi çalışıyor" + $(if ($nSir) { ", $nSir sırada" } else { '' }); $neden = 'bitince toplanır; işçi panelleri ayrı sekmede' }
     elseif ($st2 -eq 'paused' -and @($ws | Where-Object { $_.status -eq 'paused_limit' }).Count) { $adim = "kota sıfırlanınca: beyin takim resume --run $id"; $neden = 'işçi kaldığı Codex oturumundan sürer; vazgeçersen: beyin takim collect' }
     elseif ($st2 -in @('running', 'paused')) { $adim = "topla: beyin takim collect $id"; $neden = 'işçiler bitti, çıktılar toplanmadı' }
@@ -1069,6 +1130,21 @@ function SelfReloadIfChanged {
     } catch { return $false }
 }
 
+# Cizim bekcisi: cizim hatasi sessizce yutulursa donmus panel canli gorunur. Hata sayilir ve son satira rozet basilir.
+$script:cizimHata = 0; $script:cizimMesaj = ''; $script:sonCizim = Get-Date
+function CizimSonuc([scriptblock]$ciz) {
+    try { & $ciz; if ($script:cizimHata) { $script:cizimHata = 0; $script:lastFrame = '' }; $script:sonCizim = Get-Date }
+    catch {
+        $script:cizimHata++; $script:cizimMesaj = (Clean ([string]$_.Exception.Message)) -replace '\s+', ' '
+        try {
+            $hh = $Host.UI.RawUI.WindowSize.Height; $ww = [Math]::Max(40, $Host.UI.RawUI.WindowSize.Width)
+            $etiket = if ($script:cizimHata -ge 5) { 'BOZUK' } else { 'SORUNLU' }
+            $msg = "⚠ panel $etiket · $($script:cizimHata) kez çizilemedi · son başarılı çizim $(Ago $script:sonCizim) önce · $($script:cizimMesaj)"
+            [Console]::Write("$ESC[$hh;1H$cErr$(Cut $msg ($ww - 1))$RS$ESC[K")
+        } catch { }
+    }
+}
+
 Clear-Host
 $tick = 0; $quit = $false
 while ($true) {
@@ -1078,13 +1154,13 @@ while ($true) {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $selfPath -Vault $Vault -Run $Run -Kart $Kart -Model $Model
         exit $LASTEXITCODE
     }
-    if (-not $Kart) { try { RenderRun $tick } catch { } }
+    if (-not $Kart) { CizimSonuc { RenderRun $tick } }
     else {
     ReadNew
     if (-not $replay -and -not $replayDividerAdded) { $replayDividerAdded = $true; if ($rows.Count -gt 0) { $rows.Add(@{ kind = 'divider'; ts = '' }) } }
     RefreshSide
     if ($rows.Count -gt 3000) { $rows.RemoveRange(0, $rows.Count - 2000) }
-    try { Render $tick } catch { }
+    CizimSonuc { Render $tick }
     }
     $tick++
     try {

@@ -209,3 +209,64 @@ Describe 'AgentChef kesfi (2026-10-14): Belgeler/kod klasorleri, git origin guve
         } finally { $env:USERPROFILE = $eskiEv; $env:BEYIN_AGENTCHEF_KOK = $eskiAyar }
     }
 }
+
+Describe 'kosu paneli saglik (2026-10-14): gozetmen nabzi ve cizim bekcisi' {
+    BeforeAll {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'takim-izle.ps1'), [ref]$null, [ref]$null)
+        $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'GozetmenDurmus' }, $true) | Select-Object -First 1
+        . ([scriptblock]::Create($fn.Extent.Text))
+    }
+    It 'nabzi taze gozetmen durmus sayilmaz; eski nabiz + olu pid sahipsiz kosudur; canli pid sahipsiz degildir' {
+        $taze = (Get-Date).ToUniversalTime().ToString('o'); $eski = (Get-Date).ToUniversalTime().AddMinutes(-5).ToString('o')
+        GozetmenDurmus ([pscustomobject]@{ supervisor = [pscustomobject]@{ pid = 999999; heartbeatAt = $taze } }) | Should Be $false
+        GozetmenDurmus ([pscustomobject]@{ supervisor = [pscustomobject]@{ pid = $null; heartbeatAt = $eski } }) | Should Be $true
+        GozetmenDurmus ([pscustomobject]@{ supervisor = [pscustomobject]@{ pid = $PID; heartbeatAt = $eski } }) | Should Be $false
+        GozetmenDurmus ([pscustomobject]@{ supervisor = [pscustomobject]@{ pid = $null; heartbeatAt = $null } }) | Should Be $true
+        GozetmenDurmus ([pscustomobject]@{ supervisor = $null }) | Should Be $false
+    }
+    It 'cizim hatalari yutulmaz: bekci ve rozet ana dongude, try/catch ile susturulmus cizim kalmadi' {
+        $src = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'takim-izle.ps1') -Raw -Encoding UTF8
+        $src | Should Match 'CizimSonuc \{ RenderRun \$tick \}'
+        $src | Should Match 'CizimSonuc \{ Render \$tick \}'
+        $src | Should Not Match 'try \{ RenderRun \$tick \} catch \{ \}'
+        $src | Should Match 'GÖZETMEN DURDU'
+    }
+}
+
+Describe 'kosu paneli bildirimi (2026-10-14): yalniz sonradan olusan olaylar' {
+    BeforeAll {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'takim-izle.ps1'), [ref]$null, [ref]$null)
+        foreach ($ad in @('KosuOlaylari', 'OlaylariBildir')) {
+            $fn = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $ad }.GetNewClosure(), $true) | Select-Object -First 1
+            . ([scriptblock]::Create($fn.Extent.Text))
+        }
+    }
+    It 'ilk cizim sessiz; sonra biten isci, kota ve onay bekleyen durum bir kez bildirilir' {
+        $script:gonderilen = New-Object System.Collections.Generic.List[string]
+        function Bildir([string]$baslik, [string]$metin) { $script:gonderilen.Add($metin) }
+        $script:olayGoruldu = $null
+        $rr = [pscustomobject]@{ runId = 'R-1'; status = 'running'; workers = @([pscustomobject]@{ taskId = 'TASK-A'; status = 'running' }, [pscustomobject]@{ taskId = 'TASK-B'; status = 'finished' }) }
+        OlaylariBildir $rr $false
+        $script:gonderilen.Count | Should Be 0
+        $rr.workers[0].status = 'paused_limit'
+        OlaylariBildir $rr $false
+        $script:gonderilen.Count | Should Be 1
+        $script:gonderilen[0] | Should Match 'TASK-A kota'
+        OlaylariBildir $rr $false
+        $script:gonderilen.Count | Should Be 1
+        $rr.status = 'verified'
+        OlaylariBildir $rr $false
+        $script:gonderilen[1] | Should Match 'birlestir R-1'
+        OlaylariBildir $rr $true
+        $script:gonderilen[2] | Should Match 'gözetmen durdu'
+        OlaylariBildir $rr $false
+        OlaylariBildir $rr $true
+        $script:gonderilen.Count | Should Be 4
+        $script:gonderilen[3] | Should Match 'gözetmen durdu'
+    }
+    It 'BEYIN_BILDIRIM ayari dogrulanir' {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        (Test-BeyinAyarDeger -Ad 'BEYIN_BILDIRIM' -Deger 'kapali').Ok | Should Be $true
+        (Test-BeyinAyarDeger -Ad 'BEYIN_BILDIRIM' -Deger 'belki').Ok | Should Be $false
+    }
+}

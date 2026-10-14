@@ -121,12 +121,33 @@ foreach ($k in $kayitlar) {
 $silinen = @($eski.Keys | Where-Object { $sl = $_; -not ($kayitlar | Where-Object { $_.slug -eq $sl }) }).Count
 
 # --- 4) Yeni/degisenleri partiler halinde gom -------------------------------------
+# Karantina: bir parti dusunce notlar tek tek denenir. Tek basina da gomulemeyen not tum kosuyu durdurmaz:
+# eski vektoru varsa eski hash'iyle korunur (bir sonraki kosu yeniden dener), yoksa bu kosuda indekse girmez.
+# Servis tamamen yoksa (saglik denemesi de duserse) eski davranis: kosu durur, eski indeks korunur.
 $gomulen = 0
+$karantina = New-Object System.Collections.Generic.List[string]
 for ($i = 0; $i -lt $yeni.Count; $i += $Parti) {
     $parca = @($yeni | Select-Object -Skip $i -First $Parti)
     $emb = Invoke-BeyinOllamaEmbed -Texts @($parca | ForEach-Object { $_.metin }) -TimeoutMs 180000
-    if (-not $emb.Ok) { Bitir "GOM_HATA_EMBED" "parti $([int]($i / $Parti) + 1) gomulemedi ($($parca.Count) not); eski indeks korundu" -Cikis 5 }
+    if (-not $emb.Ok) {
+        $tekler = New-Object System.Collections.Generic.List[object]; $tekOk = 0
+        foreach ($k in $parca) {
+            $e1 = Invoke-BeyinOllamaEmbed -Texts @($k.metin) -TimeoutMs 60000
+            if ($e1.Ok -and @($e1.Vectors).Count -ge 1) { $tekler.Add([float[]]$e1.Vectors[0]); $tekOk++ } else { $tekler.Add($null) }
+        }
+        # Yarida kalan bir servis notlari sessizce karantinaya atmasin: herhangi bir tek deneme dustuyse saglik denenir.
+        if ($tekOk -lt $parca.Count) {
+            $saglik = Invoke-BeyinOllamaEmbed -Texts @('saglik') -TimeoutMs 60000
+            if (-not $saglik.Ok) { Bitir "GOM_HATA_EMBED" "parti $([int]($i / $Parti) + 1) gomulemedi ($($parca.Count) not); eski indeks korundu" -Cikis 5 }
+        }
+        $emb = @{ Ok = $true; Vectors = $tekler.ToArray() }
+    }
     for ($j = 0; $j -lt $parca.Count; $j++) {
+        if ($null -eq $emb.Vectors[$j]) {
+            $sl = [string]$parca[$j].slug; $karantina.Add($sl)
+            if ($eski.ContainsKey($sl)) { $parca[$j].vec = $eski[$sl].vec; $parca[$j].hash = $eski[$sl].hash } else { $parca[$j].karantina = $true }
+            continue
+        }
         $u = ConvertTo-BeyinUnitVector ([float[]]$emb.Vectors[$j])
         if ($dim -eq 0) { $dim = $u.Length }
         if ($u.Length -ne $dim) { Bitir 'GOM_HATA_BOYUT' "boyut uyusmazligi ($($u.Length) != $dim); -Zorla ile yeniden gom" -Cikis 5 }
@@ -136,6 +157,7 @@ for ($i = 0; $i -lt $yeni.Count; $i += $Parti) {
 if ($dim -eq 0) { Bitir 'GOM_BOS' 'hicbir vektor uretilmedi' }
 
 # --- 5) Yaz: .bin (float32) + .dat (meta) ----------------------------------------
+$kayitlar = @($kayitlar | Where-Object { -not $_.karantina })
 $n = $kayitlar.Count
 $all = New-Object float[] ($n * $dim)
 $items = New-Object System.Collections.Generic.List[object]
@@ -154,4 +176,5 @@ $files = @(
     @{ p = 'motor/scripts/.state/kavram-vektor.bin'; b = $binOnce; a = (Measure-BeyinDosya -Path $bin) },
     @{ p = 'motor/scripts/.state/kavram-vektor.dat'; b = $datOnce; a = (Measure-BeyinDosya -Path $dat) }
 )
-Bitir "GOM_OK yeni=$gomulen ayni=$ayni silinen=$silinen dim=$dim" "yeni=$gomulen ayni=$ayni silinen=$silinen dim=$dim ($n kavram, $([math]::Round($sw.ElapsedMilliseconds / 1000.0, 1)) sn)" $files
+$kar = if ($karantina.Count) { " karantina=$($karantina.Count) ($(@($karantina | Select-Object -First 5) -join ', '))" } else { '' }
+Bitir "GOM_OK yeni=$gomulen ayni=$ayni silinen=$silinen dim=$dim$kar" "yeni=$gomulen ayni=$ayni silinen=$silinen dim=$dim ($n kavram, $([math]::Round($sw.ElapsedMilliseconds / 1000.0, 1)) sn)$kar" $files

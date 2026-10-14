@@ -28,7 +28,7 @@ try {
     $ham = [Console]::In.ReadToEnd()
     if (-not $ham) { exit 0 }
     # --- hizli on filtre ---
-    if (-not (M $ham '(?i)taskkill|tskill|pkill|killall|stop-process|spps|wmic|\bkill(?=\s)|approvals|korunan-pid|ayar\.json|agentchef-kok|kill-guard|vault\.txt|beyin-launcher|BEYIN_KILL_GUARD|\bclaude(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:-p\b|--print\b)|\bcodex(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:exec|e)\b')) { exit 0 }
+    if (-not (M $ham '(?i)taskkill|tskill|pkill|killall|stop-process|spps|wmic|\bkill(?=\s)|approvals|korunan-pid|ayar\.json|agentchef-kok|kill-guard|vault\.txt|beyin-launcher|BEYIN_KILL_GUARD|start-process[^;|&]*claude|\bclaude(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:-p\b|--print\b)|\bcodex(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:exec|e)\b')) { exit 0 }
 
     $cmd = ''; $dosya = ''
     try {
@@ -57,6 +57,8 @@ try {
     $cagri = '(?im)(?:^|[;|&]\s*|&&\s*|\|\|\s*|\bcmd(?:\.exe)?\s+/[ck]\s+[''"]?|\bstart\s+(?:/\w+\s+)*|\bstart-process\s+(?:-filepath\s+)?|-command\s+[''"]?)(?:&\s*)?(?:\\?[''"])?(?:[\w:.\\/-]*[\\/])?'
     # claude print: her zaman (Claude onay taklidi). codex exec: yalniz onay sozcugu tasiyorsa (Codex'e devir akislari calisir; 2026-10-14 peer incelemesi).
     $altAjan = $cagri + '(?:claude(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:-p\b|--print\b)|codex(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:exec|e)\b(?=[\s\S]*\b(?:baslat|birlestir|onayla)\b))'
+    # Start-Process <claude> -ArgumentList '-p',... bicimi (2026-10-14: bilinen sinir kapandi)
+    $altAjan = '(?:' + $altAjan + ')|(?i)\bstart-process\b[^;|&\r\n]*\bclaude(?:\.exe|\.cmd)?\b[^;|&\r\n]*-argumentlist\b[^;|&\r\n]*[''"](?:-p|--print)[''"]'
     if ((M $cmd $altAjan)) {
         # 2026-10-14 guvenlik denetimi: ajanin actigi alt ajan oturumu (claude -p / codex exec) Beyin kancalarini
         # tetikler ve kendi "kullanici" satiriyla onay (baslat/birlestir/onayla) uretebilirdi. Takim iscileri motorun

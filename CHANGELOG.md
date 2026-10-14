@@ -21,6 +21,14 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.3.4 - Kota sonrasi devam ve kill guard son acigi
+
+- **Kota dolunca koşu sürer.** AgentChef 1.7.3'un `resume` komutuyla: `beyin takim resume --run <runId>`.
+  Kosu panosu kota yuzunden duran kosuyu "KOTA SINIRI" rozetiyle gosterir; SIRADA satiri `resume`
+  komutunu onerir (vazgecilirse `collect`).
+- **Kill guard:** `Start-Process <claude> -ArgumentList '-p',...` bicimi de alt ajan oturumu sayilir
+  (1.3.3'te bilinen sinir olarak kalmisti).
+
 ## 1.3.3 - Guvenlik ve saglamlik turu
 
 Bagimsiz bir guvenlik denetimi ve iki kod incelemesinin Beyin tarafindaki bulgulari:

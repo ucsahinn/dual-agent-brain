@@ -839,7 +839,7 @@ function RenderRun([int]$tick) {
     elseif ($st2 -eq 'verified' -and $uyari) { $badge = "$bgPart$BOLD ◐ UYARIYLA DOĞRULANDI $RS"; $glyph = '◐' }
     elseif ($st2 -eq 'verified') { $badge = "$bgRun$BOLD ✔ DOĞRULANDI $RS"; $glyph = '✔' }
     elseif ($st2 -eq 'planned') { $badge = "$bgWait$BOLD ◐ ONAY BEKLİYOR $RS"; $glyph = '◐' }
-    elseif ($st2 -eq 'paused') { $badge = "$bgIdle$BOLD ◐ DURAKLADI $RS"; $glyph = '◐' }
+    elseif ($st2 -eq 'paused') { $badge = "$bgIdle$BOLD ◐ KOTA SINIRI $RS"; $glyph = '◐' }
     else { $badge = "$bgDone$BOLD ▶ ŞEF SIRASI $RS"; $glyph = '▶' }
     try { $Host.UI.RawUI.WindowTitle = "$glyph koşu $Run" } catch { }
 
@@ -1028,6 +1028,7 @@ function RenderRun([int]$tick) {
     elseif ($st2 -eq 'merged') { $adim = 'bitti: ek adım yok'; $neden = 'kartlar için sohbete onayla <TASK>; push/PR ayrı karar' }
     elseif ($st2 -eq 'planned') { $adim = "başlat: sohbete yaz  baslat $id"; $neden = 'işçiler ancak senin onayınla açılır' }
     elseif ($calisan -gt 0) { $nCal = @($ws | Where-Object { $_.status -in @('spawning', 'running') }).Count; $nSir = $calisan - $nCal; $adim = "bekle: $nCal işçi çalışıyor" + $(if ($nSir) { ", $nSir sırada" } else { '' }); $neden = 'bitince toplanır; işçi panelleri ayrı sekmede' }
+    elseif ($st2 -eq 'paused' -and @($ws | Where-Object { $_.status -eq 'paused_limit' }).Count) { $adim = "kota sıfırlanınca: beyin takim resume --run $id"; $neden = 'işçi kaldığı Codex oturumundan sürer; vazgeçersen: beyin takim collect' }
     elseif ($st2 -in @('running', 'paused')) { $adim = "topla: beyin takim collect $id"; $neden = 'işçiler bitti, çıktılar toplanmadı' }
     elseif ($cakisma) { $adim = "çakışmayı çöz: $(@($ig.conflicts) -join ', ')"; $neden = 'düzeltip beyin takim integrate'; $nedenCol = $cErr }
     elseif ($kontrolDustu) { $dus = @($ig.checks | Where-Object { $_.status -ne 0 } | ForEach-Object { IsAdi ([string]$_.command) 'test' (CheckKey ([string]$_.command)) '' } | Select-Object -Unique); $adim = "kontrol başarısız: $($dus -join ', ')"; $neden = 'raporları oku; düzeltip beyin takim integrate'; $nedenCol = $cErr }

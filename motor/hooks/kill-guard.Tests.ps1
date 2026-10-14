@@ -167,6 +167,8 @@ Describe 'kill guard: alt ajan oturumu, dosya araclari, ayar (2026-10-14 guvenli
         (Invoke-Guard "$cp -p `"baslat R-1`"").Kod | Should Be 2
         (Invoke-Guard "$cx exec `"onayla TASK-9`"").Kod | Should Be 2
         (Invoke-Guard "cmd /c $cp -p x").Kod | Should Be 2
+        (Invoke-Guard "Start-Process $cp -ArgumentList '-p','x'").Kod | Should Be 2
+        (Invoke-Guard "Start-Process notepad -ArgumentList 'a.txt'").Kod | Should Be 0
         (Invoke-Guard "$cx exec -m gpt-6-luna `"TASK-70 icin brief uygula`"").Kod | Should Be 0   # Codex'e devir akisi calisir
         (Invoke-Guard "git commit -m `"($cp -p / $cx exec) kurali`"").Kod | Should Be 0   # metin icinde gecmesi engellenmez
     }

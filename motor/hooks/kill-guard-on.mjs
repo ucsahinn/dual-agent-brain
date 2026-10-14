@@ -24,7 +24,7 @@ import { join, basename, resolve } from "node:path";
 import { homedir } from "node:os";
 import fs from "node:fs";
 
-const DESEN = /taskkill|tskill|pkill|killall|stop-process|spps|wmic|\bkill(?=\s)|approvals|korunan-pid|ayar\.json|agentchef-kok|kill-guard|vault\.txt|beyin-launcher|BEYIN_KILL_GUARD|\bclaude(?:\.exe|\.cmd)?(?:\\?["'])?\s+(?:-p\b|--print\b)|\bcodex(?:\.exe|\.cmd)?(?:\\?["'])?\s+(?:exec|e)\b/i;
+const DESEN = /taskkill|tskill|pkill|killall|stop-process|spps|wmic|\bkill(?=\s)|approvals|korunan-pid|ayar\.json|agentchef-kok|kill-guard|vault\.txt|beyin-launcher|BEYIN_KILL_GUARD|start-process[^;|&]*claude|\bclaude(?:\.exe|\.cmd)?(?:\\?["'])?\s+(?:-p\b|--print\b)|\bcodex(?:\.exe|\.cmd)?(?:\\?["'])?\s+(?:exec|e)\b/i;
 const ajan = process.argv.includes("--codex") ? "codex" : "claude";
 const parcalar = [];
 let bitti = false;

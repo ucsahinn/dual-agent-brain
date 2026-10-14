@@ -230,6 +230,8 @@ Describe 'kosu paneli saglik (2026-10-14): gozetmen nabzi ve cizim bekcisi' {
         $src | Should Match 'CizimSonuc \{ Render \$tick \}'
         $src | Should Not Match 'try \{ RenderRun \$tick \} catch \{ \}'
         $src | Should Match 'GÖZETMEN DURDU'
+        $src | Should Match 'Open-BeyinTakimPanel -Paths \$p -RunId \$Run -TaskIds @\(\$tid\)'
+        $src | Should Match 'işçi paneli aç'
     }
 }
 

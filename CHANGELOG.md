@@ -21,6 +21,14 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.3.6 - Panelden isci paneli ve kota sonrasi kendiliginden devam
+
+- **1-4 tuslari.** Kosu genel gorunumunde 1-4 tuslari o isciye ait paneli yeni Windows Terminal sekmesinde
+  acar; alt satir hangi tuslarin gecerli oldugunu ve sonucu gosterir.
+- **Kota sonrasi kendiliginden devam.** Kota yuzunden duran kosuda SIRADA satiri artik
+  `beyin takim resume --run <runId> --wait` onerir: AgentChef 1.7.7 sinir mesajindan sifirlanma saatini
+  okur, bekler ve kosuyu surdurur.
+
 ## 1.3.5 - Kosu paneli sagligi, bildirim ve gomme karantinasi
 
 - **Windows bildirimi.** Kosu genel gorunumu (`beyin takim izle <runId>`) acikken kosu senden bir sey

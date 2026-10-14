@@ -1089,7 +1089,7 @@ function RenderRun([int]$tick) {
     elseif ($st2 -eq 'planned') { $adim = "başlat: sohbete yaz  baslat $id"; $neden = 'işçiler ancak senin onayınla açılır' }
     elseif ($sahipsiz) { $adim = "gözetmen durmuş (uyku/çökme?): beyin takim resume --run $id"; $neden = 'işçiler kayıtlı Codex oturumlarından devam eder; canlı işçi varsa önce o biter'; $nedenCol = $cWarn }
     elseif ($calisan -gt 0) { $nCal = @($ws | Where-Object { $_.status -in @('spawning', 'running') }).Count; $nSir = $calisan - $nCal; $adim = "bekle: $nCal işçi çalışıyor" + $(if ($nSir) { ", $nSir sırada" } else { '' }); $neden = 'bitince toplanır; işçi panelleri ayrı sekmede' }
-    elseif ($st2 -eq 'paused' -and @($ws | Where-Object { $_.status -eq 'paused_limit' }).Count) { $adim = "kota sıfırlanınca: beyin takim resume --run $id"; $neden = 'işçi kaldığı Codex oturumundan sürer; vazgeçersen: beyin takim collect' }
+    elseif ($st2 -eq 'paused' -and @($ws | Where-Object { $_.status -eq 'paused_limit' }).Count) { $adim = "kota sıfırlanınca kendiliğinden devam: beyin takim resume --run $id --wait"; $neden = 'işçi kaldığı Codex oturumundan sürer; vazgeçersen: beyin takim collect' }
     elseif ($st2 -in @('running', 'paused')) { $adim = "topla: beyin takim collect $id"; $neden = 'işçiler bitti, çıktılar toplanmadı' }
     elseif ($cakisma) { $adim = "çakışmayı çöz: $(@($ig.conflicts) -join ', ')"; $neden = 'düzeltip beyin takim integrate'; $nedenCol = $cErr }
     elseif ($kontrolDustu) { $dus = @($ig.checks | Where-Object { $_.status -ne 0 } | ForEach-Object { IsAdi ([string]$_.command) 'test' (CheckKey ([string]$_.command)) '' } | Select-Object -Unique); $adim = "kontrol başarısız: $($dus -join ', ')"; $neden = 'raporları oku; düzeltip beyin takim integrate'; $nedenCol = $cErr }
@@ -1103,7 +1103,7 @@ function RenderRun([int]$tick) {
     $L.Add((Row "$cAccent$BOLD▌ SIRADA$RS   $cText$BOLD$adim$RS" $w))
     if ($neden) { $L.Add((Row "$cAccent▌$RS          $nedenCol$neden$RS" $w)) }
     $kD = if ($script:detay) { "$cAccent[d]$RS$cText ayrıntıyı gizle$RS" } else { "$cFaint[d]$RS$cMuted ayrıntı$RS" }
-    $L.Add((HLine $w "$cFaint[q]$RS$cMuted çık$RS  $kD$cFrame  ─  $RS$cFaint işçi paneli: beyin takim izle $Run <TASK>$RS" '╰' '╯'))
+    $L.Add((HLine $w "$cFaint[q]$RS$cMuted çık$RS  $kD$cFrame  ─  $RS$cFaint[1-$([Math]::Min(4, [Math]::Max(1, $ws.Count)))]$RS$cMuted işçi paneli aç$RS$(if ($script:panelMesaj) { "$cFrame  ─  $RS$cWarn$($script:panelMesaj)$RS" })" '╰' '╯'))
     $sb = New-Object Text.StringBuilder
     [void]$sb.Append("$ESC[H")
     foreach ($ln in $L) { [void]$sb.Append($ln).Append("$RS$ESC[K`n") }
@@ -1131,7 +1131,7 @@ function SelfReloadIfChanged {
 }
 
 # Cizim bekcisi: cizim hatasi sessizce yutulursa donmus panel canli gorunur. Hata sayilir ve son satira rozet basilir.
-$script:cizimHata = 0; $script:cizimMesaj = ''; $script:sonCizim = Get-Date
+$script:cizimHata = 0; $script:cizimMesaj = ''; $script:sonCizim = Get-Date; $script:panelMesaj = ''
 function CizimSonuc([scriptblock]$ciz) {
     try { & $ciz; if ($script:cizimHata) { $script:cizimHata = 0; $script:lastFrame = '' }; $script:sonCizim = Get-Date }
     catch {
@@ -1173,6 +1173,20 @@ while ($true) {
                 ' ' { $script:freezeAt = $(if ($script:freezeAt -ge 0) { -1 } else { $rows.Count }) }
                 'm' { $script:showTok = -not $script:showTok }
                 'd' { $script:detay = -not $script:detay; $script:lastFrame = '' }
+                { -not $Kart -and $_ -in @('1', '2', '3', '4') } {
+                    $script:panelMesaj = ''
+                    try {
+                        $rrK = Read-Shared $runRec | ConvertFrom-Json
+                        $wsK = @($rrK.workers | Where-Object { $null -ne $_ })
+                        $ix = [int][string]$_ - 1
+                        if ($ix -lt $wsK.Count) {
+                            $tid = [string]$wsK[$ix].taskId
+                            $sn = Open-BeyinTakimPanel -Paths $p -RunId $Run -TaskIds @($tid)
+                            $script:panelMesaj = $(if ($sn.Ok) { "$tid paneli açıldı" } else { "$tid paneli açılamadı: $($sn.Neden)" })
+                        } else { $script:panelMesaj = "işçi $($ix + 1) yok" }
+                    } catch { $script:panelMesaj = 'panel açılamadı' }
+                    $script:lastFrame = ''
+                }
                 default { }
             }
         }

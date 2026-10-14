@@ -51,6 +51,7 @@ if ($args2.Count -eq 0) {
     'Komutlar AgentChef coordination-board ile birebir: init | create | brief | brief-check | assign | renew-lease | transition | add-evidence | handoff | resolve-handoff | handoff-check | attach-report | show'
     '  1.3.3+: in_progress icin sahip (assign) gerekir; review icin kanit; done icin --verified-by (sahip/oturum/koordinator DISINDA biri);'
     '  geri hareketler (review->in_progress, ->blocked, ->cancelled) --reason ister; show: --status open, --owner, leaseState/stale alanlari.'
+    '  1.7.0+: review icin SON kanit Verdict + Mutation check tasir: --evidence "Verdict: pass. Mutation check: none - yalniz belge. <kanit>"; blocked kirayi birakir; attach-report --report-path <dosya>; show evidenceMissing.'
     '  beyin pano create --id TASK-012 --title "..." --owner-coordinator backend_coordinator --owner-agent codex --write-repo Beyin --write-paths motor/x.ps1'
     '  beyin pano brief-check --brief-file brief.md   -   beyin pano brief --task TASK-012 --brief-file brief.md'
     '  beyin pano renew-lease --task TASK-012 --minutes 90   -   beyin pano transition --task TASK-012 --status in_progress'

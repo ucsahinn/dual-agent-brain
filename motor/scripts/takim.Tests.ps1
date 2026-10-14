@@ -180,6 +180,6 @@ Describe 'beyin takim sarmalayicisi (2026-10-12)' {
         Remove-Item -LiteralPath (Join-Path $script:kok 'scripts\team-run.mjs') -Force
         $o2 = Invoke-Takim $script:tv @('status', '--run', 'R-5')
         $LASTEXITCODE | Should Be 2
-        $o2 | Should Match 'team-run.mjs yok'
+        $o2 | Should Match 'AgentChef bulunamadi'
     }
 }

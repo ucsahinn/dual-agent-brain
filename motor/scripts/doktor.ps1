@@ -1956,7 +1956,7 @@ try {
     try { $tkKok = Get-BeyinAgentChefKok; $tkMotor = [bool](Test-Path -LiteralPath (Join-Path ([string]$tkKok.Yol) 'scripts\team-run.mjs')) } catch { }
     if (@($tkD.Kosular).Count -eq 0) {
         if ($tkMotor) { Add-Row 'takim' $true 'motor var (team-run.mjs) ama henuz hic kosu yok' 'beyin takim plan ... (bkz. KILAVUZ takim)' -Durum 'OLCULEMEDI' }
-        else { Add-Row 'takim' $true 'takim modu kurulu degil (AgentChef 1.5.0+ team-run.mjs yok); kosu yok' 'AgentChef 1.5.0 kurulunca: beyin takim doctor' }
+        else { Add-Row 'takim' $true 'takim modu kurulu degil (AgentChef 1.5.0+ team-run.mjs bulunamadi); kosu yok' (Get-BeyinAgentChefYokMesaji -Kok $tkKok -Gereken 'AgentChef 1.5.0+') }
     } else {
         $tkBayat = @($tkD.Acik | Where-Object { try { ((Get-Date) - [datetime]::Parse([string]$_.updatedAt, $tkInv)).TotalHours -gt 24 } catch { $false } })
         $tkEskiOnay = @(Get-BeyinOnayBekleyen -Paths $p | Where-Object { $_.Tur -and $(try { ((Get-Date) - [datetime]::Parse([string]$_.ApprovedAt, $tkInv)).TotalDays -gt 1 } catch { $false }) })

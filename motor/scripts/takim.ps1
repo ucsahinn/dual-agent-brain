@@ -52,7 +52,7 @@ $engineVar = [bool](Test-Path -LiteralPath $engine -PathType Leaf)
 
 function Yaz-Ozet {
     $d = Get-BeyinTakimDurum -Paths $p
-    "TAKIM  state: $($p.TeamRuns)  |  motor: $engine $(if ($engineVar) { "(AgentChef $($acKok.Surum), kaynak: $($acKok.Kaynak))" } else { '(YOK - AgentChef 1.5.0+ gerekir; ayar BEYIN_AGENTCHEF_KOK)' })"
+    "TAKIM  state: $($p.TeamRuns)  |  motor: $engine $(if ($engineVar) { "(AgentChef $($acKok.Surum), kaynak: $($acKok.Kaynak))" } else { "(YOK) $(Get-BeyinAgentChefYokMesaji -Kok $acKok -Gereken 'AgentChef 1.5.0+')" })"
     if ($d.Acik.Count -eq 0) { "  acik kosu yok (toplam kayit $($d.Kosular.Count))" }
     else {
         "  $($d.Satir)"
@@ -148,7 +148,7 @@ if ($komut -eq 'maliyet') {
 }
 
 if (-not $nodeExe) { Write-Output 'HATA: node bulunamadi (PATH). Takim kosusu AgentChef team-run.mjs ile calisir.'; exit 2 }
-if (-not $engineVar) { Write-Output "HATA: team-run.mjs yok: $engine  (AgentChef 1.5.0+; ayar: beyin ayar BEYIN_AGENTCHEF_KOK <checkout>)"; exit 2 }
+if (-not $engineVar) { Write-Output "HATA: $(Get-BeyinAgentChefYokMesaji -Kok $acKok -Gereken 'AgentChef 1.5.0+, takim motoru scripts\team-run.mjs')"; exit 2 }
 
 # 'durdur <id>' -> abort; 'durum <id>' -> status
 if ($komut -eq 'durdur') { $args2[0] = 'abort'; $komut = 'abort' }
@@ -162,6 +162,14 @@ foreach ($a in $gecilen) { if ($a -eq '--state') { $stateVar = $true }; if ($a -
 if (-not $stateVar) {
     New-Item -ItemType Directory -Force -Path $p.ScrState, $p.TeamRuns | Out-Null
     $gecilen += @('--state', $p.Board)
+    # NEDEN (2026-10-14 temiz profil provasi): pano.ps1 board.json'u kendisi olusturuyordu, takim.ps1 olusturmuyordu;
+    # yeni kullanicinin ilk 'beyin takim plan'i motorda "Board state file does not exist" ile dusuyordu.
+    if (-not (Test-Path -LiteralPath $p.Board)) {
+        $panoMotor = Join-Path $kok 'scripts\coordination-board.mjs'
+        $initCik = & $nodeExe $panoMotor init --state $p.Board --json 2>&1
+        if ($LASTEXITCODE -ne 0) { Write-Output "HATA: pano baslatilamadi (init): $(($initCik | ForEach-Object { "$_" }) -join ' ')"; exit 1 }
+        Write-Host "[takim] pano yoktu, olusturuldu: $($p.Board)" -ForegroundColor DarkGray
+    }
 }
 if (-not $jsonVar) { $gecilen += '--json' }
 
@@ -179,7 +187,10 @@ if ($onayTur) {
 
 # Isci paneli: premium panel (takim-izle.ps1) acilacaksa motorun ham izleyici sekmesi kapatilir.
 $panelMod = [string]$(if ($env:BEYIN_TAKIM_PANEL) { $env:BEYIN_TAKIM_PANEL } else { 'on' })
-if ($komut -eq 'start' -and $panelMod -ne 'motor' -and -not $env:AGENTCHEF_TEAM_PANE) { $env:AGENTCHEF_TEAM_PANE = 'off' }
+$wtVar = [bool](Get-Command wt.exe -ErrorAction SilentlyContinue)
+if ($komut -eq 'start' -and $panelMod -eq 'on' -and -not $wtVar) { Write-Host '[takim] Windows Terminal (wt.exe) yok: Beyin panelleri acilamaz; isciler arka planda calisir. Izlemek icin: beyin takim status <runId>' -ForegroundColor Yellow }
+if ($komut -eq 'start' -and $panelMod -eq 'on' -and $wtVar -and -not $env:AGENTCHEF_TEAM_PANE) { $env:AGENTCHEF_TEAM_PANE = 'off' }
+if ($komut -eq 'start' -and $panelMod -eq 'off' -and -not $env:AGENTCHEF_TEAM_PANE) { $env:AGENTCHEF_TEAM_PANE = 'off' }   # off: hic sekme (testler)
 
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $eapEski = $ErrorActionPreference

@@ -42,14 +42,16 @@ $isciEnv = @{ AGENTCHEF_TEAM_RUN = 'R-ISCI'; AGENTCHEF_TEAM_TASK = 'TASK-41'; AG
 
 Describe 'Takim (2026-10-12): insan onayi fiilleri (prompt-counter)' {
     $tv = New-TakimVault; $tp = Get-BeyinPaths -Vault $tv
-    Write-KosuFixture $tp 'R-T1'; Write-KosuFixture $tp 'R-T2'; Write-KosuFixture $tp 'R-T3'
+    Write-KosuFixture $tp 'R-T1'; Write-KosuFixture $tp 'R-T2'; Write-KosuFixture $tp 'R-T3'; Write-KosuFixture $tp 'R-T4' 'verified'
     $sid = 'takim-test-onay-1'
     $c1 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = 'baslat R-T1' }
     $c2 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = 'birlestir R-YOK' }
     # sentetik tur (R-T3) ve isci oturumu (R-T2): kosu dosyasi VAR ama onay yazilmamali
     $c3 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = "<task-notification>`nbaslat R-T3`n</task-notification>" }
     $c4 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = 'takim-test-onay-isci'; cwd = $tv; prompt = 'birlestir R-T2' } $isciEnv
-    $c5 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = 'takim birlestir R-T1.' }
+    $c5 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = 'takim birlestir R-T4.' }
+    # 2026-10-14: erken onay (planned kosuya birlestir) yazilmaz; kullaniciya nedeni soylenir. Kimlik kayittan alinir.
+    $c6 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = 'birlestir R-T1' }
     $mk = @(Read-BeyinMakbuz -Paths $tp -Gun 1 | Where-Object { $_.script -eq 'takim' })
     It 'gercek kullanici satiri "baslat <run>" R-T1.baslat.json yazar ve sonraki komutu soyler' {
         (Test-Path -LiteralPath (Join-Path $tp.ScrState 'approvals\R-T1.baslat.json')) | Should Be $true
@@ -68,12 +70,17 @@ Describe 'Takim (2026-10-12): insan onayi fiilleri (prompt-counter)' {
         ($c4 -notmatch 'Insan onayi kaydedildi') | Should Be $true
     }
     It '"takim birlestir <run>." bicimi de gecer; TASK onayi (onayla) bayt-bayt eski bicimde kalir' {
-        (Test-Path -LiteralPath (Join-Path $tp.ScrState 'approvals\R-T1.birlestir.json')) | Should Be $true
-        $c5 | Should Match 'beyin takim merge --run R-T1'
+        (Test-Path -LiteralPath (Join-Path $tp.ScrState 'approvals\R-T4.birlestir.json')) | Should Be $true
+        $c5 | Should Match 'beyin takim merge --run R-T4'
         $t = Add-BeyinOnay -Paths $tp -TaskId 'TASK-9' -Kanal 'sohbet'
         $ham = Get-Content -LiteralPath $t.Yol -Raw
         $ham | Should Match '^\{"v":1,"taskId":"TASK-9","nonce":"[0-9a-f]{12}","approvedAt":"[^"]+","kanal":"sohbet","ajan":"","session":"","kullanildi":"","kullanan":""\}\s*$'
         (Get-BeyinOnay -Paths $tp -TaskId 'TASK-9' -Tur 'baslat') | Should Be $null
+    }
+    It 'birlestir yalniz dogrulanmis (verified) kosu icin yazilir; erken satir reddedilir ve nedeni soylenir' {
+        (Test-Path -LiteralPath (Join-Path $tp.ScrState 'approvals\R-T1.birlestir.json')) | Should Be $false
+        $c6 | Should Match "kaydedilmedi: kosu su an 'planned'"
+        @($mk | Where-Object { $_.outcome -eq 'ONAY_ATLANDI' -and [string]$_.note -like '*R-T1*beklenen verified*' }).Count | Should Be 1
     }
     Remove-Item -Recurse -Force $tv -ErrorAction SilentlyContinue
 }

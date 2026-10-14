@@ -257,8 +257,20 @@ try {
         foreach ($tmc in $takimM) {
             $tkTur = $tmc.Groups[1].Value.ToLowerInvariant(); $tkRun = $tmc.Groups[2].Value
             if ($takimOnay -contains "$tkTur $tkRun") { continue }
-            if (-not (Test-Path -LiteralPath (Join-Path $p.TeamRuns "$tkRun.json"))) {
+            $tkDosya = Join-Path $p.TeamRuns "$tkRun.json"
+            if (-not (Test-Path -LiteralPath $tkDosya)) {
                 Write-BeyinMakbuz -Paths $p -Script 'takim' -Outcome 'ONAY_ATLANDI' -Agent (Get-BeyinAgent) -Reason 'sohbet' -Note "$tkTur $tkRun kosu yok"
+                continue
+            }
+            # 2026-10-14: motor 'baslat'i yalniz planned, 'birlestir'i yalniz verified kosuda kabul eder (approvedAt >
+            # plannedAt / verification.at). Erken yazilan onay motorda exit 3 veriyor ama Beyin'in kapisi gecerli
+            # sayiyordu: kullanici "onay verdim" sanip takiliyordu. Kimlik kayittan alinir (motor buyuk/kucuk harfe duyarli).
+            $tkRec = $null; try { $tkRec = Get-Content -LiteralPath $tkDosya -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+            if ($tkRec -and $tkRec.runId) { $tkRun = [string]$tkRec.runId }
+            $tkBekl = if ($tkTur -eq 'baslat') { 'planned' } else { 'verified' }
+            if ($tkRec -and [string]$tkRec.status -ne $tkBekl) {
+                Write-BeyinMakbuz -Paths $p -Script 'takim' -Outcome 'ONAY_ATLANDI' -Agent (Get-BeyinAgent) -Reason 'sohbet' -Note "$tkTur $tkRun durum $($tkRec.status) (beklenen $tkBekl)"
+                $parcalar.Add("[Hafiza] '$tkTur $tkRun' kaydedilmedi: kosu su an '$($tkRec.status)' durumunda; '$tkTur' yalniz '$tkBekl' kosuda gecerli. $(if ($tkTur -eq 'birlestir') { 'Once beyin takim verify.' } else { 'Kosu zaten baslamis ya da kapanmis.' })")
                 continue
             }
             $tkKayit = Add-BeyinOnay -Paths $p -TaskId $tkRun -Kanal 'sohbet' -Ajan (Get-BeyinAgent) -Session (Get-BeyinSessionKey -SessionId $hook.session_id) -Tur $tkTur

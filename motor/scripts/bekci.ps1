@@ -121,7 +121,7 @@ if ($hygYol -and $nodeExe) {
         }
     } catch { }
 }
-$rapor.codexMcp = $(if ($hyg) { $hyg } else { [ordered]@{ durum = 'ATLANDI'; neden = $(if (-not $nodeExe) { 'node yok' } elseif (-not $hygYol) { "codex-process-hygiene.mjs bulunamadi ($kok\plugins\{agentchef,agentchef-workflows}\scripts)" } else { 'cikti okunamadi' }) } })
+$rapor.codexMcp = $(if ($hyg) { $hyg } else { [ordered]@{ durum = 'ATLANDI'; neden = $(if (-not $nodeExe) { 'node yok' } elseif (-not $kok) { 'AgentChef bulunamadi (kur ya da: beyin ayar BEYIN_AGENTCHEF_KOK <klasor>)' } elseif (-not $hygYol) { "codex-process-hygiene.mjs bulunamadi ($kok\plugins\{agentchef,agentchef-workflows}\scripts)" } else { 'cikti okunamadi' }) } })
 
 # 5) Disk - yalniz rapor (kullanici karari: simdilik silme yok)
 function Boyut($yol, $filtre) {

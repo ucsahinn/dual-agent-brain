@@ -200,7 +200,7 @@ function Get-BeyinAyarKayitlari {
         @{ Ad = 'BEYIN_PANO_ONAY';      Varsayilan = 'zorunlu';              Secenekler = @('zorunlu', 'kapali');        Aciklama = 'Pano karti done icin insan onayi (sohbete onayla TASK-x ya da beyin pano onayla). kapali = eski davranis.' },
         @{ Ad = 'BEYIN_KILL_GUARD';     Varsayilan = 'acik';                 Secenekler = @('acik', 'kapali');           Aciklama = 'Surec oldurme korumasi (PreToolUse kancasi, kayitliysa): ajanlari ad ile toptan olduren ve korunan PID hedefleyen komutlari reddeder. Kayit: kur.ps1 -KillGuard' },
         @{ Ad = 'BEYIN_SONME';          Varsayilan = 'acik';                 Secenekler = @('acik', 'kapali');           Aciklama = 'Kullanim sonmesi: 14 gunde 5+ olculebilir enjeksiyonda hic acilmayan/anilmayan kavram notunun geri getirme skoru x0.6 (beyin kullanim 14 hesaplar; 14 gunden taze not muaf)' },
-        @{ Ad = 'BEYIN_AGENTCHEF_KOK';  Varsayilan = (Join-Path $env:USERPROFILE 'Desktop\codex-chef'); Secenekler = @(); Aciklama = 'AgentChef checkout yolu (bekci: codex-process-hygiene.mjs; pano: coordination-board.mjs)' },
+        @{ Ad = 'BEYIN_AGENTCHEF_KOK';  Varsayilan = '';                       Secenekler = @(); Aciklama = 'AgentChef checkout yolu; bos ise otomatik bulunur (ev, Belgeler, Masaustu, source\repos, src, dev, code ...). Pano, takim ve bekci kullanir.' },
         @{ Ad = 'BEYIN_PANO_KOORDINATOR'; Varsayilan = 'leadership_coordinator'; Secenekler = @('backend_coordinator', 'devops_coordinator', 'leadership_coordinator', 'product_coordinator', 'qa_coordinator', 'ui_coordinator', 'marketing_coordinator'); Aciklama = 'beyin pano create icin varsayilan --owner-coordinator (AgentChef katalog koordinatoru); -Koordinator ile ezilir' },
         @{ Ad = 'BEYIN_BRAIN_CLI';   Varsayilan = '';                       Secenekler = @();                          Aciklama = 'brain-cli.mjs yolu (istege bagli, beyin yedek)' },
         @{ Ad = 'BEYIN_DEPO';        Varsayilan = 'https://github.com/ucsahinn/dual-agent-brain'; Secenekler = @();    Aciklama = 'Motor guncelleme deposu (fork ettiysen kendi adresini yaz)' },
@@ -5306,29 +5306,55 @@ function Get-BeyinOnayBekleyen {
 # yazma kapsami bu repoya dusuyorsa) ve turetilmis pano.md. Node BASLATILMAZ.
 # ============================================================================
 function Get-BeyinAgentChefKok {
-    # AGENTCHEF YOLU (2026-10-07): ayar (BEYIN_AGENTCHEF_KOK) gecerli bir checkout'u gosteriyorsa
-    # o; degilse ~\agentchef* altinda coordination-board.mjs tasiyan kurulumlardan package.json
-    # surumu en yuksek olan; o da yoksa Desktop\codex-chef. Eskiden yol tek bir surum klasorune
-    # sabitti: AgentChef baska klasore kurulunca pano ve bekci SESSIZCE koparlardi (denetim).
-    # Donus: @{ Yol; Kaynak (ayar|tarama|varsayilan|yok); Surum }
-    $r = @{ Yol = ''; Kaynak = 'yok'; Surum = '' }
+    # AGENTCHEF YOLU. Sira: (1) ayar BEYIN_AGENTCHEF_KOK, (2) ortam AGENTCHEF_ROOT, (3) onbellek
+    # (~\.beyin\agentchef-kok.txt, gecerliyse), (4) tarama: ev klasoru, Belgeler, Masaustu ve bilinen kod
+    # klasorlerinin (source\repos, src, dev, code, kod, projects, repos, git, github) BIR seviye altinda
+    # scripts\coordination-board.mjs tasiyan ve package.json adi 'agentchef' olan checkout'lar; en yuksek surum.
+    # NEDEN (2026-10-14 temiz profil provasi): yalniz ~\agentchef* taraniyordu ve bulunamayinca yazarin
+    # kendi makinesindeki Desktop\codex-chef yolu gosteriliyordu; README'ye uyup kodu Belgeler'e klonlayan
+    # yeni kullanicida pano/takim/bekci hep dustu. Bulunamazsa Yol BOS doner; cagiran Get-BeyinAgentChefYokMesaji yazar.
+    # Donus: @{ Yol; Kaynak (ayar|ortam|onbellek|tarama|yok); Surum; Ayar (gecersiz ayar degeri, varsa) }
+    $r = @{ Yol = ''; Kaynak = 'yok'; Surum = ''; Ayar = '' }
     $gecerli = { param([string]$K) $K -and (Test-Path -LiteralPath (Join-Path $K 'scripts\coordination-board.mjs') -PathType Leaf) }
     $surum = { param([string]$K) try { [string]((Get-Content -LiteralPath (Join-Path $K 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version) } catch { '' } }
+    $ad = { param([string]$K) try { [string]((Get-Content -LiteralPath (Join-Path $K 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).name) } catch { '' } }
     $ayar = ''
     try { $ayar = [string](Get-BeyinAyar 'BEYIN_AGENTCHEF_KOK' '') } catch { }
     if (& $gecerli $ayar) { $r.Yol = $ayar; $r.Kaynak = 'ayar'; $r.Surum = (& $surum $ayar); return $r }
-    $adaylar = @(Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Filter 'agentchef*' -ErrorAction SilentlyContinue | Where-Object { & $gecerli $_.FullName })
+    if ($ayar) { $r.Ayar = $ayar }
+    $ortam = [string]$env:AGENTCHEF_ROOT
+    if (& $gecerli $ortam) { $r.Yol = $ortam; $r.Kaynak = 'ortam'; $r.Surum = (& $surum $ortam); return $r }
+    $onbellek = Join-Path $env:USERPROFILE '.beyin\agentchef-kok.txt'
+    try { if (Test-Path -LiteralPath $onbellek) { $ob = ([string](Get-Content -LiteralPath $onbellek -Raw -Encoding UTF8)).Trim(); if (& $gecerli $ob) { $r.Yol = $ob; $r.Kaynak = 'onbellek'; $r.Surum = (& $surum $ob); return $r } } } catch { }
+    $kokler = New-Object System.Collections.Generic.List[string]
+    foreach ($k in @($env:USERPROFILE, ([Environment]::GetFolderPath('MyDocuments')), ([Environment]::GetFolderPath('Desktop')))) { if ($k -and -not $kokler.Contains($k)) { $kokler.Add($k) } }
+    foreach ($alt in @('source\repos', 'src', 'dev', 'code', 'kod', 'projects', 'Projects', 'repos', 'git', 'github', 'GitHub')) { $k = Join-Path $env:USERPROFILE $alt; if ((Test-Path -LiteralPath $k -PathType Container) -and -not $kokler.Contains($k)) { $kokler.Add($k) } }
     $enIyi = $null; $enIyiV = $null
-    foreach ($a in $adaylar) {
-        $s = & $surum $a.FullName
-        $v = $null; try { $v = [version](($s -split '[-+]')[0]) } catch { }
-        if (-not $enIyi -or ($v -and (-not $enIyiV -or $v -gt $enIyiV))) { $enIyi = $a.FullName; $enIyiV = $v; $r.Surum = $s }
+    foreach ($kok in $kokler) {
+        foreach ($a in @(Get-ChildItem -LiteralPath $kok -Directory -ErrorAction SilentlyContinue)) {
+            if (-not (& $gecerli $a.FullName)) { continue }
+            if ($a.Name -notlike 'agentchef*' -and (& $ad $a.FullName) -ne 'agentchef') { continue }
+            $s = & $surum $a.FullName
+            $v = $null; try { $v = [version](($s -split '[-+]')[0]) } catch { }
+            if (-not $enIyi -or ($v -and (-not $enIyiV -or $v -gt $enIyiV))) { $enIyi = $a.FullName; $enIyiV = $v; $r.Surum = $s }
+        }
     }
-    if ($enIyi) { $r.Yol = $enIyi; $r.Kaynak = 'tarama'; return $r }
-    $vars = Join-Path $env:USERPROFILE 'Desktop\codex-chef'
-    if (& $gecerli $vars) { $r.Yol = $vars; $r.Kaynak = 'varsayilan'; $r.Surum = (& $surum $vars); return $r }
-    $r.Yol = $(if ($ayar) { $ayar } else { $vars })
+    if ($enIyi) {
+        $r.Yol = $enIyi; $r.Kaynak = 'tarama'
+        try { $d = Split-Path $onbellek -Parent; if (Test-Path -LiteralPath $d) { [IO.File]::WriteAllText($onbellek, $enIyi, (New-Object Text.UTF8Encoding $false)) } } catch { }
+        return $r
+    }
     return $r
+}
+
+function Get-BeyinAgentChefYokMesaji {
+    # AgentChef bulunamadiginda kullaniciya ne yapacagini soyleyen TEK metin (pano, takim, bekci, doktor ayni metni verir)
+    param([hashtable]$Kok, [string]$Gereken = '')
+    $s = "AgentChef bulunamadi$(if ($Gereken) { " ($Gereken gerekir)" })."
+    if ($Kok -and $Kok.Ayar) { $s += " Ayar BEYIN_AGENTCHEF_KOK gecersiz bir yolu gosteriyor: $($Kok.Ayar) (scripts\coordination-board.mjs yok)." }
+    $s += ' Kur: git clone https://github.com/ucsahinn/agentchef.git ; cd agentchef ; npm run chef -- --install --apply.'
+    $s += ' Baska bir klasordeyse yerini soyle: beyin ayar BEYIN_AGENTCHEF_KOK <checkout klasoru>'
+    return $s
 }
 
 function Get-BeyinPanoDurum {
@@ -5441,7 +5467,7 @@ function Update-BeyinPanoMd {
                 # KANIT YOK (2026-10-06): calisilan ya da incelemedeki kartta tek kanit yoksa
                 # isaret; 'todo' isaretlenmez (henuz baslamadi).
                 $kanitSay = @($k.evidence).Count
-                $kanitHucre = $(if (($kanitSay -eq 0 -and $k.status -in @('in_progress', 'review')) -or $k.evidenceMissing -eq $true) { '**KANIT YOK**' } else { [string]$kanitSay })
+                $kanitHucre = $(if (($kanitSay -eq 0 -and $k.status -in @('in_progress', 'review'))) { '**KANIT YOK**' } else { [string]$kanitSay })
                 [void]$sb.AppendLine("| ``$($k.id)`` | $($k.status) | $sahip | $ws | $(Zaman $k.leaseUntil) | $(if ($k.brief) { 'var' } else { 'YOK' }) | $kanitHucre | $(Kisa $k.title 70) |")
             }
             $kanitsiz = @($d.Kartlar | Where-Object { @($_.evidence).Count -eq 0 -and $_.status -in @('in_progress', 'review') }).Count
@@ -5488,7 +5514,7 @@ function Update-BeyinPanoMd {
 # Durum sozlugu motorun sozlesmesinden; yeniden adlandirma tek yerden.
 # ============================================================================
 $script:BeyinTakimAcik = @('planned', 'running', 'paused', 'collected', 'integrated', 'verified')
-$script:BeyinTakimCalisan = @('spawning', 'running')
+$script:BeyinTakimCalisan = @('queued', 'spawning', 'running')
 $script:BeyinTakimOnayGerek = @{ baslat = @('planned'); birlestir = @('verified') }
 
 function Get-BeyinTakimKosular {

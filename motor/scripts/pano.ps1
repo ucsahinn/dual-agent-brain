@@ -85,7 +85,7 @@ if ([string]$args2[0] -eq 'onayla') {
     exit 0
 }
 if (-not $nodeExe) { Write-Output 'HATA: node bulunamadi (PATH). Pano AgentChef coordination-board.mjs ile calisir.'; exit 2 }
-if (-not (Test-Path -LiteralPath $board -PathType Leaf)) { Write-Output "HATA: coordination-board.mjs yok: $board  (ayar: beyin ayar BEYIN_AGENTCHEF_KOK <checkout>)"; exit 2 }
+if (-not (Test-Path -LiteralPath $board -PathType Leaf)) { Write-Output "HATA: $(Get-BeyinAgentChefYokMesaji -Kok $acKok -Gereken 'AgentChef 1.3.3+')"; exit 2 }
 
 $komut = [string]$args2[0]
 $gecilen = @($args2)

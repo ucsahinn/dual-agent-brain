@@ -105,6 +105,10 @@ $Vault = [IO.Path]::GetFullPath([IO.Path]::Combine($cwdFs, $Vault)).TrimEnd('\',
 if ($Vault -match '^[A-Za-z]:$') { $Vault += '\' }   # surucu koku: 'C:' tek basina cwd'ye gore cozulur
 $ilerleme = New-Object System.Collections.Generic.List[object]
 $uyarilar = New-Object System.Collections.Generic.List[string]
+# AJAN EVLERI (2026-10-14): motor CLAUDE_CONFIG_DIR ve CODEX_HOME'u izliyordu, kurulum ise hep ~\.claude ve ~\.codex'e
+# yaziyordu; bu degiskenleri kullanan birinde kancalar yanlis yere kuruluyordu. Codex simi (beyin-launcher) yeri degismez.
+$claudeEv = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
+$codexEv  = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
 
 function Adim([string]$Ad, [string]$Sonuc, [string]$Detay = '') {
     $ilerleme.Add([pscustomobject]@{ Adim = $Ad; Sonuc = $Sonuc; Detay = $Detay })
@@ -429,8 +433,8 @@ $beyinKok    = Join-Path $env:USERPROFILE '.beyin'
 $vaultKayit  = Join-Path $beyinKok 'vault.txt'
 $launcherYol = Join-Path $env:USERPROFILE '.beyin\beyin-launcher.ps1'          # gercek (ajan-tarafsiz)
 $simYol      = Join-Path $env:USERPROFILE '.claude\hooks\beyin-launcher.ps1'  # Codex simi (hooks.json buraya bakar)
-$claudeAyar  = Join-Path $env:USERPROFILE '.claude\settings.json'
-$codexAyar   = Join-Path $env:USERPROFILE '.codex\hooks.json'
+$claudeAyar  = Join-Path $claudeEv 'settings.json'
+$codexAyar   = Join-Path $codexEv 'hooks.json'
 
 if ($YalnizVault) {
     Write-Host ''
@@ -770,7 +774,7 @@ function Birlestir-Kanca([string]$AyarYol, [string]$Ajan, [bool]$Yaz, [bool]$Yen
 }
 
 # --- Claude Code: guvenli, hash yok ---
-$claudeAyar = Join-Path $env:USERPROFILE '.claude\settings.json'
+$claudeAyar = Join-Path $claudeEv 'settings.json'
 # TEK SEFERLIK GOC (Faz 0.2): eski kurulumlar Claude'u da ~\.claude\hooks simine
 # bagliyordu. Claude'un dosyasinda hash yok; girdileri gercek launcher'a cevir.
 # CODEX ICIN ASLA YAPILMAZ.
@@ -802,7 +806,7 @@ elseif ($r.Farkli -gt 0) { Adim 'Claude kancalari' 'atlandi' "$($r.Farkli) girdi
 else { Adim 'Claude kancalari' 'zaten' '4 girdi yerinde' }
 
 # --- Codex: HASH GUVENI VAR, dikkatli ---
-$codexAyar = Join-Path $env:USERPROFILE '.codex\hooks.json'
+$codexAyar = Join-Path $codexEv 'hooks.json'
 $codexVar = Test-Path -LiteralPath $codexAyar
 $codexBeyinVar = $false
 if ($codexVar) {
@@ -854,8 +858,8 @@ Write-Host '4) Skill aynalari' -ForegroundColor Cyan
 # motor/skills'i HIC taramaz. Tek kaynak vault'ta kalir, uc yere baglanir.
 $skillKaynak = Join-Path $Vault 'motor\skills'
 $skillHedefler = @(
-    @{ Ad = 'Claude (kullanici)'; Yol = (Join-Path $env:USERPROFILE '.claude\skills') },
-    @{ Ad = 'Codex (kullanici)';  Yol = (Join-Path $env:USERPROFILE '.codex\skills') },
+    @{ Ad = 'Claude (kullanici)'; Yol = (Join-Path $claudeEv 'skills') },
+    @{ Ad = 'Codex (kullanici)';  Yol = (Join-Path $codexEv 'skills') },
     @{ Ad = 'Ortak (.agents)';    Yol = (Join-Path $env:USERPROFILE '.agents\skills') }
 )
 $skiller = @(Get-ChildItem -LiteralPath $skillKaynak -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
@@ -1118,6 +1122,28 @@ if ($Zamanla) {
     } catch { Write-Host "  zamanlayici HATA: $($_.Exception.Message)" -ForegroundColor Red }
     Write-Host ''
 }
+# ORTAM DURUMU (2026-10-14 temiz profil provasi): kurulum Claude/Codex/Node yoklugunu ve AgentChef'i hic
+# soylemiyordu; README'ye uyan yeni kullanici takim modunun var olup olmadigini bilmiyordu.
+Write-Host 'ORTAM' -ForegroundColor Cyan
+$cliSatir = foreach ($c in @(@{ A = 'claude'; N = 'Claude Code' }, @{ A = 'codex'; N = 'Codex CLI' }, @{ A = 'node'; N = 'Node.js (pano/takim/bekci icin)' }, @{ A = 'wt'; N = 'Windows Terminal (takim panelleri icin)' })) {
+    $g = Get-Command $c.A -ErrorAction SilentlyContinue
+    '  {0,-40} {1}' -f $c.N, $(if ($g) { 'var' } else { 'YOK' })
+}
+$cliSatir | ForEach-Object { Write-Host $_ }
+if (-not (Get-Command claude -ErrorAction SilentlyContinue) -and -not (Get-Command codex -ErrorAction SilentlyContinue)) {
+    Write-Host '  UYARI: ne Claude Code ne Codex CLI bulundu; motor ozet uretemez. En az birini kur.' -ForegroundColor Yellow
+}
+$acDurum = $null
+try { $acDurum = & { param($vk) . (Join-Path $vk 'motor\hooks\lib.ps1'); Get-BeyinAgentChefKok } $Vault } catch { }   # alt kapsam: lib kurulumun degiskenlerine dokunmaz
+if ($acDurum -and $acDurum.Yol) {
+    $tm = Test-Path -LiteralPath (Join-Path $acDurum.Yol 'scripts\team-run.mjs')
+    Write-Host ('  {0,-40} {1}' -f 'AgentChef', "var: $($acDurum.Yol) (surum $($acDurum.Surum), $($acDurum.Kaynak))$(if ($tm) { ' - takim modu hazir: beyin takim doctor' } else { ' - takim motoru yok (1.5.0+ gerekir)' })")
+} else {
+    Write-Host ('  {0,-40} {1}' -f 'AgentChef', 'YOK (istege bagli: ortak pano ve takim modu icin)')
+    Write-Host '    Kurmak icin: git clone https://github.com/ucsahinn/agentchef.git ; cd agentchef ; npm run chef -- --install --apply' -ForegroundColor DarkGray
+    Write-Host '    Baska klasordeyse: beyin ayar BEYIN_AGENTCHEF_KOK <checkout klasoru>' -ForegroundColor DarkGray
+}
+Write-Host ''
 Write-Host 'SONRAKI ADIMLAR' -ForegroundColor Cyan
 Write-Host '  1. Codex TUI''de  /hooks  calistir ve beyin girdilerini onayla (Trusted olmali).'
 Write-Host '  2. Codex oturumlarini  /exit  ile kapat (pencere kapatinca SessionEnd atesmez).'
@@ -1127,6 +1153,7 @@ Write-Host '     beyin durum' -ForegroundColor White
 Write-Host '     (komut bulunamazsa tam yolla:)' -ForegroundColor DarkGray
 Write-Host "     powershell -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $beyinKok 'beyin.ps1')`" durum" -ForegroundColor DarkGray
 Write-Host '  5. Kullanim kilavuzu: <vault>\kurulum\KILAVUZ.md' -ForegroundColor White
+Write-Host '  6. AgentChef de kuruluysa takim modu: beyin takim doctor (ayrinti: KILAVUZ, "Takim modu: AgentChef ile birlikte")' -ForegroundColor White
 Write-Host ''
 
 exit $(if ($KuruCalisma -or $kotu -eq 0) { 0 } else { 1 })

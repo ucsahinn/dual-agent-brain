@@ -21,6 +21,31 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.3.2 - Beyin + AgentChef her makinede
+
+Temiz profil provasi (sahte ev klasoru, iki depo GitHub'dan sifirdan) ve iki bagimsiz denetim, yeni bir
+kullanicinin takim moduna ulasamadigi yerleri cikardi. Hepsi duzeldi:
+
+- **AgentChef artik her yerde bulunur.** Yalniz `~\agentchef*` taraniyordu; README'ye uyup kodu Belgeler'e
+  ya da `source\repos`'a klonlayan kullanicida `beyin pano`/`takim`/`bekci` dusuyordu ve hata mesaji
+  yazarin kendi makinesindeki `Desktop\codex-chef` yolunu gosteriyordu. Simdi sira: ayar
+  `BEYIN_AGENTCHEF_KOK` > ortam `AGENTCHEF_ROOT` > onbellek > tarama (ev, Belgeler, Masaustu, `source\repos`,
+  `src`, `dev`, `code`, `kod`, `projects`, `repos`, `git`, `github`; bir seviye; `package.json` adi `agentchef`).
+  Bulunamazsa tek, anlasilir mesaj: depo adresi, kurulum komutu ve `beyin ayar` satiri.
+- **`beyin takim plan` panoyu kendisi olusturur.** Yeni kullanicinin ilk plani "Board state file does not
+  exist" ile dusuyordu (`beyin pano` olusturuyordu, `takim` olusturmuyordu).
+- **Onay kancasi dogru anda yazar.** `baslat` yalniz planlanmis, `birlestir` yalniz dogrulanmis kosu icin
+  kaydedilir; erken satirda ajan nedenini soyler (eskiden Beyin onayi gecerli sayiyor, motor exit 3 veriyordu).
+  Kosu kimligi kayittan alinir (buyuk/kucuk harf farki motoru reddettirmiyor).
+- **Isci tanima** motorun kart kimligi deseniyle ayni (`TASK-A1` gibi kimlikler artik isci sayilir).
+- **Windows Terminal yoksa** motorun izleyicisi kapatilmaz, kullaniciya `status` ile izlemesi soylenir.
+- **`AGENTCHEF_TEAM_MODE=off`** iken acilista "Takim modu hazir" ipucu gosterilmez.
+- **Kurulum (`kur.ps1`)** `CLAUDE_CONFIG_DIR` ve `CODEX_HOME`'u izler (eskiden hep `~\.claude`/`~\.codex`);
+  sonda ORTAM bolumu: Claude Code, Codex, Node, Windows Terminal ve AgentChef var mi, yoksa ne yapilir.
+- **Belgeler:** README'ye "AgentChef ile takim modu", KILAVUZ'a bolum 13 (kurulum, ilk kosu, onay satirlari,
+  sinirlar); gereksinimlerde Node (pano/takim/bekci icin zorunlu), AgentChef ve Windows Terminal.
+- Kucuk: `queued` isci calisiyor sayilir; doktor ve bekci AgentChef yokken ayni anlasilir mesaji verir.
+
 ## 1.3.1 - Isci paneli
 
 - `beyin takim start` artik her isci icin **premium isci panelini** (`motor/scripts/takim-izle.ps1`) Windows
@@ -46,6 +71,12 @@ onu ve yayindaki surumu birlikte basar.
   (SURE, JETON, KOMUT basarili/basarisiz, DOSYA, TEST, SON OLAY), Turkce rol ve pano durumu, yamali arka plan
   kutulari kalkti; kartlar dar ekranda satirlara boluunur (120 sutunda 3'lu, 100'de 2'li). Sure birimleri
   "sn/dk/sa" (eski "6d 6s" gun gibi okunuyordu).
+- Panel v14-v15 (2026-10-14, tasarim incelemesi 12 madde): paneller dosyalari FileShare ReadWrite+Delete ile okur
+  (motorun atomik yazmasini engellemez; R20261014-753a'da gozetmen EPERM ile dusmustu); rozet verdict'e gore
+  (UYARIYLA DOGRULANDI); ASAMA satirinda onaylar ve olay cizelgesi; kartlar karar sirasiyla (DOGRULAMA, KONTROL,
+  ISCILER, JETON, SURE, DOSYA), asama sureleri, bolunmus renkli isci cubugu; isci tablosunda sure cubugu, commit kodu,
+  "kismen x/y"; butunlestirme tek satir ozet + [d] ayrinti; sandbox engeli (spawn EPERM) sari ve ayri sayilir;
+  110 sutun altinda kompakt kartlar; terim birligi (butunlestir / ana dala al / denetim).
 - Acilis ipucu: motor kuruluysa ve acik kosu yoksa sef oturumu `[Hafiza]` satirinda "Takim modu hazir" gorur
   (iki+ yazma kapsamina yayilan isi `beyin takim plan` ile iscilere bolme hatirlatmasi; baslatma yine kullanicinin
   `baslat <runId>` satiriyla). Isci oturumlarinda gosterilmez.

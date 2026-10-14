@@ -47,7 +47,7 @@ $ssPane  = [string]$env:HERDR_PANE_ID
 # durumuna yazilir (aktarim suzgeci, bekci, session-end okur).
 $ssTakimRun  = [string]$env:AGENTCHEF_TEAM_RUN
 $ssTakimKart = ([string]$env:AGENTCHEF_TEAM_TASK).Trim().ToUpperInvariant()
-if ($ssTakimKart -cnotmatch '^TASK-\d+$') { $ssTakimKart = '' }
+if ($ssTakimKart -cnotmatch '^TASK-[A-Z0-9][A-Z0-9._-]*$') { $ssTakimKart = '' }   # motorun deseni (team-run.mjs safeTaskId); TASK-A1 de isci
 $isciMod = [bool]($ssTakimRun -and $ssTakimKart -and $ssAgent -eq 'codex')
 # AJAN PID (BB5, 2026-10-06): kill guard bu oturumun ajan surecini (ata zincirinde
 # ilk claude/codex/node) korunan sayar. Yalniz alan bossa ya da surec olmusse olculur.
@@ -579,7 +579,7 @@ try {
     $tkTxt = ''
     if (-not $isciMod) { try { $tkD = Get-BeyinTakimDurum -Paths $p; if ($tkD.Satir) { $tkTxt = ' ' + $tkD.Satir } } catch { } }
     # Takim modu ipucu (2026-10-13): motor kuruluysa ve acik kosu yoksa sef oturumu takimi bilsin (otomatik baslatma yok; `baslat` kullanicinin)
-    if (-not $isciMod -and -not $tkTxt) { try { $acK = Get-BeyinAgentChefKok; if ($acK -and $acK.Yol -and (Test-Path -LiteralPath (Join-Path ([string]$acK.Yol) 'scripts/team-run.mjs'))) { $tkTxt = ' Takim modu hazir: iki+ yazma kapsamina yayilan isi 1-4 Codex isciye bol (beyin takim plan -> kullanici `baslat <runId>`; sef bu oturum).' } } catch { } }
+    if (-not $isciMod -and -not $tkTxt -and ([string]$env:AGENTCHEF_TEAM_MODE).ToLowerInvariant() -notin @('off', '0', 'false', 'disabled')) { try { $acK = Get-BeyinAgentChefKok; if ($acK -and $acK.Yol -and (Test-Path -LiteralPath (Join-Path ([string]$acK.Yol) 'scripts/team-run.mjs'))) { $tkTxt = ' Takim modu hazir: iki+ yazma kapsamina yayilan isi 1-4 Codex isciye bol (beyin takim plan -> kullanici `baslat <runId>`; sef bu oturum).' } } catch { } }
     $parts.Add("[Hafiza] Beyin hafiza motoru aktif (iki ajanda da ayni vault: $vault).$mvTxt$btTxt$pnTxt$tkTxt " +
                "Tani/durum: powershell -NoProfile -ExecutionPolicy Bypass -File $vault\motor\scripts\doktor.ps1 -Ozet " +
                "(tam tarama icin -Ozet'i kaldir; -Derin gunluk butceden bir claude -p harcar).")

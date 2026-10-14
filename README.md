@@ -64,6 +64,7 @@ Git istemiyorsan [son sürümün arşivini](https://github.com/ucsahinn/dual-age
 | `beyin ayar` | Tüm ayarları tek yerden gör/değiştir |
 | `beyin guncelle` | Motoru güncelle — **notlara dokunmaz** |
 | `beyin yedek` | Tam vault yedeği |
+| `beyin pano` / `beyin takim` | Ortak görev panosu ve takım modu (AgentChef gerekir) |
 
 Tam liste: `beyin yardim` · Ayrıntılı anlatım: [kurulum/KILAVUZ.md](kurulum/KILAVUZ.md)
 
@@ -109,6 +110,21 @@ Bu bir tercih değil, mekanizma: yayın adımı **izin verilenler listesi** kull
 | [Ollama](https://ollama.com) + `bge-m3` | ⬜ opsiyonel | Geri getirme kelime eşleşmesine düşer |
 | Node.js + brain-cli | ⬜ opsiyonel | `beyin yedek` yine çalışır (motorun kendi yedeği); brain-cli varsa o tercih edilir |
 | [Obsidian](https://obsidian.md) | ⬜ opsiyonel | Notları düz metin olarak okursun |
+| [AgentChef](https://github.com/ucsahinn/agentchef) + Node.js 22.12+ | ⬜ opsiyonel | Ortak görev panosu (`beyin pano`) ve takım modu (`beyin takim`) kapalı kalır |
+
+---
+
+## 🤝 AgentChef ile takım modu
+
+[AgentChef](https://github.com/ucsahinn/agentchef) da kuruluysa Claude Code oturumun **şef** olur: işi 1–4 Codex işçiye böler, her işçi kendi git worktree'sinde çalışır, sen yalnız iki satırla onay verirsin (`baslat <runId>`, `birlestir <runId>`). Canlı koşu panosu ve işçi panelleri Windows Terminal'de açılır.
+
+```powershell
+git clone https://github.com/ucsahinn/agentchef.git
+cd agentchef; npm run chef -- --install --apply; codex login
+beyin takim doctor
+```
+
+Beyin AgentChef'i kendisi bulur (ev, Belgeler, Masaüstü, `source\repos`, `src`, `dev` …); başka yerdeyse `beyin ayar BEYIN_AGENTCHEF_KOK <klasör>`. Ayrıntı: [KILAVUZ §13](kurulum/KILAVUZ.md#13-takim-modu-agentchef-ile-birlikte).
 
 ---
 

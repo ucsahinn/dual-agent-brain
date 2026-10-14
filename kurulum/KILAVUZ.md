@@ -24,6 +24,7 @@ zaman gunceldir.
 10. [Gizlilik ve guvenlik](#10-gizlilik-ve-guvenlik)
 11. [Kaldirma](#11-kaldirma)
 12. [Guncelleme](#12-guncelleme)
+13. [Takim modu: AgentChef ile birlikte](#13-takim-modu-agentchef-ile-birlikte)
 
 ---
 
@@ -73,7 +74,9 @@ Sonuc: bir oturumu kapatip yenisini actiginda ajan nerede kaldigini bilir.
 | **Claude Code CLI ve/veya Codex CLI** | En az biri zorunlu | Kancalar ateslenir, isler kuyruga girer ve **hicbir gunluk log yazilmaz** - kuyruk surekli buyur. Doktor'un `ozetleyici (claude/codex)` satiri bunu soyler. Ikisi birden varsa ikincisi ozetleyicinin yedegidir. |
 | **Git** | Istege bagli | Depoyu `git clone` ile almak icin gerekir; ZIP indirip acmak da olur. `copcu` komutu git'in yok saydigi klasorleri olctugu icin git olmadan is bulamaz. |
 | **Ollama + `bge-m3` modeli** | Istege bagli | Anlamsal (vektor) geri getirme kapali kalir; motor **anahtar kelime yoluna** duser ve calismaya devam eder. `beyin bagla` (capraz baglantilar) diskteki vektorleri kullandigi icin vektor olmadan is yapamaz. Doktor'un `embedding` satiri hangi yolda oldugunu yazar. |
-| **Node.js** | Istege bagli | Yalnizca doktor'un `-Derin` modundaki `brain-cli` sema kontrolu icin. `beyin yedek` Node'suz da calisir (motorun kendi yedegi); brain-cli varsa dagitici onu tercih eder. |
+| **Node.js** (22.12+) | Takim/pano icin zorunlu, gerisi icin istege bagli | `beyin pano`, `beyin takim` ve `beyin bekci` AgentChef'in Node betiklerini calistirir; Node yoksa bu uc komut hata verir. Hafiza motorunun geri kalani Node'suz calisir (`beyin yedek` dahil). |
+| **AgentChef** ([github.com/ucsahinn/agentchef](https://github.com/ucsahinn/agentchef)) | Istege bagli | Ortak gorev panosu (`beyin pano`, 1.3.3+) ve takim modu (`beyin takim`, 1.5.0+; herkese acik 1.6.0+) icin gerekir. Yoksa hafiza motoru normal calisir, yalniz bu iki ozellik kapali kalir. Kurulum: asagida **Takim modu: AgentChef ile birlikte**. |
+| **Windows Terminal** (`wt.exe`) | Takim panelleri icin | Windows 11'de hazir gelir. Yoksa isciler yine calisir ama Beyin'in kosu/isci panelleri acilamaz; durumu `beyin takim status <runId>` ile izlersin. |
 | **Obsidian** | Istege bagli | Notlari duz Markdown olarak zaten okuyabilirsin. Obsidian yalnizca grafik gorunumu, `.base` tablolari ve `.canvas` haritalari icin gerekir. |
 
 > `beyin yedek` bagimliliksizdir: motorun kendi PowerShell yedegini alir.
@@ -332,7 +335,7 @@ BEYIN DURUMU  (2026-01-15 09:12)  ·  motor v1.0.0
 | Komut | Ne yapar / ne zaman | Yazar mi? |
 | --- | --- | --- |
 | `pano <komut>` | Ortak gorev panosu: AgentChef `coordination-board.mjs` (sema v3/v4: sahip, yazma kapsami, kira, brief, kanit; 1.3.3 ile `blocked`/`cancelled` durumlari, `assign`, `resolve-handoff`, `handoff-check`, `show --status open --owner x`, done icin `--verified-by` sahipten farkli biri, geri hareketlerde `--reason`) icin sarmalayici. Tek ortak state `motor\scripts\.state\board.json`; komut ve `--bayraklar` AgentChef'inkiyle birebir, `--state` ve `--json` otomatik eklenir. Komutlar: `init`, `create --id TASK-012 --title ... [--owner-agent codex --owner-session x] [--write-repo Beyin --write-paths a,b]` (koordinator zorunlu: `--owner-coordinator` verilmezse `-Koordinator qa` ya da ayar `BEYIN_PANO_KOORDINATOR`, varsayilan `leadership_coordinator`), `brief --task id --brief-file brief.md` (7 alan: Hedef, Kanit, Yazma kapsami, Sinirlar, Bitti kriteri, Donus bicimi, Kullanicinin ozgun cumlesi), `brief-check --brief-file ...`, `renew-lease --task id --minutes 90`, `transition --task id --status in_progress` (brief + canli kira yoksa reddedilir), `add-evidence`, `handoff`, `attach-report`, `show`. Her degisiklikte `10-command-center\pano.md` yeniden yazilir; oturum acilisinda isletim satirina `Pano: N acik, M bu projede (...)` ve bu repoya yazan acik kartlar icin `[Hafiza] UYARI pano:` satiri eklenir (node baslatilmaz). Ayar: `BEYIN_AGENTCHEF_KOK`. |
-| `takim <komut>` | **Takim kosusu** (2026-10-12; AgentChef 1.5.0+ `scripts/team-run.mjs` gerekir): sef = kullanicinin konustugu Claude oturumu, isciler = 1-4 Codex (`codex exec`, abonelik), her isci kendi git worktree'sinde (`takim/<runId>-<TASK>` dali), kendi pano kartiyla, gorunur Windows Terminal sekmesinde. Komut ve `--bayraklar` motorla birebir, `--state` (board.json) ve `--json` otomatik: `plan --repo <yol> --plan-file <plan.json>` (kartlari acar, kosu `planned`), `start --run <id>`, `status`, `collect` (isci ciktisi + gercek mutasyon -> kart `review`), `integrate` (ara dal `takim/<runId>`, checks), `verify` (salt-okunur `test_verifier` iscisi), `merge --run <id>` (ara dal senin daline), `pause`, `resume`, `abort`, `cleanup`, `doctor`. Beyin fiilleri: `durum [id]`, `baslat <id>` / `birlestir <id>` (etkilesimli terminal onayi), `durdur <id>` (= abort; isci surecleri yalniz motor durdurur, taskkill ASLA), `maliyet <id>` (kart basina jeton). **Iki insan onayi** sohbete tek satir: `baslat <runId>` (`start` oncesi) ve `birlestir <runId>` (`merge` oncesi); `onayla TASK-x` kurallari aynen (gercek kullanici satiri, 7 gun, tek kullanimlik; ajan mesaji, sentetik tur ve isci oturumu saymaz; onaysiz exit 5, node cagrilmaz). Kosu kaydi `motor\scripts\.state\team-runs\<runId>.json` (motor yazar), onay `.state\approvals\<runId>.baslat|birlestir.json` (motor okur, uretmez). Isci oturumu acilista `[Hafiza: Takim]` blogu alir (vault baglami yuklenmez, toparlama atlanir), kapanista sefe tek "isci bitti" brifingi yazar; `beyin aktar "..." -Isci TASK-x` yalniz o isciye gider. Turetilmis gorunum `10-command-center\takim.md`; doktor `takim` satiri; bekci iscileri kosu/kart ile listeler. Push/PR ve kart `done` (`onayla TASK-x`) ayri adimlardir. | `.state` (kosu, onay, takim.md) **Isci paneli (1.3.1, v13):** `start` basarili olunca her isci icin premium panel (stat kartlari: sure, jeton, komut, dosya, test, son olay; kosu panosunda asama ilerleme cubugu + isci/jeton/sure/kontrol/dogrulama/dosya kartlari) (`motor/scripts/takim-izle.ps1`; motor kaydi + `events.jsonl`, yalniz okur) Windows Terminal sekmesinde acilir, motorun ham `watch` sekmesi kapatilir; `izle <id> [TASK ...|pano]` panelleri yeniden acar (`pano` = yalniz kosu panosu: tum isciler, asama cizgisi, SIRADA komutu); ayar `BEYIN_TAKIM_PANEL` `on` (varsayilan) / `motor` / `off`. Acilista acik kosu yoksa sef `Takim modu hazir` ipucunu gorur (1.3.1). AgentChef 1.6.0+ ile takim modu herkese aciktir (bayrak gerekmez); kapatmak icin `AGENTCHEF_TEAM_MODE=off`. 1.5.x motorlarda sarmalayici deneysel bayragi kendi surecinde verir; ortamdaki farkli degere dokunmaz. |
+| `takim <komut>` | **Takim kosusu** (2026-10-12; AgentChef 1.5.0+ `scripts/team-run.mjs` gerekir): sef = kullanicinin konustugu Claude oturumu, isciler = 1-4 Codex (`codex exec`, abonelik), her isci kendi git worktree'sinde (`takim/<runId>-<TASK>` dali), kendi pano kartiyla, gorunur Windows Terminal sekmesinde. Komut ve `--bayraklar` motorla birebir, `--state` (board.json) ve `--json` otomatik: `plan --repo <yol> --plan-file <plan.json>` (kartlari acar, kosu `planned`), `start --run <id>`, `status`, `collect` (isci ciktisi + gercek mutasyon -> kart `review`), `integrate` (ara dal `takim/<runId>`, checks), `verify` (salt-okunur `test_verifier` iscisi), `merge --run <id>` (ara dal senin daline), `pause`, `resume`, `abort`, `cleanup`, `doctor`. Beyin fiilleri: `durum [id]`, `baslat <id>` / `birlestir <id>` (etkilesimli terminal onayi), `durdur <id>` (= abort; isci surecleri yalniz motor durdurur, taskkill ASLA), `maliyet <id>` (kart basina jeton). **Iki insan onayi** sohbete tek satir: `baslat <runId>` (`start` oncesi) ve `birlestir <runId>` (`merge` oncesi); `onayla TASK-x` kurallari aynen (gercek kullanici satiri, 7 gun, tek kullanimlik; ajan mesaji, sentetik tur ve isci oturumu saymaz; onaysiz exit 5, node cagrilmaz). Kosu kaydi `motor\scripts\.state\team-runs\<runId>.json` (motor yazar), onay `.state\approvals\<runId>.baslat|birlestir.json` (motor okur, uretmez). Isci oturumu acilista `[Hafiza: Takim]` blogu alir (vault baglami yuklenmez, toparlama atlanir), kapanista sefe tek "isci bitti" brifingi yazar; `beyin aktar "..." -Isci TASK-x` yalniz o isciye gider. Turetilmis gorunum `10-command-center\takim.md`; doktor `takim` satiri; bekci iscileri kosu/kart ile listeler. Push/PR ve kart `done` (`onayla TASK-x`) ayri adimlardir. | `.state` (kosu, onay, takim.md) **Isci paneli (1.3.1, v15; kosu panosunda [d] butunlestirme ayrintisi):** `start` basarili olunca her isci icin premium panel (stat kartlari: sure, jeton, komut, dosya, test, son olay; kosu panosunda asama ilerleme cubugu + isci/jeton/sure/kontrol/dogrulama/dosya kartlari) (`motor/scripts/takim-izle.ps1`; motor kaydi + `events.jsonl`, yalniz okur) Windows Terminal sekmesinde acilir, motorun ham `watch` sekmesi kapatilir; `izle <id> [TASK ...|pano]` panelleri yeniden acar (`pano` = yalniz kosu panosu: tum isciler, asama cizgisi, SIRADA komutu); ayar `BEYIN_TAKIM_PANEL` `on` (varsayilan) / `motor` / `off`. Acilista acik kosu yoksa sef `Takim modu hazir` ipucunu gorur (1.3.1). AgentChef 1.6.0+ ile takim modu herkese aciktir (bayrak gerekmez); kapatmak icin `AGENTCHEF_TEAM_MODE=off`. 1.5.x motorlarda sarmalayici deneysel bayragi kendi surecinde verir; ortamdaki farkli degere dokunmaz. |
 | `bekci` | Kaynak bekcisi (tam katman). Commit/RAM yuzdesi, son 14 gunun oturum dosyalari (ajan, proje, kac dakikadir sessiz, Herdr pane), ebeveyni olmus yetim `doktor.ps1` surecleri, Codex MCP birikimi (AgentChef `codex-process-hygiene.mjs --json`; `BEYIN_AGENTCHEF_KOK` altinda once `plugins\agentchef`, sonra `plugins\agentchef-workflows`; ikisi de yoksa ATLANDI) ve yalniz-rapor disk ozeti (Claude transkriptleri, Codex oturumlari, Codex sqlite). **Hicbir sureci kapatmaz**: `taskkill ... /T /F` ve `herdr pane close <pane>` satirlarini panoya kopyalar, karar sende. `-BostaDk n`, `-Json`, `-PanoyaKopyalama` (panoya yazma). Oturum acilisindaki tek satirlik uyari (`[Hafiza] UYARI kaynak:`) ucuz katmandir: esikler `BEYIN_BEKCI_COMMIT` (vars. 85) ve `BEYIN_BEKCI_BOSTA_DK` (vars. 120). |
 | `geri-getirme-olc` deney bayraklari | `-Fusion hibrit|rrf5|rrf60`, `-TopK N`, `-SonmeYok` (2026-10-06): varsayilan disi her ayar DENEY sayilir; rapor `.state\geri-getirme-deney.json`, makbuz `OLC_DENEY` (haftalik kapiyi kirletmez). 2026-10-06 olcumu: RRF iyilestirme getirmedi (sonmeyle 0,844, sonmesiz 0,969); varsayilan hibrit kaldi. | Hayir |
 | Devir blogu | Flush ozetinin son bolumu `**Devir:**` (nerede kalindi / siradaki adim / dokunulmayacak dosya). Sikistirma oncesi ve oturum sonu flush'inda aktarim olarak kaydedilir (`kind=devir`); ayni ajanin AYNI projedeki bir sonraki acilisinda bir kez gosterilir ve kapanir; oturum icinde gosterilmez. Ayni oturumun yeni devri eskisini kapatir. | Aktarim kaydi |
@@ -1153,3 +1156,56 @@ onaylaman gerekebilir.
 - `AGENTS.md` (vault kokunde) - ajan calisma sozlesmesi
 - `CLAUDE.md` (vault kokunde) - Claude Code icin yonlendirici
 - `brain.config.json` (vault kokunde) - vault sozlesmesi ve klasor haritasi
+
+---
+
+## 13. Takim modu: AgentChef ile birlikte
+
+Beyin tek basina hafiza motorudur. [AgentChef](https://github.com/ucsahinn/agentchef)
+ile birlikte kurulunca iki ozellik daha acilir: **ortak gorev panosu** (`beyin pano`)
+ve **takim modu** (`beyin takim`): bu oturum (sef) isi 1-4 Codex isciye boler, her
+isci kendi git worktree'sinde calisir, sen iki satirla onay verirsin.
+
+### 13.1 Kurulum (sira onemli degil)
+
+```powershell
+git clone https://github.com/ucsahinn/agentchef.git
+cd agentchef
+npm run chef -- --install --apply
+codex login          # isciler Codex aboneliginle calisir
+```
+
+Beyin AgentChef'i kendisi bulur: ev klasoru, Belgeler, Masaustu ve `source\repos`,
+`src`, `dev`, `code`, `projects`, `repos`, `git`, `github` klasorlerinin bir seviye
+altinda `agentchef` adli checkout'u arar. Baska bir yerdeyse yerini bir kez soyle:
+
+```powershell
+beyin ayar BEYIN_AGENTCHEF_KOK D:\yolgentchef
+```
+
+Kontrol: `beyin takim doctor` - her satir `pass` olmali (`last-run` ilk kosudan
+once bilgi amaclidir). `kur.ps1` de kurulum sonunda AgentChef'i bulup bulmadigini yazar.
+
+### 13.2 Ilk kosu
+
+1. Claude Code'da isi anlat ve "takimla yap" de. Sef planlar (`beyin takim plan`),
+   isci tablosunu gosterir. Pano yoksa ilk komut onu kendisi olusturur.
+2. Sohbete **tek basina bir satir** yaz: `baslat <runId>`. Onay kancasi bunu kaydeder;
+   cumle icinde gecen ifade sayilmaz.
+3. Isciler calisir; Windows Terminal'de **kosu panosu** ve her isci icin **isci paneli**
+   acilir (`beyin takim izle <runId> pano` ile yeniden acilir; `[d]` butunlestirme ayrintisi).
+4. Sef toplar, butunlestirir, bagimsiz dogrulayiciya dogrulatir.
+5. Sohbete tek satir: `birlestir <runId>`. Ara dal senin dalina girer.
+6. Kartlari kapatmak icin: `onayla TASK-x` (her kart ayri satir).
+
+Onay satirlari yalniz dogru anda gecerlidir: `baslat` yalniz planlanmis, `birlestir`
+yalniz dogrulanmis kosu icin kaydedilir; erken yazilirsa ajan neden kaydedilmedigini soyler.
+
+### 13.3 Kapatma ve sinirlar
+
+- `AGENTCHEF_TEAM_MODE=off` o surecte takim yurutmesini kapatir.
+- Isciler push/PR yapmaz; push ayri bir karardir.
+- Pano Beyin'in kasasinda tutulur (`motor\scripts\.state\board.json`). Takimi Claude'da
+  dogrudan team-conductor skill'i ile calistirirken de `beyin takim <komut>` kullan: onay
+  kancasi yalniz bu panonun kosularini tanir.
+

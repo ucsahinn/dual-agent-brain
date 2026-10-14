@@ -44,7 +44,7 @@ Sonra **yeni bir terminal aç** (PATH girdisi ancak orada geçerli olur):
 beyin durum
 ```
 
-Git istemiyorsan [son sürümün arşivini](https://github.com/ucsahinn/dual-agent-brain/releases/latest) indirip açman da yeter — `beyin guncelle` git gerektirmez, zip indirir.
+Git istemiyorsan [güncel arşivi (main)](https://github.com/ucsahinn/dual-agent-brain/archive/refs/heads/main.zip) indirip açman da yeter — `beyin guncelle` git gerektirmez, zip indirir.
 
 ---
 

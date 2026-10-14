@@ -45,6 +45,8 @@ kullanicinin takim moduna ulasamadigi yerleri cikardi. Hepsi duzeldi:
 - **Belgeler:** README'ye "AgentChef ile takim modu", KILAVUZ'a bolum 13 (kurulum, ilk kosu, onay satirlari,
   sinirlar); gereksinimlerde Node (pano/takim/bekci icin zorunlu), AgentChef ve Windows Terminal.
 - Kucuk: `queued` isci calisiyor sayilir; doktor ve bekci AgentChef yokken ayni anlasilir mesaji verir.
+- `beyin takim durdur <runId>` calismiyordu (motor `--reason` ister); simdi varsayilan neden verilir.
+- `beyin pano show` bos kasada ham ENOENT veriyordu; pano yoksa olusturulur, bos liste doner.
 
 ## 1.3.1 - Isci paneli
 

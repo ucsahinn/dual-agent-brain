@@ -108,6 +108,7 @@ Describe 'beyin takim sarmalayicisi (2026-10-12)' {
         $j = Echo-Json $out
         $j.echo[0] | Should Be 'abort'
         $j.echo[($j.echo.IndexOf('--run') + 1)] | Should Be 'R-2'
+        ($j.echo -contains '--reason') | Should Be $true   # motor --reason ister; durdur varsayilan neden verir (2026-10-14)
         $err = Invoke-Takim $script:tv @('fail')
         $LASTEXITCODE | Should Be 1
         $err | Should Match 'sahte motor hatasi'

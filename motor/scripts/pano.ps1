@@ -96,7 +96,7 @@ if (-not $stateVar -and $komut -ne 'brief-check') {
     $gecilen += @('--state', $p.Board)
     # board.json yoksa create/transition/... ENOENT veriyordu (prova bulgusu #19a):
     # init'i otomatik kos; yalniz 'show' icin dokunma (bos pano = bos liste).
-    if ($komut -ne 'init' -and $komut -ne 'show' -and -not (Test-Path -LiteralPath $p.Board)) {
+    if ($komut -ne 'init' -and -not (Test-Path -LiteralPath $p.Board)) {   # 2026-10-14: 'show' da (bos kasada motor ENOENT veriyordu; bos pano = bos liste)
         $initCik = & $nodeExe $board init --state $p.Board --json 2>&1
         if ($LASTEXITCODE -ne 0) { Write-Output "HATA: pano baslatilamadi (init): $(($initCik | ForEach-Object { "$_" }) -join ' ')"; exit 1 }
         Write-Host "[pano] board.json yoktu, olusturuldu: $($p.Board)" -ForegroundColor DarkGray

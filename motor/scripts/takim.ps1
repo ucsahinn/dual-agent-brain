@@ -172,6 +172,8 @@ if (-not $stateVar) {
     }
 }
 if (-not $jsonVar) { $gecilen += '--json' }
+# 'durdur <id>' / abort: motor --reason ister; kullanici vermediyse varsayilan neden (2026-10-14 prova: 'beyin takim durdur' hic calismiyordu)
+if ($komut -eq 'abort' -and -not ($gecilen -contains '--reason')) { $gecilen += @('--reason', 'kullanici durdurdu (beyin takim durdur)') }
 
 # INSAN ONAYI KAPISI: start <- baslat, merge <- birlestir. Onay yoksa node HIC cagrilmaz.
 $onayTur = ''

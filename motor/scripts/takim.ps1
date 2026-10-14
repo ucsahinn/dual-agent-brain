@@ -187,7 +187,10 @@ $ErrorActionPreference = 'Continue'
 # Deneysel opt-in (2026-10-13): motor `AGENTCHEF_TEAM_MODE=experimental` yoksa start'i "team-mode-disabled" ile
 # reddeder ve doctor "opt-in" FAIL verir. Kullanici karari (2026-10-12) "once bize": sarmalayici bu bayragi
 # kendi surecinde verir; disaridan baska bir deger gelmisse (ornek: kapatmak icin 'off') ona dokunmaz.
-if (-not $env:AGENTCHEF_TEAM_MODE) { $env:AGENTCHEF_TEAM_MODE = 'experimental' }
+# AgentChef 1.6.0+ (2026-10-14): takim modu herkese acik, bayrak gereksiz; satir 1.5.x uyumu icin durur.
+$motorSurum = ''; try { $motorSurum = [string]((Get-Content -LiteralPath (Join-Path $kok 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version) } catch { }
+$eskiMotor = $true; try { if ($motorSurum -and ([version](($motorSurum -split '[-+]')[0]) -ge [version]'1.6.0')) { $eskiMotor = $false } } catch { }
+if ($eskiMotor -and -not $env:AGENTCHEF_TEAM_MODE) { $env:AGENTCHEF_TEAM_MODE = 'experimental' }   # 1.6.0+ motorda bayrak gereksiz: ortam oldugu gibi gecer
 $cikti = & $nodeExe $engine @gecilen 2>&1
 $kod = $LASTEXITCODE
 $ErrorActionPreference = $eapEski

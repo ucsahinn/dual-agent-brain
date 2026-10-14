@@ -39,12 +39,20 @@ onu ve yayindaki surumu birlikte basar.
 - Panel v12: Catppuccin Mocha paleti (tek vurgu rengi + uc durum rengi), cerceveye gomulu bolum basliklari,
   durum = glif + sozcuk (calisiyor sari, bitti yesil, hata kirmizi, `rejected_content` = icerik reddi),
   Turkce is adlari, Latin disi isci notlari gizlenir (`Yabanci`), kare degismediyse yeniden cizilmez (titreme yok).
+- Panel v13 (2026-10-14, kullanici istegi "stat/widget kartlari, process bar, Turkce, premium"): kosu panosunda
+  ASAMA ilerleme cubugu (n/6, yuzde, kirik asama kirmizi) ve alti kart (ISCILER bitti/toplam + mini bar, JETON
+  giris/cikis/onbellek payi, SURE kosu + isci basina ortalama, KONTROL gecen/toplam, DOGRULAMA verdict + saat,
+  DOSYA degisen dosya + teslim commit'i), isci tablosunda Turkce rol/durum/son olay; isci panelinde alti stat karti
+  (SURE, JETON, KOMUT basarili/basarisiz, DOSYA, TEST, SON OLAY), Turkce rol ve pano durumu, yamali arka plan
+  kutulari kalkti; kartlar dar ekranda satirlara boluunur (120 sutunda 3'lu, 100'de 2'li). Sure birimleri
+  "sn/dk/sa" (eski "6d 6s" gun gibi okunuyordu).
 - Acilis ipucu: motor kuruluysa ve acik kosu yoksa sef oturumu `[Hafiza]` satirinda "Takim modu hazir" gorur
   (iki+ yazma kapsamina yayilan isi `beyin takim plan` ile iscilere bolme hatirlatmasi; baslatma yine kullanicinin
   `baslat <runId>` satiriyla). Isci oturumlarinda gosterilmez.
 - `beyin takim` motorun deneysel opt-in bayragini (`AGENTCHEF_TEAM_MODE=experimental`) kendi surecinde verir:
   bayraksiz terminalden `start` "team-mode-disabled" ile dusuyor, `doctor` 9/10 veriyordu. Ortamdaki farkli bir
-  degere dokunmaz.
+  degere dokunmaz. AgentChef 1.6.0 ile bayrak gereksizdir (takim modu herkese acik); `AGENTCHEF_TEAM_MODE=off` kapatir,
+  sarmalayici bu degere dokunmaz.
 
 ## 1.3.0 - Takim kosusu: Claude sef, Codex isciler
 

@@ -184,3 +184,28 @@ Describe 'beyin takim sarmalayicisi (2026-10-12)' {
         $o2 | Should Match 'AgentChef bulunamadi'
     }
 }
+
+Describe 'AgentChef kesfi (2026-10-14): Belgeler/kod klasorleri, git origin guveni, yazar yolu yok' {
+    It 'source\repos altindaki agentchef bulunur; origin baska depoyu gosteren agentchef-kopya elenir; hicbiri yoksa Yol bos' {
+        $ev = Join-Path $TestDrive ('ev-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+        $eskiEv = $env:USERPROFILE; $eskiAyar = $env:BEYIN_AGENTCHEF_KOK
+        try {
+            $env:USERPROFILE = $ev; $env:BEYIN_AGENTCHEF_KOK = (Join-Path $ev 'yok-agentchef')   # makinedeki gercek ayari ez; gecersiz ayar taramayi durdurmamali
+            New-Item -ItemType Directory -Force -Path (Join-Path $ev '.beyin') | Out-Null
+            $yap = { param($k, $surum, $origin) New-Item -ItemType Directory -Force -Path (Join-Path $k 'scripts'), (Join-Path $k '.git') | Out-Null
+                Set-Content -LiteralPath (Join-Path $k 'scripts\coordination-board.mjs') -Value '//' -Encoding ASCII
+                Set-Content -LiteralPath (Join-Path $k 'package.json') -Value ('{"name":"agentchef","version":"' + $surum + '"}') -Encoding ASCII
+                Set-Content -LiteralPath (Join-Path $k '.git\config') -Value ("[remote ""origin""]`n`turl = $origin") -Encoding ASCII }
+            $yok = Get-BeyinAgentChefKok
+            ([string]$yok.Yol).StartsWith($ev) | Should Be $false   # Belgeler/Masaustu Windows yollari sahte evden bagimsiz; gercek bir klon bulunabilir
+            (Get-BeyinAgentChefYokMesaji -Kok $yok) | Should Match 'github.com/ucsahinn/agentchef'
+            & $yap (Join-Path $ev 'source\repos\agentchef') '1.7.1' 'https://github.com/ucsahinn/agentchef.git'
+            & $yap (Join-Path $ev 'agentchef-kopya') '9.9.9' 'https://example.invalid/baska-depo.git'
+            Remove-Item -LiteralPath (Join-Path $ev '.beyin\agentchef-kok.txt') -Force -ErrorAction SilentlyContinue
+            $k = Get-BeyinAgentChefKok
+            $k.Yol | Should Be (Join-Path $ev 'source\repos\agentchef')
+            $k.Kaynak | Should Be 'tarama'
+            (Get-BeyinAgentChefKok).Kaynak | Should Be 'onbellek'
+        } finally { $env:USERPROFILE = $eskiEv; $env:BEYIN_AGENTCHEF_KOK = $eskiAyar }
+    }
+}

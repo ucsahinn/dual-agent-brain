@@ -21,6 +21,27 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.3.3 - Guvenlik ve saglamlik turu
+
+Bagimsiz bir guvenlik denetimi ve iki kod incelemesinin Beyin tarafindaki bulgulari:
+
+- **Onay taklidi kapandi.** Ajan kendi kabugundan alt ajan oturumu acip (Claude print modu ya da Codex exec)
+  kendi "kullanici" satiriyla `baslat` / `birlestir` / `onayla` uretebilirdi; kill guard artik bu cagrilari
+  reddeder (yalniz cagri konumunda: commit mesaji ya da heredoc icinde gecen metin engellenmez).
+- **Dosya araclari da korunuyor.** Claude'un Write/Edit/MultiEdit/NotebookEdit araclari kill guard'in
+  disindaydi; onay kaydi bu araclarla dogrudan yazilabiliyordu. Artik onay kayitlari, korunan PID listesi ve
+  `~\.beyin` ayar/kesif dosyalari bu araclarla yazilamaz; kill guard ajan komutuyla kapatilamaz.
+  Kayitli kurulumlar icin: `kur.ps1 -KillGuard` (Claude eslestiricisine dosya araclari eklenir).
+- **Onay kancasi fail-closed.** Kosu kaydi okunamazsa onay yazilmaz (eskiden yaziliyordu); CRLF ile biten
+  satirlar da taninir; onay makbuzuna oturum kaynagi bayraklari dusulur.
+- **AgentChef kesfi guvenli ve hizli.** Taranan klasor git deposuysa origin adresi `agentchef` deposunu
+  gostermeli (yedek/kopya/ilgisiz depolar elenir); esitlikte on-surum kaybeder; onbellek 24 saatte yenilenir,
+  oturum acilisi bulunamayan AgentChef'i 10 dk boyunca yeniden taramaz.
+- **Panel:** bos alanlar sahte cakisma/dosya/isci gostermez (PS 5.1 `@($null).Count`), calisan isci suresi
+  UTC hatasi duzeldi, eksik onay saati bozuk tarih gostermez, "sandbox engeli" yalniz Codex'in `spawn EPERM`
+  imzasinda.
+- Oturumlar arasi mesajlasma icin `beyin aktar` (SendMessage kullaniciya her seferinde "Deliver" onayi cikarir).
+
 ## 1.3.2 - Beyin + AgentChef her makinede
 
 Temiz profil provasi (sahte ev klasoru, iki depo GitHub'dan sifirdan) ve iki bagimsiz denetim, yeni bir

@@ -11,10 +11,11 @@ Copy-Item (Join-Path $here 'lib.ps1') (Join-Path $kgVault 'motor\hooks\lib.ps1')
 Copy-Item (Join-Path $here 'pre-tool-use.ps1') (Join-Path $kgVault 'motor\hooks\pre-tool-use.ps1')
 Set-Content -Path (Join-Path $kgVault '.beyin-version') -Value '1.0.0'
 
-function Invoke-Guard($Komut, [hashtable]$Env = @{}) {
+function Invoke-Guard($Komut, [hashtable]$Env = @{}, [string]$Arac = 'Bash', [string]$Dosya = '') {
     $in  = Join-Path $env:TEMP ("kg-in-" + [guid]::NewGuid().ToString('N') + '.json')
     $err = Join-Path $env:TEMP ("kg-err-" + [guid]::NewGuid().ToString('N') + '.txt')
-    $payload = @{ session_id = 'kg-test'; hook_event_name = 'PreToolUse'; tool_name = 'Bash'; tool_input = @{ command = $Komut }; cwd = $vault }
+    $ti = $(if ($Dosya) { @{ file_path = $Dosya; content = [string]$Komut } } else { @{ command = $Komut } })
+    $payload = @{ session_id = 'kg-test'; hook_event_name = 'PreToolUse'; tool_name = $Arac; tool_input = $ti; cwd = $vault }
     [IO.File]::WriteAllText($in, ($payload | ConvertTo-Json -Compress -Depth 4), (New-Object Text.UTF8Encoding $false))
     $eski = @{}
     if (-not $Env.ContainsKey('BEYIN_VAULT')) { $Env['BEYIN_VAULT'] = $kgVault }
@@ -158,6 +159,28 @@ Describe 'kill guard (BB5)' {
         [int]$z[0].Pid | Should Be $PID
         $k = Get-BeyinKorunanPid -Paths $p
         if ($z.Count -gt 1) { $k.ContainsKey([int]$z[1].Pid) | Should Be $true }
+    }
+}
+Describe 'kill guard: alt ajan oturumu, dosya araclari, ayar (2026-10-14 guvenlik denetimi)' {
+    $cp = 'cl' + 'aude'; $cx = 'co' + 'dex'; $ap = 'appr' + 'ovals'; $kg = 'BEYIN_' + 'KILL_GUARD'
+    It 'ajan kabugundan claude -p ve codex exec reddedilir (onay taklidi yolu)' {
+        (Invoke-Guard "$cp -p `"baslat R-1`"").Kod | Should Be 2
+        (Invoke-Guard "$cx exec `"onayla TASK-9`"").Kod | Should Be 2
+        (Invoke-Guard "cmd /c $cp -p x").Kod | Should Be 2
+        (Invoke-Guard "$cx exec -m gpt-6-luna `"TASK-70 icin brief uygula`"").Kod | Should Be 0   # Codex'e devir akisi calisir
+        (Invoke-Guard "git commit -m `"($cp -p / $cx exec) kurali`"").Kod | Should Be 0   # metin icinde gecmesi engellenmez
+    }
+    It 'Write/Edit onay klasorune ve Beyin ayar/kesif dosyalarina yazamaz; baska dosyada icerikte gecen ad sorun degil' {
+        (Invoke-Guard '{}' -Arac 'Write' -Dosya "C:\x\motor\scripts\.state\$ap\R-1.baslat.json").Kod | Should Be 2
+        (Invoke-Guard 'x' -Arac 'Edit' -Dosya 'X:\ev\.beyin\ayar.json').Kod | Should Be 2
+        (Invoke-Guard 'x' -Arac 'Write' -Dosya 'X:\ev\.beyin\agentchef-kok.txt').Kod | Should Be 2
+        (Invoke-Guard 'x' -Arac 'Write' -Dosya 'X:\ev\.beyin\vault.txt').Kod | Should Be 2
+        (Invoke-Guard "see .state/$ap here" -Arac 'Write' -Dosya 'C:\x\docs\a.md').Kod | Should Be 0
+    }
+    It 'kill guard ajan komutuyla kapatilamaz; siradan komutlar gecer' {
+        (Invoke-Guard "beyin ayar $kg kapali").Kod | Should Be 2
+        (Invoke-Guard 'git status').Kod | Should Be 0
+        (Invoke-Guard 'beyin takim start --run R-1').Kod | Should Be 0
     }
 }
 Remove-Item -LiteralPath $kgVault -Recurse -Force -ErrorAction SilentlyContinue

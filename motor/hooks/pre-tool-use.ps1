@@ -28,23 +28,43 @@ try {
     $ham = [Console]::In.ReadToEnd()
     if (-not $ham) { exit 0 }
     # --- hizli on filtre ---
-    if (-not (M $ham '(?i)taskkill|tskill|pkill|killall|stop-process|spps|wmic|\bkill(?=\s)|approvals|korunan-pid')) { exit 0 }
+    if (-not (M $ham '(?i)taskkill|tskill|pkill|killall|stop-process|spps|wmic|\bkill(?=\s)|approvals|korunan-pid|ayar\.json|agentchef-kok|kill-guard|vault\.txt|beyin-launcher|BEYIN_KILL_GUARD|\bclaude(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:-p\b|--print\b)|\bcodex(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:exec|e)\b')) { exit 0 }
 
-    # --- yavas yol: komutu cikar ---
-    $cmd = ''
+    $cmd = ''; $dosya = ''
     try {
         $o = $ham | ConvertFrom-Json
         $ti = $o.tool_input
         if ($ti) {
             $c = $ti.command
             if ($c -is [array]) { $cmd = ($c | ForEach-Object { [string]$_ }) -join ' ' } elseif ($c) { $cmd = [string]$c }
+            # 2026-10-14 guvenlik denetimi: Write/Edit/MultiEdit/NotebookEdit kill guard'in DISINDAYDI; onay kaydi bu
+            # araclarla dogrudan yazilabiliyordu. Dosya araclarinda yalniz HEDEF YOL denetlenir (icerik degil).
+            foreach ($alan in @('file_path', 'notebook_path', 'path')) { if (-not $dosya -and $ti.$alan) { $dosya = [string]$ti.$alan } }
         }
     } catch { }
+    if ($dosya -and -not $cmd) {
+        if ((M $dosya '(?i)[\\/]\.state[\\/]+approvals([\\/]|$)|korunan-pid\.json|[\\/]\.beyin[\\/]+(?:ayar\.json|agentchef-kok\.txt|vault\.txt|kill-guard-on\.mjs|beyin-launcher\.ps1)$')) {
+            [Console]::Error.WriteLine('[Beyin kill guard] ENGELLENDI: insan onayi kayitlari, korunan PID listesi ve Beyin ayar/kesif dosyalari ajan araciyla yazilamaz. Ayar degisikligi kullanicinin isidir (beyin ayar ...).')
+            exit 2
+        }
+        exit 0
+    }
     if (-not $cmd) { $cmd = $ham }
 
     $ad = '(?:node|claude|codex|powershell|pwsh|cmd|conhost|windowsterminal|wt|bash|code)(?:\.exe)?'
     $red = ''
-    if ((M $cmd '(?i)\.state[\\/]+approvals|korunan-pid\.json')) {
+    # Cagri konumu: satir basi, ; | & && || sonrasi, cmd /c, start, Start-Process, -Command. Metin icinde gecmesi engellenmez.
+    $cagri = '(?im)(?:^|[;|&]\s*|&&\s*|\|\|\s*|\bcmd(?:\.exe)?\s+/[ck]\s+[''"]?|\bstart\s+(?:/\w+\s+)*|\bstart-process\s+(?:-filepath\s+)?|-command\s+[''"]?)(?:&\s*)?(?:\\?[''"])?(?:[\w:.\\/-]*[\\/])?'
+    # claude print: her zaman (Claude onay taklidi). codex exec: yalniz onay sozcugu tasiyorsa (Codex'e devir akislari calisir; 2026-10-14 peer incelemesi).
+    $altAjan = $cagri + '(?:claude(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:-p\b|--print\b)|codex(?:\.exe|\.cmd)?(?:\\?[''"])?\s+(?:exec|e)\b(?=[\s\S]*\b(?:baslat|birlestir|onayla)\b))'
+    if ((M $cmd $altAjan)) {
+        # 2026-10-14 guvenlik denetimi: ajanin actigi alt ajan oturumu (claude -p / codex exec) Beyin kancalarini
+        # tetikler ve kendi "kullanici" satiriyla onay (baslat/birlestir/onayla) uretebilirdi. Takim iscileri motorun
+        # kendisiyle acilir (beyin takim start), ajanin kabugundan degil.
+        $red = 'ajan kabugundan alt ajan oturumu (claude -p / codex exec) acilamaz: bu yol insan onayini taklit edebilir. Takim isi icin beyin takim kullan; elle gerekiyorsa kullanici kendisi calistirsin.'
+    } elseif ((M $cmd '(?i)BEYIN_KILL_GUARD|[\\/]\.beyin[\\/]+(?:ayar\.json|agentchef-kok\.txt|kill-guard-on\.mjs)')) {
+        $red = 'kill guard ve Beyin kesif/ayar dosyalari ajan komutuyla degistirilemez. Kapatmak ya da ayar degistirmek kullanicinin kararidir (kendi terminalinde: beyin ayar ...).'
+    } elseif ((M $cmd '(?i)\.state[\\/]+approvals|korunan-pid\.json')) {
         $red = 'insan onayi kayitlari (.state\approvals) ve korunan PID listesi ajan komutuyla okunamaz/degistirilemez. Onay yalniz kullanicinin kendi mesajindan (onayla TASK-x) gelir.'
     } elseif ((M $cmd "(?i)\btaskkill(?:\.exe)?\b[^|;&]*?/im\s+[`"']?$ad(?=[`"'\s]|$)") -or
               (M $cmd "(?i)\b(?:stop-process|spps|kill)\b[^|;&]*?-(?:name|processname)\s+[`"']?$ad(?=[`"'\s,]|$)") -or

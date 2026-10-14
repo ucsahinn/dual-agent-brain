@@ -639,7 +639,7 @@ $KANCALAR = @(
 )
 $CODEX_SESSIONEND_TAVAN = 3
 # Claude Code'da ayrica PowerShell araci var: Stop-Process oradan da gelebilir. Codex'te yalniz Bash.
-if ($KillGuard) { $KANCALAR += @{ Olay = 'PreToolUse'; Hook = 'pre-tool-use'; Timeout = 10; Matcher = 'Bash'; ClaudeMatcher = 'Bash|PowerShell' } }
+if ($KillGuard) { $KANCALAR += @{ Olay = 'PreToolUse'; Hook = 'pre-tool-use'; Timeout = 10; Matcher = 'Bash'; ClaudeMatcher = 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit' } }
 
 function Kanca-Timeout($K, [string]$Ajan) {
     if ($Ajan -eq 'codex' -and $K.ContainsKey('CodexTimeout')) { return [int]$K.CodexTimeout }

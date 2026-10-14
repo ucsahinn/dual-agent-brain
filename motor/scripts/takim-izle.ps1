@@ -229,7 +229,7 @@ function Handle([string]$line) {
                     elseif ($o -match '(\d+) passed, (\d+) failed') { $st.lastTest = "$($Matches[1]) pass / $($Matches[2]) fail"; $detail = "$($Matches[1])/$([int]$Matches[1]+[int]$Matches[2])"; if ($Matches[2] -eq '0') { $st.lastFail = $null } }
                     elseif ($o -match 'no leaks found') { $detail = 'temiz' }
                     elseif ($o -match 'leaks found: (\d+)') { $detail = "$($Matches[1]) sızıntı" }
-                    $sandbox = (-not $ok -and $o -match 'spawn EPERM|EPERM: operation not permitted')   # Codex Windows sandbox alt sureci engelledi: kodun hatasi degil
+                    $sandbox = (-not $ok -and $o -match 'spawn EPERM')   # Codex Windows sandbox alt sureci engelledi: kodun hatasi degil
                     $ck = CheckKey $c
                     if ($ck) {
                         $st.checkSeq++
@@ -812,7 +812,7 @@ function RenderRun([int]$tick) {
     $rr = $null; try { $rr = Read-Shared $runRec | ConvertFrom-Json } catch { }
     $L = New-Object System.Collections.Generic.List[string]
     if (-not $rr) { $L.Add((HLine $w "$cTitle$BOLD$Run$RS" '╭' '╮')); $L.Add((Row "$cFaint koşu kaydı okunamadı$RS" $w)); $L.Add((HLine $w '' '╰' '╯')); [Console]::Write("$ESC[H" + ($L -join "$RS$ESC[K`n") + "$RS$ESC[K`n$ESC[J"); return }
-    $ws = @($rr.workers); $st2 = [string]$rr.status
+    $ws = @($rr.workers | Where-Object { $null -ne $_ }); $st2 = [string]$rr.status
     $sorunluD = @('failed', 'timed_out', 'scope_violation', 'rejected_content', 'conflict', 'aborted')
     $calisan = @($ws | Where-Object { $_.status -in @('queued', 'spawning', 'running') }).Count
     $bekleyen = @($ws | Where-Object { $_.status -in @('planned', 'paused_limit') }).Count
@@ -822,7 +822,7 @@ function RenderRun([int]$tick) {
     $temiz = [Math]::Max(0, $bitenS - $sorunlu - $kismen)
     $as = KosuAsamalar $rr
     $ig = $rr.integration; $v = $rr.verification
-    $cakisma = @($(if ($ig) { $ig.conflicts } else { @() })).Count -gt 0
+    $cakisma = @($(if ($ig) { $ig.conflicts } else { @() }) | Where-Object { $null -ne $_ }).Count -gt 0   # @($null).Count = 1 (PS 5.1)
     $kontrolDustu = [bool]($ig -and -not $ig.ok -and -not $cakisma)
     $dogrulamaDustu = [bool]($v -and $v.verdict -and $v.verdict -notin @('pass', 'warn'))
     $uyari = [bool]($v -and $v.verdict -eq 'warn')
@@ -851,8 +851,8 @@ function RenderRun([int]$tick) {
     $L.Add((HLine ($w - 9) $titleLab '╭' '') + $clockLab)
 
     # ---- zamanlar ----
-    $onayS = if ($rr.approvals -and $rr.approvals.start) { ([DateTime]$rr.approvals.start.consumedAt).ToLocalTime() } else { $null }
-    $onayM = if ($rr.approvals -and $rr.approvals.merge) { ([DateTime]$rr.approvals.merge.consumedAt).ToLocalTime() } else { $null }
+    $onayS = if ($rr.approvals -and $rr.approvals.start -and $rr.approvals.start.consumedAt) { ([DateTime]$rr.approvals.start.consumedAt).ToLocalTime() } else { $null }
+    $onayM = if ($rr.approvals -and $rr.approvals.merge -and $rr.approvals.merge.consumedAt) { ([DateTime]$rr.approvals.merge.consumedAt).ToLocalTime() } else { $null }
     $t0 = $(if ($rr.startedAt) { ([DateTime]$rr.startedAt).ToLocalTime() } elseif ($onayS) { $onayS } else { $null })
     $tSon = $null; foreach ($hh in @($rr.history)) { if ($hh.at) { $tSon = ([DateTime]$hh.at).ToLocalTime() } }
     $bittiMi = ($st2 -in @('merged', 'aborted', 'failed', 'verified'))
@@ -862,10 +862,10 @@ function RenderRun([int]$tick) {
     $oz = @{}; $dosya = 0; $commits = 0; $tokIn = 0L; $tokOut = 0L; $tokC = 0L; $durs = @(); $maxDur = 0.0
     foreach ($wk in $ws) {
         $o1 = IsciOzet ([string]$wk.taskId); $oz[[string]$wk.taskId] = $o1
-        $dosya += @($wk.changedPaths).Count; if ($wk.commit) { $commits++ }
+        $dosya += @($wk.changedPaths | Where-Object { $null -ne $_ }).Count; if ($wk.commit) { $commits++ }
         $use = if ($wk.usage -and $wk.usage.input_tokens) { $wk.usage } elseif ($o1) { $o1.usage } else { $null }
         if ($use) { $tokIn += [long]$use.input_tokens; $tokOut += [long]$use.output_tokens; $tokC += [long]$use.cached_input_tokens }
-        if ($wk.startedAt) { $bitis = $(if ($wk.finishedAt) { [DateTime]$wk.finishedAt } else { (Get-Date).ToUniversalTime() }); $dsec = ($bitis - [DateTime]$wk.startedAt).TotalSeconds; if ($wk.finishedAt) { $durs += $dsec }; if ($dsec -gt $maxDur) { $maxDur = $dsec } }
+        if ($wk.startedAt) { $bitis = $(if ($wk.finishedAt) { [DateTime]$wk.finishedAt } else { Get-Date }); $dsec = ($bitis - [DateTime]$wk.startedAt).TotalSeconds; if ($wk.finishedAt) { $durs += $dsec }; if ($dsec -gt $maxDur) { $maxDur = $dsec } }
     }
     $ortIsci = if ($durs.Count) { KisaSure (($durs | Measure-Object -Average).Average) } else { '' }
 
@@ -989,7 +989,7 @@ function RenderRun([int]$tick) {
         $use = if ($wk.usage -and $wk.usage.input_tokens) { $wk.usage } elseif ($o1) { $o1.usage } else { $null }
         $jeton = if ($use -and $use.input_tokens) { "$(Fmt ([long]$use.input_tokens))/$(Fmt ([long]$use.output_tokens))" } else { '—' }
         $sha = if ($wk.commit) { " $cFaint$(([string]$wk.commit).Substring(0, [Math]::Min(7, ([string]$wk.commit).Length)))$RS" } else { '' }
-        $dosyaH = "$cText$(@($wk.changedPaths).Count)$RS$sha"
+        $dosyaH = "$cText$(@($wk.changedPaths | Where-Object { $null -ne $_ }).Count)$RS$sha"
         $sonuc = if (-not $wk.verdict -and $wk.note) { "$cWarn◐ şef$RS" } else { (VerdictTr ([string]$wk.verdict)) + $(if ($o1 -and $o1.toplam -gt 0 -and $wk.verdict -and $o1.gecen -lt $o1.toplam) { " $cFaint$($o1.gecen)/$($o1.toplam)$RS" } else { '' }) }
         $L.Add((Row ("  $cText$(Pad ([string]$wk.taskId) 9)$RS $cMuted$(Pad (RolTr ([string]$wk.role)) $rolW)$RS $dc$(Pad ($dm + (IsciDurumTr $d)) 14)$RS $(Pad $sureHucre (11 + $(if ($barG) { $barG + 1 } else { 0 }))) $cMuted$(Pad $jeton 11)$RS $(Pad $dosyaH 13) $(Pad $sonuc 14)" + $(if (-not $dar) { "$sonCol$son$RS" } else { '' })) $w))
         if ($wk.failure) { $L.Add((Row "            $cErr↳ $(CutWord (MotorHataTr ([string]$wk.failure)) ($inner - 16))$RS" $w)) }
@@ -1004,7 +1004,7 @@ function RenderRun([int]$tick) {
     # ---- butunlestirme (tek satir ozet; ayrinti [d]) ----
     $L.Add((HLine $w (Sec 'BÜTÜNLEŞTİRME') '├' '┤'))
     if ($ig) {
-        $L.Add((Row "  $(if ($ig.ok) { "$cOk✔ temiz$RS" } else { "$cErr✖ sorunlu$RS" }) $cFrame·$RS $cText$(@($ig.merged).Count)$RS $cMuted işçi dalı$RS $cFaint$($rr.integrationBranch)$RS $cFrame·$RS $(if ($cakisma) { "$cErr çakışma: $(@($ig.conflicts) -join ', ')$RS" } else { "$cMuted çakışma yok$RS" })" $w))
+        $L.Add((Row "  $(if ($ig.ok) { "$cOk✔ temiz$RS" } else { "$cErr✖ sorunlu$RS" }) $cFrame·$RS $cText$(@($ig.merged | Where-Object { $null -ne $_ }).Count)$RS $cMuted işçi dalı$RS $cFaint$($rr.integrationBranch)$RS $cFrame·$RS $(if ($cakisma) { "$cErr çakışma: $(@($ig.conflicts) -join ', ')$RS" } else { "$cMuted çakışma yok$RS" })" $w))
         $dusen = @($ig.checks | Where-Object { $_.status -ne 0 })
         if (-not $dusen.Count -and -not $script:detay) { $L.Add((Row "  $cOk✔$RS $cText$ckOk/$ckN kontrol geçti$RS $cMuted· $turler$RS   $cFaint[d] ayrıntı$RS" $w)) }
         else {

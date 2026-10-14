@@ -5306,6 +5306,7 @@ function Get-BeyinOnayBekleyen {
 # yazma kapsami bu repoya dusuyorsa) ve turetilmis pano.md. Node BASLATILMAZ.
 # ============================================================================
 function Get-BeyinAgentChefKok {
+    param([switch]$Hizli)
     # AGENTCHEF YOLU. Sira: (1) ayar BEYIN_AGENTCHEF_KOK, (2) ortam AGENTCHEF_ROOT, (3) onbellek
     # (~\.beyin\agentchef-kok.txt, gecerliyse), (4) tarama: ev klasoru, Belgeler, Masaustu ve bilinen kod
     # klasorlerinin (source\repos, src, dev, code, kod, projects, repos, git, github) BIR seviye altinda
@@ -5325,18 +5326,38 @@ function Get-BeyinAgentChefKok {
     $ortam = [string]$env:AGENTCHEF_ROOT
     if (& $gecerli $ortam) { $r.Yol = $ortam; $r.Kaynak = 'ortam'; $r.Surum = (& $surum $ortam); return $r }
     $onbellek = Join-Path $env:USERPROFILE '.beyin\agentchef-kok.txt'
-    try { if (Test-Path -LiteralPath $onbellek) { $ob = ([string](Get-Content -LiteralPath $onbellek -Raw -Encoding UTF8)).Trim(); if (& $gecerli $ob) { $r.Yol = $ob; $r.Kaynak = 'onbellek'; $r.Surum = (& $surum $ob); return $r } } } catch { }
+    # Onbellek 24 saat gecerli (sonra yeniden taranir: yeni klonlanan daha yuksek surum bayat kopyaya takilmasin).
+    # Bos satir = "bulunamadi" (negatif onbellek): yalniz -Hizli cagri (her oturum acilisi) icin 10 dk gecerli;
+    # pano/takim/doktor gibi acik komutlar her zaman tarar.
+    try {
+        if (Test-Path -LiteralPath $onbellek) {
+            $obYas = ((Get-Date) - (Get-Item -LiteralPath $onbellek).LastWriteTime).TotalMinutes
+            $ob = ([string](Get-Content -LiteralPath $onbellek -Raw -Encoding UTF8)).Trim()
+            if ($ob -and $obYas -lt 1440 -and (& $gecerli $ob)) { $r.Yol = $ob; $r.Kaynak = 'onbellek'; $r.Surum = (& $surum $ob); return $r }
+            if (-not $ob -and $Hizli -and $obYas -lt 10) { return $r }
+        }
+    } catch { }
     $kokler = New-Object System.Collections.Generic.List[string]
     foreach ($k in @($env:USERPROFILE, ([Environment]::GetFolderPath('MyDocuments')), ([Environment]::GetFolderPath('Desktop')))) { if ($k -and -not $kokler.Contains($k)) { $kokler.Add($k) } }
     foreach ($alt in @('source\repos', 'src', 'dev', 'code', 'kod', 'projects', 'Projects', 'repos', 'git', 'github', 'GitHub')) { $k = Join-Path $env:USERPROFILE $alt; if ((Test-Path -LiteralPath $k -PathType Container) -and -not $kokler.Contains($k)) { $kokler.Add($k) } }
-    $enIyi = $null; $enIyiV = $null
+    $enIyi = $null; $enIyiV = $null; $enIyiOn = $false
     foreach ($kok in $kokler) {
         foreach ($a in @(Get-ChildItem -LiteralPath $kok -Directory -ErrorAction SilentlyContinue)) {
             if (-not (& $gecerli $a.FullName)) { continue }
             if ($a.Name -notlike 'agentchef*' -and (& $ad $a.FullName) -ne 'agentchef') { continue }
+            # GUVEN (2026-10-14 guvenlik denetimi): taranan klasordeki node betikleri kullanici yetkisiyle calisir.
+            # Git checkout'u ise origin adresi '/agentchef' deposunu gostermeli (yedek/kopya klasorleri ve ilgisiz
+            # depolar elenir). Kesin sabitleme icin: beyin ayar BEYIN_AGENTCHEF_KOK <yol>.
+            $gitCfg = Join-Path $a.FullName '.git\config'
+            if (Test-Path -LiteralPath $gitCfg -PathType Leaf) {
+                $origin = ''; try { $origin = [string](Select-String -LiteralPath $gitCfg -Pattern '^\s*url\s*=\s*(.+)$' | Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value }) } catch { }
+                if ($origin -and $origin -notmatch '[/:]agentchef(\.git)?\s*$') { continue }
+            }
             $s = & $surum $a.FullName
             $v = $null; try { $v = [version](($s -split '[-+]')[0]) } catch { }
-            if (-not $enIyi -or ($v -and (-not $enIyiV -or $v -gt $enIyiV))) { $enIyi = $a.FullName; $enIyiV = $v; $r.Surum = $s }
+            $onSurum = [bool]($s -match '-')
+            $dahaIyi = (-not $enIyi) -or ($v -and (-not $enIyiV -or $v -gt $enIyiV)) -or ($v -and $enIyiV -and $v -eq $enIyiV -and $enIyiOn -and -not $onSurum)
+            if ($dahaIyi) { $enIyi = $a.FullName; $enIyiV = $v; $enIyiOn = $onSurum; $r.Surum = $s }
         }
     }
     if ($enIyi) {
@@ -5344,6 +5365,8 @@ function Get-BeyinAgentChefKok {
         try { $d = Split-Path $onbellek -Parent; if (Test-Path -LiteralPath $d) { [IO.File]::WriteAllText($onbellek, $enIyi, (New-Object Text.UTF8Encoding $false)) } } catch { }
         return $r
     }
+    # negatif onbellek (yalniz -Hizli cagrilar kullanir)
+    try { $d = Split-Path $onbellek -Parent; if (Test-Path -LiteralPath $d) { [IO.File]::WriteAllText($onbellek, '', (New-Object Text.UTF8Encoding $false)) } } catch { }
     return $r
 }
 

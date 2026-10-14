@@ -44,7 +44,7 @@ $args2 = @($Arg | Where-Object { $null -ne $_ })
 
 if ($args2.Count -eq 0) {
     $d = Get-BeyinPanoDurum -Paths $p
-    "PANO  state: $($p.Board)  |  AgentChef: $board $(if (Test-Path -LiteralPath $board) { "(surum $($acKok.Surum), kaynak: $($acKok.Kaynak))" } else { '(YOK - BEYIN_AGENTCHEF_KOK ayarini kontrol et)' })"
+    "PANO  state: $($p.Board)  |  AgentChef: $board $(if (Test-Path -LiteralPath $board) { "(surum $($acKok.Surum), kaynak: $($acKok.Kaynak))" } else { "(YOK) $(Get-BeyinAgentChefYokMesaji -Kok $acKok -Gereken 'AgentChef 1.3.3+')" })"
     "  acik kart: $($d.Acik) (todo $($d.Todo), in_progress $($d.Surecte), review $($d.Inceleme)) - bekleyen (backlog) $($d.Bekleyen) - toplam $($d.Toplam)"
     foreach ($k in $d.Kartlar) { "  - $($k.id) [$($k.status)] $($k.title)$(if ($k.owner) { " - $($k.owner.agent)" })$(if ($k.writeScope) { " - yazar: $($k.writeScope.repo): $(@($k.writeScope.paths) -join ', ')" })$(if ($k.leaseUntil) { " - kira $($k.leaseUntil)" })" }
     ''

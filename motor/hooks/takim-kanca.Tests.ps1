@@ -42,7 +42,7 @@ $isciEnv = @{ AGENTCHEF_TEAM_RUN = 'R-ISCI'; AGENTCHEF_TEAM_TASK = 'TASK-41'; AG
 
 Describe 'Takim (2026-10-12): insan onayi fiilleri (prompt-counter)' {
     $tv = New-TakimVault; $tp = Get-BeyinPaths -Vault $tv
-    Write-KosuFixture $tp 'R-T1'; Write-KosuFixture $tp 'R-T2'; Write-KosuFixture $tp 'R-T3'; Write-KosuFixture $tp 'R-T4' 'verified'
+    Write-KosuFixture $tp 'R-T1'; Write-KosuFixture $tp 'R-T2'; Write-KosuFixture $tp 'R-T3'; Write-KosuFixture $tp 'R-T4' 'verified'; Write-KosuFixture $tp 'R-T5'
     $sid = 'takim-test-onay-1'
     $c1 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = 'baslat R-T1' }
     $c2 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = 'birlestir R-YOK' }
@@ -52,6 +52,8 @@ Describe 'Takim (2026-10-12): insan onayi fiilleri (prompt-counter)' {
     $c5 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = 'takim birlestir R-T4.' }
     # 2026-10-14: erken onay (planned kosuya birlestir) yazilmaz; kullaniciya nedeni soylenir. Kimlik kayittan alinir.
     $c6 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = 'birlestir R-T1' }
+    # 2026-10-14: Windows'tan yapistirilan satir CRLF ile biter; .NET (?m)$ yalniz \n oncesinde eslesir
+    $c7 = Invoke-TakimKanca $tv 'prompt-counter.ps1' @{ session_id = $sid; cwd = $tv; prompt = "baslat R-T5`r`nbaska bir satir" }
     $mk = @(Read-BeyinMakbuz -Paths $tp -Gun 1 | Where-Object { $_.script -eq 'takim' })
     It 'gercek kullanici satiri "baslat <run>" R-T1.baslat.json yazar ve sonraki komutu soyler' {
         (Test-Path -LiteralPath (Join-Path $tp.ScrState 'approvals\R-T1.baslat.json')) | Should Be $true
@@ -76,6 +78,10 @@ Describe 'Takim (2026-10-12): insan onayi fiilleri (prompt-counter)' {
         $ham = Get-Content -LiteralPath $t.Yol -Raw
         $ham | Should Match '^\{"v":1,"taskId":"TASK-9","nonce":"[0-9a-f]{12}","approvedAt":"[^"]+","kanal":"sohbet","ajan":"","session":"","kullanildi":"","kullanan":""\}\s*$'
         (Get-BeyinOnay -Paths $tp -TaskId 'TASK-9' -Tur 'baslat') | Should Be $null
+    }
+    It 'CRLF ile biten onay satiri da kaydedilir' {
+        (Test-Path -LiteralPath (Join-Path $tp.ScrState 'approvals\R-T5.baslat.json')) | Should Be $true
+        $c7 | Should Match 'Insan onayi kaydedildi: baslat R-T5'
     }
     It 'birlestir yalniz dogrulanmis (verified) kosu icin yazilir; erken satir reddedilir ve nedeni soylenir' {
         (Test-Path -LiteralPath (Join-Path $tp.ScrState 'approvals\R-T1.birlestir.json')) | Should Be $false

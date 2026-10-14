@@ -252,7 +252,7 @@ try {
         # ara dal kullanicinin daline girsin. Yalniz VAR OLAN bir kosu icin yazilir: siradan bir
         # "baslat ..." cumlesi (kosu yoksa) onay uretmez, makbuza ONAY_ATLANDI duser.
         # runId alnum ile BITER: 'baslat R-1.' satirindaki nokta kimlige yapismasin (olculdu: 'R-T1.' -> kosu yok).
-        $takimM = [regex]::Matches($prompt, '(?im)^[ \t]*(?:takim[ \t]+)?(baslat|birlestir)[ \t]+([A-Za-z0-9](?:[A-Za-z0-9._-]{1,62}[A-Za-z0-9])?)[ \t]*[.!]?[ \t]*$')
+        $takimM = [regex]::Matches($prompt, '(?im)^[ \t]*(?:takim[ \t]+)?(baslat|birlestir)[ \t]+([A-Za-z0-9](?:[A-Za-z0-9._-]{1,62}[A-Za-z0-9])?)[ \t]*[.!]?[ \t]*\r?$')
         $takimOnay = New-Object System.Collections.Generic.List[string]
         foreach ($tmc in $takimM) {
             $tkTur = $tmc.Groups[1].Value.ToLowerInvariant(); $tkRun = $tmc.Groups[2].Value
@@ -265,7 +265,19 @@ try {
             # 2026-10-14: motor 'baslat'i yalniz planned, 'birlestir'i yalniz verified kosuda kabul eder (approvedAt >
             # plannedAt / verification.at). Erken yazilan onay motorda exit 3 veriyor ama Beyin'in kapisi gecerli
             # sayiyordu: kullanici "onay verdim" sanip takiliyordu. Kimlik kayittan alinir (motor buyuk/kucuk harfe duyarli).
-            $tkRec = $null; try { $tkRec = Get-Content -LiteralPath $tkDosya -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+            $tkRec = $null
+            for ($tkDeneme = 0; $tkDeneme -lt 5 -and -not $tkRec; $tkDeneme++) {
+                try {
+                    $tkFs = New-Object IO.FileStream($tkDosya, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+                    try { $tkRec = (New-Object IO.StreamReader($tkFs, [Text.Encoding]::UTF8, $true)).ReadToEnd() | ConvertFrom-Json } finally { $tkFs.Dispose() }
+                } catch { Start-Sleep -Milliseconds 60 }
+            }
+            if (-not $tkRec) {
+                # 2026-10-14 inceleme: okunamayan kayitta onay YAZILIYORDU (fail-open); kapinin anlami kalmiyordu.
+                Write-BeyinMakbuz -Paths $p -Script 'takim' -Outcome 'ONAY_ATLANDI' -Agent (Get-BeyinAgent) -Reason 'sohbet' -Note "$tkTur $tkRun kayit okunamadi"
+                $parcalar.Add("[Hafiza] '$tkTur $tkRun' kaydedilmedi: kosu kaydi su an okunamadi. Satiri birkac saniye sonra tekrar yaz.")
+                continue
+            }
             if ($tkRec -and $tkRec.runId) { $tkRun = [string]$tkRec.runId }
             $tkBekl = if ($tkTur -eq 'baslat') { 'planned' } else { 'verified' }
             if ($tkRec -and [string]$tkRec.status -ne $tkBekl) {
@@ -277,14 +289,14 @@ try {
             if ($tkKayit.Ok) {
                 $takimOnay.Add("$tkTur $tkRun")
                 Write-BeyinMakbuz -Paths $p -Script 'takim' -Outcome 'ONAY_KAYDEDILDI' -Agent (Get-BeyinAgent) `
-                    -Key (Get-BeyinSessionKey -SessionId $hook.session_id) -Reason 'sohbet' -Note "$tkTur $tkRun"
+                    -Key (Get-BeyinSessionKey -SessionId $hook.session_id) -Reason 'sohbet' -Note "$tkTur $tkRun (ent=$($env:CLAUDE_CODE_ENTRYPOINT) child=$($env:CLAUDE_CODE_CHILD_SESSION) att=$($env:CLAUDE_CODE_SESSION_ATTENDED))"
             }
         }
         if ($takimOnay.Count -gt 0) {
             $tkSonraki = @($takimOnay | ForEach-Object { $tkp = $_ -split ' '; "beyin takim $(if ($tkp[0] -eq 'baslat') { 'start' } else { 'merge' }) --run $($tkp[1])" }) -join '; '
             $parcalar.Add("[Hafiza] Insan onayi kaydedildi: $($takimOnay -join ', ') (7 gun gecerli, tek kullanimlik). Simdi: $tkSonraki")
         }
-        $onayM = [regex]::Matches($prompt, '(?im)^[ \t]*onayla[ \t]+(TASK-\d+(?:[ \t]*,?[ \t]*TASK-\d+)*)[ \t]*[.!]?[ \t]*$')
+        $onayM = [regex]::Matches($prompt, '(?im)^[ \t]*onayla[ \t]+(TASK-\d+(?:[ \t]*,?[ \t]*TASK-\d+)*)[ \t]*[.!]?[ \t]*\r?$')
         $onaylanan = New-Object System.Collections.Generic.List[string]
         foreach ($om in $onayM) {
             foreach ($tm in [regex]::Matches($om.Groups[1].Value, '(?i)TASK-\d+')) {

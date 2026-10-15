@@ -92,11 +92,15 @@ function Read-MerkezSonSatirlar([string]$Yol, [int]$Bayt = 32768) {
     } finally { $fs.Dispose() }
 }
 
+$script:MerkezProtOnb = @{}
 function Protect-MerkezSatir([string]$Metin, [int]$Uzunluk = 64) {
     # Ekrana giden HER ajan metni buradan gecer: tek satir, kontrol/ANSI/OSC dizileri silinir (sahte cerceve ya da
     # pencere basligi cizilemez), sirlar maskelenir, uzunluk kesilir. Balon modulu yukluyse onun daha genis maske
     # kurallari da uygulanir (ad cakismasi olmasin diye bu islev ayri adlidir).
     if (-not $Metin) { return '' }
+    # Saf islev: ayni (metin, uzunluk) icin sonuc onbellekten (kare basina onlarca cagri, her biri ~1 ms regex).
+    $ok = "$Uzunluk|$Metin"; if ($script:MerkezProtOnb.ContainsKey($ok)) { return $script:MerkezProtOnb[$ok] }
+    if ($script:MerkezProtOnb.Count -gt 4000) { $script:MerkezProtOnb.Clear() }
     $m = [string]$Metin
     $m = $m -replace '\x1b\][^\x07\x1b]*(\x07|\x1b\\)?', '' -replace '\x1b\[[0-9;?]*[A-Za-z]', '' -replace '\x1b.', ''
     $m = ($m -replace '[\r\n\t]+', ' ' -replace '[\x00-\x1f\x7f]', '').Trim()
@@ -112,6 +116,7 @@ function Protect-MerkezSatir([string]$Metin, [int]$Uzunluk = 64) {
     if (-not $script:MerkezProtVar) { $script:MerkezProtVar = [bool](Get-Command Protect-MerkezMetin -ErrorAction SilentlyContinue) }
     if ($script:MerkezProtVar) { try { $m = [string](Protect-MerkezMetin $m) } catch { } }
     if ($m.Length -gt $Uzunluk) { $m = $m.Substring(0, [Math]::Max(1, $Uzunluk - 1)) + '…' }
+    if ($script:MerkezProtVar) { $script:MerkezProtOnb[$ok] = $m }   # balon modulu yuklenmeden onbelleklenmez (maske kurallari eksik kalmasin)
     return $m
 }
 

@@ -82,7 +82,7 @@ function Cut([string]$s, [int]$w) {
     }
     return $out.ToString() + "…$RS"
 }
-function Pad([string]$s, [int]$w) { $s = Cut $s $w; return $s + (' ' * [Math]::Max(0, $w - (VisLen $s))) }
+function Pad([string]$s, [int]$w) { $v = VisLen $s; if ($v -le $w) { return $s + (' ' * ($w - $v)) }; $s = Cut $s $w; return $s + (' ' * [Math]::Max(0, $w - (VisLen $s))) }   # tek olcum (sigan metinde Cut yok)
 function PadL([string]$s, [int]$w) { $s = Cut $s $w; return (' ' * [Math]::Max(0, $w - (VisLen $s))) + $s }
 function Kisa([double]$sn) {
     if ($sn -lt 0) { return '—' }; if ($sn -lt 60) { return "$([int]$sn) sn" }; if ($sn -lt 3600) { return "$([int][Math]::Floor($sn / 60)) dk" }
@@ -137,8 +137,8 @@ function Tarama([int]$gen, [int]$faz, [int[]]$c) {
 }
 function Spark([double[]]$v, [int]$gen, [int[]]$c1, [int[]]$c2, [double]$maks = -1) {
     # Mini grafik: son $gen deger, ▁..█ yukseklik; renk yukseklige gore c1 -> c2. Sifir/eksik deger koyu taban cizgisi.
-    $bl = @('▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'); $v = @($v | Select-Object -Last $gen)
-    $m = $(if ($maks -gt 0) { $maks } else { [double](($v | Measure-Object -Maximum).Maximum) }); $sb = "$cIz$('▁' * [Math]::Max(0, $gen - $v.Count))"
+    $bl = @('▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'); if ($v.Count -gt $gen) { $v = $v[($v.Count - $gen)..($v.Count - 1)] }
+    $m = $maks; if ($m -le 0) { $m = 0.0; foreach ($x in $v) { if ($x -gt $m) { $m = $x } } }; $sb = "$cIz$('▁' * [Math]::Max(0, $gen - $v.Count))"   # pipeline yok
     foreach ($x in $v) {
         if ($m -le 0 -or $x -le 0) { $sb += "$cIz▁"; continue }
         $t = [Math]::Min(1.0, $x / $m); $k = [int][Math]::Round($t * 7)

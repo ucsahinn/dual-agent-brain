@@ -21,6 +21,11 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.4.7 - Merkez: daha akici cizim
+
+- Bir kare ~180 ms yerine ~100 ms: ajan metni temizligi (saf islev, ~10 regex) sonucu
+  onbellekten gelir (18 kat), Pad sigan metni bir kez olcer, mini grafik pipeline kullanmaz.
+
 ## 1.4.6 - Merkez: egilim grafikleri ve bir bakista okunur panel
 
 - **Egilim grafikleri (sparkline):** baslikta son 2 saatin sistem etkinligi (10 dk'lik

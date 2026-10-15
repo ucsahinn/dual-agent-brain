@@ -93,7 +93,7 @@ function Cards([object[]]$cards, [int]$inner) {
     # stat kartlari (koşu panosu ile ayni): genis ekranda yan yana, darda 3'lu / 2'li satirlara boler
     $out = New-Object System.Collections.Generic.List[string]
     $n = $cards.Count; if ($n -eq 0) { return $out }
-    $perRow = 1; foreach ($cand in @($n, [int][Math]::Ceiling($n / 2.0), [int][Math]::Ceiling($n / 3.0), 2, 1)) { if ($cand -lt 1 -or $cand -gt $n) { continue }; if ([int][Math]::Floor(($inner - ($cand - 1)) / $cand) -ge 30) { $perRow = $cand; break } }
+    $perRow = 1; foreach ($cand in @($n, [int][Math]::Ceiling($n / 2.0), [int][Math]::Ceiling($n / 3.0), 2, 1)) { if ($cand -lt 1 -or $cand -gt $n) { continue }; if ([int][Math]::Floor(($inner - ($cand - 1)) / $cand) -ge 36) { $perRow = $cand; break } }
     for ($s0 = 0; $s0 -lt $n; $s0 += $perRow) {
         $grp = @($cards[$s0..([Math]::Min($n, $s0 + $perRow) - 1)])
         $cw = [int][Math]::Floor(($inner - ($grp.Count - 1)) / $grp.Count)
@@ -210,6 +210,7 @@ function KanatSatirlari([string]$kanat, $ajanlar, [int]$ic) {
 
 function KosuRozet([string]$r) {
     switch ($r) {
+        'raporlar'      { return "$bgDone$BOLD ✔ RAPORLAR ALINDI $RS" }
         'iptal'         { return "$bgBad$BOLD ✖ İPTAL $RS" }
         'basarisiz'     { return "$bgBad$BOLD ✖ BAŞARISIZ $RS" }
         'anadalda'      { return "$bgRun$BOLD ✔ ANA DALDA $RS" }
@@ -414,7 +415,7 @@ function Ciz {
     }
     $L.Add($alt)
     $sb = New-Object Text.StringBuilder; [void]$sb.Append("$ESC[H")
-    foreach ($ln in $L) { [void]$sb.Append($ln).Append("$RS$ESC[K`n") }
+    foreach ($ln in $L) { [void]$sb.Append($ln).Append($RS); if ((VisLen $ln) -lt $w) { [void]$sb.Append("$ESC[K") }; [void]$sb.Append("`n") }   # tam genislikte ESC[K sag kenari siler
     [void]$sb.Append("$ESC[J")
     $kare = $sb.ToString(); if ($kare -ne $script:lastFrame) { $script:lastFrame = $kare; [Console]::Write($kare) }
 }

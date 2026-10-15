@@ -221,8 +221,10 @@ function Get-MerkezKosuOzet($Kosu, [bool]$Sahipsiz = $false, [datetime]$Simdi = 
     $cakisma = $conflicts.Count -gt 0
     $kontrolDustu = [bool]($ig -and -not $ig.ok -and -not $cakisma)
     $dogrulamaDustu = [bool]($v -and $v.verdict -and $v.verdict -notin @('pass','warn'))
-    $kirik = [bool]($cakisma -or $kontrolDustu -or $dogrulamaDustu -or $st -in @('aborted','failed'))
-    $rozet = if ($st -eq 'aborted') { 'iptal' } elseif ($st -eq 'failed') { 'basarisiz' } elseif ($st -eq 'merged') { 'anadalda' }
+    $kirik = [bool]($cakisma -or $kontrolDustu -or $dogrulamaDustu -or $st -eq 'failed' -or ($st -eq 'aborted' -and -not ($ws.Count -gt 0 -and @($ws | Where-Object { $_.status -ne 'collected' }).Count -eq 0)))
+    # Salt okunur inceleme kosusu: isciler raporlarini teslim etti (collected) ve kosu kapatildi -> iptal degil.
+    $raporlu = [bool]($st -eq 'aborted' -and $ws.Count -gt 0 -and @($ws | Where-Object { $_.status -ne 'collected' }).Count -eq 0)
+    $rozet = if ($raporlu) { 'raporlar' } elseif ($st -eq 'aborted') { 'iptal' } elseif ($st -eq 'failed') { 'basarisiz' } elseif ($st -eq 'merged') { 'anadalda' }
         elseif ($Sahipsiz) { 'sahipsiz' } elseif ($calisan -gt 0) { 'calisiyor' } elseif ($cakisma) { 'cakisma' }
         elseif ($kontrolDustu) { 'kontrol' } elseif ($dogrulamaDustu) { 'dogrulanamadi' }
         elseif ($st -eq 'verified' -and $v.verdict -eq 'warn') { 'uyarili' } elseif ($st -eq 'verified') { 'dogrulandi' }

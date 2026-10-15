@@ -21,6 +21,15 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.4.2 - Merkez: sag kenar, kart genisligi, inceleme kosusu rozeti
+
+- **Sag kenar artik kaybolmuyor.** Satir tam pencere genisligindeyken satir sonu silme komutu son sutunu (cercevenin
+  sag kenarini) siliyordu (Windows Terminal'in kaydirma-bekliyor durumu). Tam genislikteki satira silme komutu yazilmaz.
+- **Kartlar en az 36 hucre.** Cok genis ekranda alti kart tek satira sikisip metni kesiyordu; artik uclu satirlara bolunur.
+- **Inceleme kosusu rozeti.** Raporlarini teslim etmis salt okunur bir koşu kapatildiginda IPTAL yerine
+  'RAPORLAR ALINDI' rozetiyle gorunur.
+- **Web balonu.** Codex web araci yalniz gercek bir arama sorgusu varsa sorguyu gosterir (ref_id gibi degerler gizlenir).
+
 ## 1.4.1 - Merkez: kosu panosu gorunumu
 
 - **Beyin merkez yenilendi.** Dis cerceve, saglik rozeti, ozet kartlari ve SIRADA satiri sistem durumunu hizla okunur kilarken; ONAY BEKLIYOR bandi kullanici kararlarini baglamiyla one cikarir.

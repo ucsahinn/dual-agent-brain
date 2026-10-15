@@ -173,7 +173,7 @@ function Format-MerkezCodexArac([string]$Ad, [string]$Girdi) {
         switch -Regex ($arac) {
             '^(exec_command|shell|shell_command|local_shell)$' { return "▸ Shell: $(Get-MerkezIlkSatir $deger)" }
             '^apply_patch$' { $d = Get-MerkezPatchDosya $deger; if ($d) { return "▸ Edit: $d" }; return '▸ Edit' }
-            '^web' { return "▸ Web: $(Get-MerkezIlkSatir $deger)" }
+            '^web' { if ($m.Groups[2].Value -in @('query', 'q', 'search_query')) { return "▸ Web: $(Get-MerkezIlkSatir $deger)" }; return '▸ Web' }
             default { return "▸ ${arac}: $(Get-MerkezIlkSatir $deger)" }
         }
     }

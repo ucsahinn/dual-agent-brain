@@ -188,6 +188,11 @@ Describe 'merkez ekran metni temizligi (2026-10-15 guvenlik denetimi TASK-075)' 
 
 Describe 'merkez kod incelemesi regresyonlari (2026-10-15)' {
     BeforeAll { . (Join-Path $PSScriptRoot 'merkez-veri.ps1') }
+    It 'raporlarini teslim etmis salt okunur inceleme kosusu iptal degil, raporlar rozeti alir' {
+        $o = Get-MerkezKosuOzet @{ status='aborted'; workers=@(@{status='collected'},@{status='collected'}) }
+        $o.Rozet | Should Be 'raporlar'; $o.Kirik | Should Be $false
+        (Get-MerkezKosuOzet @{ status='aborted'; workers=@(@{status='aborted'}) }).Rozet | Should Be 'iptal'
+    }
     It 'kontrol sayimi gercek semayi okur; suren kosunun suresi simdiye kadar akar, biten kosu son olayda durur' {
         $o = Get-MerkezKosuOzet @{ status='integrated'; integration=@{ ok=$false; checks=@(@{command='a';status=0},@{command='b';status=1}) }; workers=@() }
         $o.Kontrol.Gecen | Should Be 1; $o.Kontrol.Toplam | Should Be 2

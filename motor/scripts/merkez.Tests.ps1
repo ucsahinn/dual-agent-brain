@@ -218,3 +218,84 @@ Describe 'merkez kod incelemesi regresyonlari (2026-10-15)' {
         } finally { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
     }
 }
+
+Describe 'merkez premium gorunum (2026-10-15)' {
+    BeforeAll { . (Join-Path $PSScriptRoot 'merkez-veri.ps1') }
+    It 'inceleme kosusu topla adiminda biter, sonraki adimlar atlanir; siradaki satir raporlari soyler' {
+        $run = @{ status='aborted'; runId='R-X'; workers=@(@{status='collected'},@{status='collected'}) }
+        $o = Get-MerkezKosuOzet $run
+        $o.Atlanan | Should Be $true; $o.Guncel | Should Be 3; $o.Adimlar[2] | Should Be $true
+        (Get-MerkezKosuSonraki $run $false).Metin | Should Match 'raporlar teslim'
+        (Get-MerkezKosuSonraki @{ status='aborted'; runId='R-Y'; workers=@(@{status='aborted'}) } $false).Metin | Should Be 'iptal edildi'
+        (Get-MerkezKosuOzet @{ status='aborted'; workers=@(@{status='aborted'}) }).Atlanan | Should Be $false
+    }
+    It 'karar fail olan isci sorunlu (kirmizi), partial/warn kismen (sari) sayilir' {
+        $o = Get-MerkezKosuOzet @{ status='integrated'; workers=@(@{status='integrated';verdict='fail'},@{status='integrated';verdict='warn'},@{status='integrated';verdict='pass'}) }
+        $o.Sorunlu | Should Be 1; $o.Kismen | Should Be 1; $o.Temiz | Should Be 1
+    }
+    It 'sefin kapsadigi isci sayilir (integrate --covers)' {
+        (Get-MerkezKosuOzet @{ status='merged'; integration=@{ ok=$true; coveredByConductor=@('TASK-1') }; workers=@(@{status='failed'},@{status='integrated';verdict='pass'}) }).Kapsanan | Should Be 1
+        (Get-MerkezKosuOzet @{ status='merged'; integration=@{ ok=$true }; workers=@() }).Kapsanan | Should Be 0
+    }
+    It 'yolunda gorunumu bos degil: calisan ajan ve uyari sayisi soylenir' {
+        $s = Get-MerkezSirada @{ Onaylar=@(); Teshis=@(@{Seviye='warn';Metin='x'}); Kosular=@(); Ajanlar=@(@{Durum='calisiyor'},@{Durum='bosta'}) }
+        $s.Metin | Should Be 'sorun yok · 1 uyarı'; $s.Renk | Should Be 'warn'; $s.Neden | Should Match '1 ajan çalışıyor'
+        $s2 = Get-MerkezSirada @{ Onaylar=@(); Teshis=@(@{Seviye='warn';Metin='20 oturum sessiz · beyin bekci'}); Kosular=@(); Ajanlar=@() }
+        $s2.Neden | Should Match '^ilk adım: beyin bekci'
+        (Get-MerkezSirada @{ Onaylar=@(); Teshis=@(); Kosular=@(); Ajanlar=@(@{Durum='calisiyor'}) }).Metin | Should Be 'her şey yolunda'
+    }
+    It 'eski aktarim teshisi en eskisini ve sayiyi yazar' {
+        $simdi = Get-Date
+        $ak = @(@{ id='YENI'; ts=$simdi.AddDays(-4).ToString('o'); toProject='p1' }, @{ id='ESKI'; ts=$simdi.AddDays(-9).ToString('o'); toProject='p2' }, @{ id='TAZE'; ts=$simdi.AddHours(-2).ToString('o') })
+        $t = Get-MerkezEskiAktarim $ak $simdi
+        $t.Metin | Should Match '^2 aktarım'; $t.Metin | Should Match 'ESKI \(p2\)'
+        Get-MerkezEskiAktarim @($ak[2]) $simdi | Should Be $null
+    }
+    It 'gercek vault cizimi her genislikte ve iki gorunumde satiri tam pencere genisliginde kapatir' {
+        $vault = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $esc = [string][char]27
+        foreach ($g in @(@{ W = 90; A = $false }, @{ W = 120; A = $true }, @{ W = 170; A = $true }, @{ W = 210; A = $false })) {
+            $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+            try {
+                $arg = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'merkez.ps1'), '-Vault', $vault, '-Tek', '-Genislik', $g.W); if ($g.A) { $arg += '-Aktifler' }
+                $out = & powershell.exe @arg 2>&1 | Out-String
+            } finally { [Console]::OutputEncoding = $eskiKod }
+            $LASTEXITCODE | Should Be 0
+            $plain = [regex]::Replace($out, ($esc + '\[[0-9;?]*[A-Za-z]'), '')
+            $satirlar = @($plain -split "`r?`n" | Where-Object { $_.Trim() })
+            $satirlar.Count | Should BeGreaterThan 10
+            foreach ($l in $satirlar) { "$($g.W):$($l.Length)" | Should Be "$($g.W):$($g.W)" }   # cerceve sag kenari her satirda ayni sutunda
+            $satirlar[0] | Should Match '^╭'; $satirlar[$satirlar.Count - 1] | Should Match '╯$'
+        }
+    }
+}
+
+Describe 'merkez sabit veriyle kenar durumlari (onay, hatali kosu, engelli kart)' {
+    It 'onay bekleyen ve kontrolu dusmus kosu her genislikte tam cerceveyle cizilir' {
+        $root = Join-Path ([IO.Path]::GetTempPath()) ('merkez-fx-' + [guid]::NewGuid().ToString('N'))
+        $scripts = Join-Path $root 'motor\scripts'; $hooks = Join-Path $root 'motor\hooks'; $runs = Join-Path $scripts '.state\team-runs'
+        New-Item -ItemType Directory -Force -Path $scripts, $hooks, $runs | Out-Null
+        try {
+            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts
+            Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
+            $simdi = (Get-Date).ToUniversalTime()
+            @{ runId = 'R-ONAY'; repoName = 'demo'; status = 'planned'; workers = @(@{ taskId = 'TASK-1'; status = 'planned'; role = 'docs_author' }) } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $runs 'R-ONAY.json')
+            @{ runId = 'R-HATA'; repoName = 'demo'; status = 'integrated'; startedAt = $simdi.AddMinutes(-20).ToString('o'); integration = @{ ok = $false; checks = @(@{ command = 'test'; status = 1 }) }
+               workers = @(@{ taskId = 'TASK-2'; status = 'integrated'; verdict = 'fail'; role = 'qa_lead' }, @{ taskId = 'TASK-3'; status = 'integrated'; verdict = 'pass'; role = 'docs_author' }) } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $runs 'R-HATA.json')
+            @{ tasks = @(@{ id = 'TASK-9'; status = 'review'; title = 'Belgeleri guncelle'; owner = @{ agent = 'codex' } }, @{ id = 'TASK-8'; status = 'blocked'; title = 'Engelli is'; owner = @{ agent = 'claude' } }) } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $scripts '.state\board.json')
+            $esc = [string][char]27
+            foreach ($w in @(90, 120, 210)) {
+                $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+                try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts 'merkez.ps1') -Vault $root -Tek -Genislik $w 2>&1 | Out-String } finally { [Console]::OutputEncoding = $eskiKod }
+                $LASTEXITCODE | Should Be 0
+                $plain = [regex]::Replace($out, ($esc + '\[[0-9;?]*[A-Za-z]'), '')
+                $satirlar = @($plain -split "`r?`n" | Where-Object { $_.Trim() })
+                foreach ($l in $satirlar) { "$($w):$($l.Length)" | Should Be "$($w):$($w)" }
+                $plain | Should Match 'baslat R-ONAY'
+                $plain | Should Match 'onayla TASK-9'
+                $plain | Should Match 'KONTROL DÜŞTÜ'
+                $plain | Should Match '1 HATA'
+            }
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}

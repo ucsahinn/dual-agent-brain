@@ -1225,10 +1225,12 @@ renkleri saglik/engel, ajan renkleri Claude/Codex kimligini, mavi vurgu secimi
 ve guncel kosu adimini belirtir.
 
 - **Ozet kartlari:** `AJANLAR`, `KOSULAR`, `ONAYLAR`, `KAYNAK`, `MALIYET` ve
-  `PANO-AKTARIM` toplamlari. Kaynak ve maliyet ozeti veri yoksa gosterilmez.
-  120 sutunun altinda kartlar tek ozet satirina iner (dikey alan canli bolumlere kalir).
+  `PANO-AKTARIM` toplamlari, her kartta uc satir. Kaynak ve maliyet ozeti veri
+  yoksa gosterilmez. Uyari/hata durumundaki kartin kenari o renktedir.
+  120 sutunun altinda kartlar iki ozet satirina iner (dikey alan canli bolumlere kalir).
 - **SIRADA:** Bekleyen en onemli karari veya kosunun sonraki adimini ve nedenini
-  renkli olarak gosterir.
+  renkli olarak gosterir. Yalniz uyari varsa "sorun yok · N uyari" ve ilk adimin
+  komutunu yazar; hicbir sey yoksa "her sey yolunda" ve kac ajanin calistigini.
 - **ONAY BEKLIYOR:** Bekleyen `baslat <runId>`, `birlestir <runId>` veya
   `onayla TASK-x` satirini ve baglamini gosterir. Satiri yalniz sohbete yaz;
   ekran kendisi onay vermez.
@@ -1245,9 +1247,12 @@ ve guncel kosu adimini belirtir.
   sonraki eylem yer alir. Isci sayilari ve degisik dosya sayisi kosu ayrintisina,
   giris/cikis jetonlari ve onbellek payi, sure ve baslangic saati kosu satirinda
   gorunur. Biten kosulardan yalniz en yenisi gosterilir (`a` hepsi). Basarisiz, iptal, catismali, dogrulanamamis, uyarili veya onay
-  bekleyen kosular rozetle ayirt edilir.
+  bekleyen kosular rozetle ayirt edilir. Salt okunur inceleme kosusunun cizgisi
+  `topla`da biter; sefin `integrate --covers` ile kapsadigi isci ayrica sayilir.
 - **PANO ve AKTARIMLAR:** Acik kartlar ve bekleyen ajan aktarimlari birlikte
-  izlenir; dar pencerede bolumler alt alta gelir.
+  izlenir; dar pencerede bolumler alt alta gelir. Aktarimlarda en eski ustte,
+  kimligin son 4 hanesi (`beyin aktar -Tamam <id>` icin) ve 3 gunden eski satir
+  uyari renginde.
 - **TESHIS:** En fazla bes hata/uyariyi gosterir; fazlasi icin `beyin doktor`
   onerilir.
 

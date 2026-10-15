@@ -189,7 +189,11 @@ function Get-MerkezKosuSonraki($Kosu, [bool]$Sahipsiz) {
         'planned'  { return @{ Metin = "onay bekliyor → baslat $id"; Onay = $true; Renk = 'warn' } }
         'verified' { return @{ Metin = "onay bekliyor → birlestir $id"; Onay = $true; Renk = 'warn' } }
         'merged'   { return @{ Metin = 'ana dalda'; Onay = $false; Renk = 'ok' } }
-        'aborted'  { return @{ Metin = 'iptal edildi'; Onay = $false; Renk = 'muted' } }
+        'aborted'  {
+            $wsA = @($Kosu.workers | Where-Object { $null -ne $_ })
+            if ($wsA.Count -and -not @($wsA | Where-Object { $_.status -ne 'collected' }).Count) { return @{ Metin = 'raporlar teslim alındı · salt okunur koşu kapatıldı'; Onay = $false; Renk = 'ok' } }
+            return @{ Metin = 'iptal edildi'; Onay = $false; Renk = 'muted' }
+        }
         'failed'   { return @{ Metin = 'başarısız · işçi raporlarına bak'; Onay = $false; Renk = 'err' } }
         'collected' { return @{ Metin = "bütünleştir → beyin takim integrate --run $id"; Onay = $false; Renk = 'muted' } }
     }
@@ -213,8 +217,9 @@ function Get-MerkezKosuOzet($Kosu, [bool]$Sahipsiz = $false, [datetime]$Simdi = 
     $calisan = @($ws | Where-Object { $_.status -in @('queued','spawning','running') }).Count
     $bekleyen = @($ws | Where-Object { $_.status -in @('planned','paused_limit') }).Count
     $sorunKod = @('failed','timed_out','scope_violation','rejected_content','conflict','aborted')
-    $sorunlu = @($ws | Where-Object { $_.status -in $sorunKod }).Count
-    $kismen = @($ws | Where-Object { $_.status -notin $sorunKod -and $_.verdict -and $_.verdict -ne 'pass' }).Count
+    # karar fail/blocked olan isci de sorunludur (kirmizi); kismen yalniz partial/warn (sari)
+    $sorunlu = @($ws | Where-Object { $_.status -in $sorunKod -or [string]$_.verdict -in @('fail', 'blocked') }).Count
+    $kismen = @($ws | Where-Object { $_.status -notin $sorunKod -and $_.verdict -and [string]$_.verdict -notin @('pass', 'fail', 'blocked') }).Count
     $bitmis = $ws.Count - $calisan - $bekleyen
     $temiz = [Math]::Max(0, $bitmis - $sorunlu - $kismen)
     $conflicts = @(); if ($ig) { $conflicts = @($ig.conflicts | Where-Object { $null -ne $_ }) }
@@ -224,6 +229,8 @@ function Get-MerkezKosuOzet($Kosu, [bool]$Sahipsiz = $false, [datetime]$Simdi = 
     $kirik = [bool]($cakisma -or $kontrolDustu -or $dogrulamaDustu -or $st -eq 'failed' -or ($st -eq 'aborted' -and -not ($ws.Count -gt 0 -and @($ws | Where-Object { $_.status -ne 'collected' }).Count -eq 0)))
     # Salt okunur inceleme kosusu: isciler raporlarini teslim etti (collected) ve kosu kapatildi -> iptal degil.
     $raporlu = [bool]($st -eq 'aborted' -and $ws.Count -gt 0 -and @($ws | Where-Object { $_.status -ne 'collected' }).Count -eq 0)
+    if ($raporlu) { $asamalar[2] = $true; $guncel = 3 }   # topla tamam; sonraki adimlar bu kosu turunde yok (Atlanan)
+    $kapsanan = 0; if ($ig -and $ig.coveredByConductor) { $kapsanan = @($ig.coveredByConductor | Where-Object { $_ }).Count }
     $rozet = if ($raporlu) { 'raporlar' } elseif ($st -eq 'aborted') { 'iptal' } elseif ($st -eq 'failed') { 'basarisiz' } elseif ($st -eq 'merged') { 'anadalda' }
         elseif ($Sahipsiz) { 'sahipsiz' } elseif ($calisan -gt 0) { 'calisiyor' } elseif ($cakisma) { 'cakisma' }
         elseif ($kontrolDustu) { 'kontrol' } elseif ($dogrulamaDustu) { 'dogrulanamadi' }
@@ -246,7 +253,7 @@ function Get-MerkezKosuOzet($Kosu, [bool]$Sahipsiz = $false, [datetime]$Simdi = 
     $bitti = $st -in @('merged', 'aborted', 'failed', 'verified')
     if (-not ($bitti -and $sonAt)) { $sonAt = $Simdi }
     $sure = 0.0; if ($baslangic) { $sure = [Math]::Max(0, ($sonAt - $baslangic).TotalSeconds) }
-    return @{ Adimlar = [bool[]]$asamalar; Guncel = $guncel; Kirik = $kirik; Rozet = $rozet; Temiz = $temiz; Kismen = $kismen; Sorunlu = $sorunlu; Calisan = $calisan; Bekleyen = $bekleyen; Dosya = $dosya; JetonGiris = $inTok; JetonCikis = $outTok; JetonOnbellek = $cacheTok; Kontrol = @{ Gecen = $gecen; Toplam = $toplam }; Sure = $sure; Baslangic = $baslangic }
+    return @{ Adimlar = [bool[]]$asamalar; Guncel = $guncel; Kirik = $kirik; Rozet = $rozet; Atlanan = $raporlu; Kapsanan = $kapsanan; Temiz = $temiz; Kismen = $kismen; Sorunlu = $sorunlu; Calisan = $calisan; Bekleyen = $bekleyen; Dosya = $dosya; JetonGiris = $inTok; JetonCikis = $outTok; JetonOnbellek = $cacheTok; Kontrol = @{ Gecen = $gecen; Toplam = $toplam }; Sure = $sure; Baslangic = $baslangic }
 }
 
 function Get-MerkezSirada($a) {
@@ -254,7 +261,24 @@ function Get-MerkezSirada($a) {
     $err = @($a.Teshis | Where-Object { $_.Seviye -eq 'err' })
     if ($err.Count) { return @{ Metin = Protect-MerkezSatir ([string]$err[0].Metin); Neden = 'tanı gerektiriyor'; Renk = 'err' } }
     foreach ($k in $a.Kosular) { if ($k.Guncel -lt 6 -and $k.Durum -notin @('merged','aborted','failed')) { return @{ Metin = Protect-MerkezSatir ([string]$k.Sonraki.Metin); Neden = Protect-MerkezSatir ([string]$k.RunId); Renk = $(if ($k.Sonraki -and $k.Sonraki.Renk) { [string]$k.Sonraki.Renk } else { 'warn' }) } } }
-    return @{ Metin = 'her şey yolunda'; Neden = ''; Renk = 'ok' }
+    # Yolunda: yine de bir bakista durum (kac ajan calisiyor, uyari var mi) - bos satir bilgi tasimiyordu
+    $cal = @($a.Ajanlar | Where-Object { $_.Durum -eq 'calisiyor' }).Count; $uy = [int]$a.Teshis.Count
+    $calS = $(if ($cal) { "$cal ajan çalışıyor" } else { 'çalışan ajan yok' })
+    if ($uy) {
+        # Uyari varken "her şey yolunda" baslik rozetiyle celisiyordu: sorun yok ama uyari var; ilk adim ilk teshisin komutu.
+        $ilk = [string]$a.Teshis[0].Metin; $komut = ''; if ($ilk -match '·\s*(beyin [^·]+)$') { $komut = $Matches[1].Trim() }
+        return @{ Metin = "sorun yok · $uy uyarı"; Neden = (@($(if ($komut) { "ilk adım: $komut" }), $calS) | Where-Object { $_ }) -join ' · '; Renk = 'warn' }
+    }
+    return @{ Metin = 'her şey yolunda'; Neden = "$calS · bekleyen onay yok"; Renk = 'ok' }
+}
+
+function Get-MerkezEskiAktarim($Aktarimlar, [datetime]$Simdi = (Get-Date)) {
+    # 3 gunden eski acik aktarimlar: TEK teshis, sayi + EN ESKISI (eskiden siralamada ilk rastlanan yaziliyordu).
+    $eski = @(); foreach ($h in @($Aktarimlar)) { try { $t = [datetime]::Parse([string]$h.ts); if (($Simdi - $t).TotalDays -gt 3) { $eski += @{ H = $h; T = $t } } } catch { } }
+    if (-not $eski.Count) { return $null }
+    $eh = @($eski | Sort-Object -Property @{ Expression = { $_.T } })[0].H
+    $bas = $(if ($eski.Count -gt 1) { "$($eski.Count) aktarım 3 günden eski · en eskisi " } else { 'aktarım 3 günden eski · ' })
+    return @{ Seviye = 'warn'; Metin = "$bas$($eh.id)$(if ($eh.toProject) { " ($($eh.toProject))" }) · beyin aktar -Tamam $($eh.id)" }
 }
 
 function Test-MerkezPidCanli([int]$ProcessId, [hashtable]$Onbellek, [datetime]$Simdi) {
@@ -387,9 +411,7 @@ function Get-MerkezAnlik {
             $Onbellek.Aktarimlar = $a.Aktarimlar
         } catch { if ($Onbellek.ContainsKey('Aktarimlar')) { $a.Aktarimlar = $Onbellek.Aktarimlar } }
     }
-    foreach ($h in $a.Aktarimlar) {
-        try { $t = [datetime]::Parse([string]$h.ts); if (($simdi - $t).TotalDays -gt 3) { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "aktarım $($h.id) 3 günden eski ($($h.toProject)) · beyin aktar -Tamam $($h.id)" }); break } } catch { }
-    }
+    $et = Get-MerkezEskiAktarim $a.Aktarimlar $simdi; if ($et) { $a.Teshis.Add($et) }
 
     # --- kaynak + maliyet (yavas) ---
     if ($Hizli -and $Onbellek.ContainsKey('Kaynak')) { $a.Kaynak = $Onbellek.Kaynak } else {
@@ -403,7 +425,7 @@ function Get-MerkezAnlik {
     }
     if ($a.Kaynak -and $a.Kaynak.Ok) {
         if ($a.Kaynak.CommitYuzde -ge 85) { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = 'commit'; Metin = "commit %$($a.Kaynak.CommitYuzde) · beyin bekci" }) }
-        if ($a.Kaynak.BostaOturum -ge 5) { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "$($a.Kaynak.BostaOturum) oturum 2+ saattir sessiz · beyin bekci" }) }
+        if ($a.Kaynak.BostaOturum -ge 5) { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "son 24 saatte açılmış $($a.Kaynak.BostaOturum) oturum 2+ saattir sessiz (kapanmış olabilir) · beyin bekci" }) }
     }
 
     # --- sayaclar ---

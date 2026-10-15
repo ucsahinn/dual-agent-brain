@@ -21,6 +21,25 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.4.3 - Merkez: eksiksiz ve okunur panel
+
+- **Kartlar satiri tam doldurur** (sagda bosluk kalmaz) ve ucuncu satir kazandi:
+  Claude/Codex sayisi, son biten kosu, commit GB, sessiz oturum, 200K+ baglam
+  maliyet payi, en eski aktarim. Uyari/hata durumundaki kartin kenari o renkte.
+- **SIRADA celiskisi giderildi:** uyari varken "her sey yolunda" yerine
+  "sorun yok · N uyari" ve ilk adimin komutu yazar.
+- **Inceleme kosusu** (salt okunur, raporlar toplandi) adim cizgisi `topla`da
+  biter; sef'in `--covers` ile kapsadigi isci "1 sef kapsadi" olarak gorunur.
+  Karari `fail` olan isci cubukta kirmizi (eskiden sari) sayilir.
+- **Kanatlar:** bostaki oturumun eski "dusunuyor" balonu gizlenir; Codex kisa
+  kimligi son 4 haneden (UUIDv7 oneki cakisiyordu); balonda ev dizini `~`;
+  "sakin" yerine "bosta"; bosta kanat listesi sigmazsa `+N`.
+- **Aktarimlar:** en eski ustte, kisa kimlik (`-Tamam` icin), 3 gunden eski
+  satir uyari renginde, hedefsiz aktarim "her yer". Teshis sayiyi ve en eskisini yazar.
+- Dar ekran ozeti iki satir; uzun teshis satiri ikinci satira sarilir;
+  tus satiri gizli bosta ajan sayisini soyler; `-Tek -Aktifler` canli varsayilan
+  gorunumu cizer.
+
 ## 1.4.2 - Merkez: sag kenar, kart genisligi, inceleme kosusu rozeti
 
 - **Sag kenar artik kaybolmuyor.** Satir tam pencere genisligindeyken satir sonu silme komutu son sutunu (cercevenin

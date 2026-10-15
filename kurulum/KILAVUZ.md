@@ -1255,6 +1255,12 @@ ve guncel kosu adimini belirtir.
   uyari renginde.
 - **TESHIS:** En fazla bes hata/uyariyi gosterir; fazlasi icin `beyin doktor`
   onerilir.
+- **SON OLAYLAR:** Motor makbuzlarindan canli akis: oturum ozeti yazildi, aktarim
+  gonderildi/kapatildi, onay kaydedildi/kullanildi, yayin, kill guard reddi, hatirlanan
+  kavram. Gurultu (her arac cagrisinin "gecti" makbuzu gibi) gosterilmez; ayni ajanin
+  ardisik olaylari `xN` ile birlesir. Ekranda kalan bos alani doldurur.
+- **Canli gosterge:** calisan ajanin yaninda kayan tarama cubugu, baslikta nabiz noktasi,
+  renk gecisli cubuklar; uyari/hata/onay varken SIRADA seridi nabiz gibi atar.
 
 Tuslar: `yukari/asagi` sec, `Enter` odak secili ajani (iscide isci panelini,
 liderde ayrintiyi) acar, `p` kosu panosunu acar, `a` sakin ajanlari gosterir/gizler,

@@ -21,6 +21,22 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.4.5 - Merkez: canli, akici, emojili panel
+
+- **Canli:** calisan ajanin yaninda gidip gelen tarama cubugu (her ajan kendi fazinda),
+  baslikta nabiz gibi atan "canli" noktasi, uyari/hata varken SIRADA seridi nabiz gibi
+  atar. Kare araligi 250 -> 120 ms.
+- **Renk gecisli cubuklar:** AJANLAR turkuaz -> yesil; commit kullanimi yesil -> sari -> kirmizi isinir.
+- **Emoji:** bolum ve kart basliklari (🧭 🩺 🏢 🏃 📋 📨 📜 🤖 💾 💰 🔔), saglik rozeti 🟢/🟡/🔴/🔔,
+  teshis 🔴/🟡. Yalniz her terminalde 2 hucre cizilen emojiler kullanilir; Windows Terminal'de
+  harfin ustune binen belirsiz simgeler (⚠ ✔ ✖ ▶ ⏸) metin karsiliklariyla degisti.
+- **SON OLAYLAR:** motor makbuzlarindan canli akis (ozet yazildi, aktarim, onay, yayin,
+  kill guard reddi, hatirlanan kavram); gurultu atilir, ayni ajanin ardisik olaylari xN
+  birlesir. Ekranda kalan bos yuksekligi doldurur, baska bolumu disari itmez.
+- **Hiz:** bir kare 1,1 sn yerine ~0,1-0,2 sn (genislik olcumu regex, kesme parca parca,
+  Get-Command onbellekte); aktarim/kaynak 20 sn'de bir, olay akisi yalniz makbuz buyuyunce
+  okunur (tam tazeleme 475 -> ~100 ms). Kanatlar iki sutuna yalniz 200+ sutunda bolunur.
+
 ## 1.4.4 - Merkez: gercek terminalde dogrulama duzeltmeleri
 
 - Tek kanat varken ekran yanlislikla iki sutuna bolunup sag yarisi bos kaliyordu

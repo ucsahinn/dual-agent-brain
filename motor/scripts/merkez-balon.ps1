@@ -252,9 +252,9 @@ function Convert-MerkezCodexKayit($o) {
         if ($pt -eq 'task_complete') {
             $son = [string](Get-MerkezAlan $p @('last_agent_message'))
             if ($son.Trim()) { return (New-MerkezSonuc $true (Format-MerkezMetin ('✎ ' + (Get-MerkezDuzMetin $son))) $zaman 'bekliyor') }
-            return (New-MerkezSonuc $true '⏸ bekliyor' $zaman 'bekliyor')
+            return (New-MerkezSonuc $true '‖ bekliyor' $zaman 'bekliyor')
         }
-        if ($pt -eq 'turn_aborted') { return (New-MerkezSonuc $true '⏸ durduruldu' $zaman 'bekliyor') }
+        if ($pt -eq 'turn_aborted') { return (New-MerkezSonuc $true '‖ durduruldu' $zaman 'bekliyor') }
         return $null
     }
     if ($tip -ne 'response_item') { return $null }

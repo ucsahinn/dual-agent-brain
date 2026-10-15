@@ -106,7 +106,9 @@ function Protect-MerkezSatir([string]$Metin, [int]$Uzunluk = 64) {
     $m = $m -replace '(?i)(\s-(?:u|p|-password|-token)\s+)\S+', '$1***'
     $m = $m -replace '\b(sk-|ghp_|github_pat_|xox[abpr]-|AKIA|AIza)[A-Za-z0-9_-]{8,}', '***'
     $m = $m -replace '[A-Za-z0-9+_=-]{32,}', '***'
-    if (Get-Command Protect-MerkezMetin -ErrorAction SilentlyContinue) { try { $m = [string](Protect-MerkezMetin $m) } catch { } }
+    # Get-Command her cagrida milisaniyeler suruyordu (kare basina yuzlerce cagri): bulununca onbellekte kalir
+    if (-not $script:MerkezProtVar) { $script:MerkezProtVar = [bool](Get-Command Protect-MerkezMetin -ErrorAction SilentlyContinue) }
+    if ($script:MerkezProtVar) { try { $m = [string](Protect-MerkezMetin $m) } catch { } }
     if ($m.Length -gt $Uzunluk) { $m = $m.Substring(0, [Math]::Max(1, $Uzunluk - 1)) + '…' }
     return $m
 }
@@ -281,6 +283,66 @@ function Get-MerkezEskiAktarim($Aktarimlar, [datetime]$Simdi = (Get-Date)) {
     return @{ Seviye = 'warn'; Metin = "$bas$($eh.id)$(if ($eh.toProject) { " ($($eh.toProject))" }) · beyin aktar -Tamam $($eh.id)" }
 }
 
+function ConvertTo-MerkezOlay($Kayit) {
+    # Makbuz satiri -> ekran olayi @{ Zaman; Ajan; Ikon; Renk; Metin; Anahtar } ya da $null (gurultu).
+    # Gurultu: her arac cagrisinda yazilan 'gecti', esik alti/atlandi geri getirme, bos flush, gosterim makbuzlari.
+    $sc = [string]$Kayit.script; $oc = [string]$Kayit.outcome
+    if ($oc -in @('GECTI', 'ESIK_ALTI', 'ATLANDI', 'FLUSH_BOS', 'GOSTERILDI', 'KAPI_KAPALI', 'OLCULEMEDI', 'KIRP_PLAN', 'KULLANIM_OK', 'FLUSH_KUYRUKTA')) { return $null }
+    if ("$sc/$oc" -eq 'session-start/ENJEKSIYON') { return $null }   # acilislar KANATLAR'da gorunur; akista tekrar gurultusu
+    $not = Protect-MerkezSatir ([string]$Kayit.note) 80
+    $o = switch ("$sc/$oc") {
+        'flush/FLUSH_OK'                 { @('✎', 'ok', 'oturum özeti günlüğe yazıldı') }
+        'session-start/ENJEKSIYON'       { @('○', 'muted', $(if ([string]$Kayit.reason -eq 'hafif') { 'oturum açıldı · vault dışı' } else { 'oturum açıldı · tam hafıza' })) }
+        'session-end/SESSIONEND_OK'      { @('●', 'muted', 'oturum kapandı') }
+        'session-end/KUYRUK'             { @('●', 'muted', 'oturum kapandı · özet kuyrukta') }
+        'session-end/TAKIM_ISCI_BITTI'   { @('●', 'teal', 'takım işçisi bitirdi') }
+        'retrieval/ENJEKSIYON'           { $kv = @($Kayit.concepts | Where-Object { $_ }); @('◆', 'accent', "$($kv.Count) kavram hatırlandı$(if ($kv.Count) { ': ' + (Protect-MerkezSatir (([string]$kv[0]) -replace '\.md$', '' -replace '-', ' ') 60) })") }
+        'aktar/DEVIR_KAYDEDILDI'         { @('⇄', 'accent', 'aktarım gönderildi') }
+        'aktar/BRIFING_KAYDEDILDI'       { @('⇄', 'accent', 'işçi brifingi kaydedildi') }
+        'aktar/AKTAR_TAMAM'              { @('✓', 'ok', "aktarım kapatıldı$(if ($not) { ' · ' + $not })") }
+        'aktar/AKTAR_YANITLANDI'         { @('⇄', 'ok', 'aktarım yanıtlandı') }
+        'pano/ONAY_KAYDEDILDI'           { @('◐', 'warn', "onay satırı kaydedildi$(if ($not) { ' · ' + $not })") }
+        'pano/ONAY_KULLANILDI'           { @('✓', 'ok', "onay kullanıldı$(if ($not) { ' · ' + $not })") }
+        'pano/PANO_HATA'                 { @('✕', 'err', "pano komutu reddedildi$(if ($not) { ' · ' + $not })") }
+        'pano/PANO_OK'                   { @('▤', 'muted', "pano$(if ($not) { ' · ' + $not })") }
+        'takim/TAKIM_OK'                 { @('▤', 'accent', "takım$(if ($not) { ' · ' + $not })") }
+        'takim/TAKIM_HATA'               { @('✕', 'err', "takım komutu düştü$(if ($not) { ' · ' + $not })") }
+        'takim/ONAY_KAYDEDILDI'          { @('◐', 'warn', "takım onayı kaydedildi$(if ($not) { ' · ' + $not })") }
+        'yayinla/YAYIN_OK'               { @('↑', 'ok', 'motor yayınlandı') }
+        'kill-guard/RED'                 { @('✕', 'err', "kill guard engelledi$(if ($not) { ' · ' + $not })") }
+        'compile/COMPILE_OK'             { @('◆', 'ok', 'derleme: yeni kavram notları') }
+        'gom/GOM_OK'                     { @('◆', 'muted', 'vektör gömme tazelendi') }
+        default {
+            $sev = $(if ($oc -match 'HATA|RED|DUSTU|BOZUK') { 'err' } elseif ($oc -match '_OK$') { 'muted' } else { 'muted' })
+            @('·', $sev, "$sc · $(($oc -replace '_', ' ').ToLowerInvariant())")
+        }
+    }
+    $z = $null; try { $z = [datetime]$Kayit.ts } catch { return $null }
+    return @{ Zaman = $z; Ajan = [string]$Kayit.agent; Ikon = $o[0]; Renk = $o[1]; Metin = $o[2]; Anahtar = [string]$Kayit.key; Tur = "$sc/$oc"; Adet = 1 }
+}
+
+function Get-MerkezOlaylar([string]$MakbuzDizin, [int]$Adet = 14, [datetime]$Simdi = (Get-Date)) {
+    # Bugunun (azsa dunun de) makbuz kuyrugundan son anlamli olaylar, yeniden eskiye. Ayni oturumdan ard arda
+    # gelen ayni tur olay tek satirda birlesir (Adet). Dosya yoksa bos liste; asla firlatmaz.
+    $sonuc = New-Object System.Collections.Generic.List[object]
+    try {
+        foreach ($gun in @($Simdi, $Simdi.AddDays(-1))) {
+            $f = Join-Path $MakbuzDizin ($gun.ToString('yyyy-MM-dd') + '.jsonl')
+            if (-not (Test-Path -LiteralPath $f)) { continue }
+            $sat = @(Read-MerkezSonSatirlar -Yol $f -Bayt 98304)
+            for ($i = $sat.Count - 1; $i -ge 0 -and $sonuc.Count -lt $Adet; $i--) {
+                $t = $sat[$i].Trim(); if (-not $t.StartsWith('{')) { continue }
+                $k = $null; try { $k = $t | ConvertFrom-Json } catch { continue }
+                $o = ConvertTo-MerkezOlay $k; if (-not $o) { continue }
+                if ($sonuc.Count) { $son = $sonuc[$sonuc.Count - 1]; if ($son.Tur -eq $o.Tur -and $son.Ajan -eq $o.Ajan -and [Math]::Abs(($son.Zaman - $o.Zaman).TotalMinutes) -lt 30) { $son.Adet++; continue } }   # ayni ajanin 30 dk icindeki ayni olaylari tek satir
+                $sonuc.Add($o)
+            }
+            if ($sonuc.Count -ge $Adet) { break }
+        }
+    } catch { }
+    return ,$sonuc
+}
+
 function Test-MerkezPidCanli([int]$ProcessId, [hashtable]$Onbellek, [datetime]$Simdi) {
     if ($ProcessId -le 0) { return $false }
     if (-not $Onbellek) { $Onbellek = @{} }
@@ -342,7 +404,7 @@ function Get-MerkezAnlik {
             $surec = $null; if ($w.pid) { $surec = Test-MerkezPidCanli ([int]$w.pid) $Onbellek $simdi }
             $d = Get-MerkezDurum @{ Tur = 'isci'; IsciDurum = [string]$w.status; Verdict = [string]$w.verdict; NabizSn = $nabiz; SurecCanli = $surec; GozetmenDurdu = $sahipsiz }
             $balon = ''; if ($d.Durum -in @('calisiyor', 'engelli')) { $balon = Get-MerkezIsciEtkinlik $ev }
-            elseif ($d.Durum -eq 'duraklatildi') { $balon = '⏸ kota doldu' } elseif ($d.Durum -eq 'bitti') { $balon = '✔ teslim etti' }
+            elseif ($d.Durum -eq 'duraklatildi') { $balon = '‖ kota doldu' } elseif ($d.Durum -eq 'bitti') { $balon = '✓ teslim etti' }
             $basla = $null; if ($w.startedAt) { try { $basla = [datetime]$w.startedAt } catch { } }
             $son = $null; if ($w.finishedAt) { try { $son = [datetime]$w.finishedAt } catch { } }
             $a.Ajanlar.Add(@{ Tur = 'isci'; Ajan = 'codex'; Ad = [string]$w.taskId; Rol = [string]$w.role; Kanat = [string]$k.repoName; Kosu = [string]$k.runId
@@ -404,7 +466,10 @@ function Get-MerkezAnlik {
     foreach ($k in $kartlar) { if ([string]$k.status -eq 'review') { $a.Onaylar.Add(@{ Satir = "onayla $($k.id)"; Neden = "kart incelemede · $(Protect-MerkezSatir ([string]$k.title) 60)" }) } }
 
     # --- aktarimlar (yavas) ---
-    if ($Hizli -and $Onbellek.ContainsKey('Aktarimlar')) { $a.Aktarimlar = $Onbellek.Aktarimlar } else {
+    # Kademeli: aktarim listesi (~450 ms) tam tazelemede de en cok 20 sn'de bir okunur; animasyon donmasin
+    $tazeAkt = $Onbellek.ContainsKey('ts:Aktarimlar') -and ($simdi - $Onbellek['ts:Aktarimlar']).TotalSeconds -lt 20
+    if ($Onbellek.ContainsKey('Aktarimlar') -and ($Hizli -or $tazeAkt)) { $a.Aktarimlar = $Onbellek.Aktarimlar } else {
+        $Onbellek['ts:Aktarimlar'] = $simdi
         try {
             $ak = @(Get-BeyinHandoffListe -Paths $Paths | Where-Object { $_ -and [string]$_.status -ne 'tamam' -and [string]$_.kind -ne 'devir' })
             $a.Aktarimlar = @($ak | Sort-Object -Property @{ Expression = { [string]$_.ts } } -Descending)
@@ -414,7 +479,9 @@ function Get-MerkezAnlik {
     $et = Get-MerkezEskiAktarim $a.Aktarimlar $simdi; if ($et) { $a.Teshis.Add($et) }
 
     # --- kaynak + maliyet (yavas) ---
-    if ($Hizli -and $Onbellek.ContainsKey('Kaynak')) { $a.Kaynak = $Onbellek.Kaynak } else {
+    $tazeKay = $Onbellek.ContainsKey('ts:Kaynak') -and ($simdi - $Onbellek['ts:Kaynak']).TotalSeconds -lt 20
+    if ($Onbellek.ContainsKey('Kaynak') -and ($Hizli -or $tazeKay)) { $a.Kaynak = $Onbellek.Kaynak } else {
+        $Onbellek['ts:Kaynak'] = $simdi
         try { $a.Kaynak = Get-BeyinKaynakOzeti -Paths $Paths } catch { $a.Kaynak = $null }
         $Onbellek.Kaynak = $a.Kaynak
     }
@@ -427,6 +494,16 @@ function Get-MerkezAnlik {
         if ($a.Kaynak.CommitYuzde -ge 85) { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = 'commit'; Metin = "commit %$($a.Kaynak.CommitYuzde) · beyin bekci" }) }
         if ($a.Kaynak.BostaOturum -ge 5) { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "son 24 saatte açılmış $($a.Kaynak.BostaOturum) oturum 2+ saattir sessiz (kapanmış olabilir) · beyin bekci" }) }
     }
+
+    # --- son olaylar (yavas; makbuz kuyrugu) + oturum -> kanat eslemesi ---
+    # olay akisi yalniz bugunun makbuz dosyasi buyudugunde yeniden okunur (imza: boy + gun)
+    $mkF = $(if ($Paths.Makbuz) { Join-Path $Paths.Makbuz ($simdi.ToString('yyyy-MM-dd') + '.jsonl') } else { '' }); $mkImza = ''
+    try { if ($mkF -and (Test-Path -LiteralPath $mkF)) { $mkImza = "$((Get-Item -LiteralPath $mkF).Length)|$($simdi.ToString('yyyyMMdd'))" } } catch { }
+    if ($Onbellek.ContainsKey('Olaylar') -and ($Hizli -or $Onbellek['imza:Olaylar'] -eq $mkImza)) { $a.Olaylar = $Onbellek.Olaylar } else {
+        $a.Olaylar = $(if ($Paths.Makbuz) { Get-MerkezOlaylar $Paths.Makbuz 16 $simdi } else { New-Object System.Collections.Generic.List[object] }); $Onbellek.Olaylar = $a.Olaylar; $Onbellek['imza:Olaylar'] = $mkImza
+    }
+    $kanatOf = @{}; foreach ($ag in $a.Ajanlar) { if ($ag.Tur -eq 'lider' -and $ag.Ad) { $kanatOf[[string]$ag.Ad] = [string]$ag.Kanat } }
+    foreach ($ol in $a.Olaylar) { $ol.Kanat = $(if ($ol.Anahtar -and $kanatOf.ContainsKey($ol.Anahtar)) { $kanatOf[$ol.Anahtar] } else { '' }) }
 
     # --- sayaclar ---
     foreach ($ag in $a.Ajanlar) { $s = [string]$ag.Durum; if ($a.Sayac.ContainsKey($s)) { $a.Sayac[$s]++ } else { $a.Sayac[$s] = 1 } }

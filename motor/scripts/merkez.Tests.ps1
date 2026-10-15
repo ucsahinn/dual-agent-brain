@@ -300,3 +300,40 @@ Describe 'merkez sabit veriyle kenar durumlari (onay, hatali kosu, engelli kart)
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
+
+Describe 'merkez canli panel (1.4.5): olay akisi ve guvenli simgeler' {
+    BeforeAll { . (Join-Path $PSScriptRoot 'merkez-veri.ps1') }
+    It 'makbuz gurultusu atilir, anlamli olay Turkce metne cevrilir' {
+        ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'kill-guard'; outcome = 'GECTI' } | Should Be $null
+        ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'retrieval'; outcome = 'ESIK_ALTI' } | Should Be $null
+        $o = ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'kill-guard'; outcome = 'RED'; agent = 'codex'; note = 'Stop-Process -Name x' }
+        $o.Renk | Should Be 'err'; $o.Metin | Should Match 'kill guard engelledi'
+        (ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'retrieval'; outcome = 'ENJEKSIYON'; concepts = @('ornek-kavram.md') }).Metin | Should Match '1 kavram hatırlandı: ornek kavram'
+    }
+    It 'ayni oturumun ardisik ayni olaylari tek satirda birlesir; makbuz yoksa bos liste' {
+        $d = Join-Path ([IO.Path]::GetTempPath()) ('merkez-mk-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $d | Out-Null
+        try {
+            $simdi = Get-Date; $f = Join-Path $d ($simdi.ToString('yyyy-MM-dd') + '.jsonl')
+            $sat = @(
+                (@{ ts = $simdi.AddMinutes(-3).ToString('o'); script = 'flush'; outcome = 'FLUSH_OK'; agent = 'claude'; key = 'K1' } | ConvertTo-Json -Compress),
+                (@{ ts = $simdi.AddMinutes(-2).ToString('o'); script = 'flush'; outcome = 'FLUSH_OK'; agent = 'claude'; key = 'K1' } | ConvertTo-Json -Compress),
+                (@{ ts = $simdi.AddMinutes(-1).ToString('o'); script = 'kill-guard'; outcome = 'GECTI'; agent = 'codex' } | ConvertTo-Json -Compress),
+                (@{ ts = $simdi.ToString('o'); script = 'yayinla'; outcome = 'YAYIN_OK'; agent = 'claude' } | ConvertTo-Json -Compress))
+            [IO.File]::WriteAllLines($f, [string[]]$sat)
+            $ol = Get-MerkezOlaylar $d 10 $simdi
+            $ol.Count | Should Be 2
+            $ol[0].Metin | Should Be 'motor yayınlandı'
+            $ol[1].Adet | Should Be 2
+            (Get-MerkezOlaylar (Join-Path $d 'yok') 10 $simdi).Count | Should Be 0
+        } finally { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'cizimde Windows Terminalde emoji genisliginde cizilen belirsiz simge (⚠ ✔ ✖ ▶ ⏸) yok' {
+        $vault = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+        try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'merkez.ps1') -Vault $vault -Tek -Genislik 170 2>&1 | Out-String } finally { [Console]::OutputEncoding = $eskiKod }
+        $LASTEXITCODE | Should Be 0
+        $out | Should Not Match '[\u26A0\u2714\u2716\u25B6\u23F8\uFE0F]'
+        $kaynak = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'merkez.ps1') -Raw -Encoding UTF8) + (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'merkez-veri.ps1') -Raw -Encoding UTF8)
+        ($kaynak -replace '#[^\r\n]*', '') | Should Not Match '[\u26A0\u2714\u2716\u25B6\u23F8]'
+    }
+}

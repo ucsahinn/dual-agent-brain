@@ -106,6 +106,8 @@ function Protect-MerkezSatir([string]$Metin, [int]$Uzunluk = 64) {
     $m = $m -replace '(?i)(\s-(?:u|p|-password|-token)\s+)\S+', '$1***'
     $m = $m -replace '\b(sk-|ghp_|github_pat_|xox[abpr]-|AKIA|AIza)[A-Za-z0-9_-]{8,}', '***'
     $m = $m -replace '[A-Za-z0-9+_=-]{32,}', '***'
+    # ev dizini ~ : tek, cift (JSON kacisli) ters bolu ve /c/Users bicimleri; kullanici adi ekrana cikmasin
+    $m = $m -replace '(?i)([A-Z]:(\\{1,2}|/)Users(\\{1,2}|/)|/c/Users/)[^\\/\s"'']+', '~'
     # Get-Command her cagrida milisaniyeler suruyordu (kare basina yuzlerce cagri): bulununca onbellekte kalir
     if (-not $script:MerkezProtVar) { $script:MerkezProtVar = [bool](Get-Command Protect-MerkezMetin -ErrorAction SilentlyContinue) }
     if ($script:MerkezProtVar) { try { $m = [string](Protect-MerkezMetin $m) } catch { } }
@@ -269,7 +271,7 @@ function Get-MerkezSirada($a) {
     if ($uy) {
         # Uyari varken "her şey yolunda" baslik rozetiyle celisiyordu: sorun yok ama uyari var; ilk adim ilk teshisin komutu.
         $ilk = [string]$a.Teshis[0].Metin; $komut = ''; if ($ilk -match '·\s*(beyin [^·]+)$') { $komut = $Matches[1].Trim() }
-        return @{ Metin = "sorun yok · $uy uyarı"; Neden = (@($(if ($komut) { "ilk adım: $komut" }), $calS) | Where-Object { $_ }) -join ' · '; Renk = 'warn' }
+        return @{ Metin = "hata yok · $uy uyarı bekliyor"; Neden = (@($(if ($komut) { "ilk adım: $komut" }), $calS) | Where-Object { $_ }) -join ' · '; Renk = 'warn' }
     }
     return @{ Metin = 'her şey yolunda'; Neden = "$calS · bekleyen onay yok"; Renk = 'ok' }
 }
@@ -341,6 +343,27 @@ function Get-MerkezOlaylar([string]$MakbuzDizin, [int]$Adet = 14, [datetime]$Sim
         }
     } catch { }
     return ,$sonuc
+}
+
+function Get-MerkezEtkinlikHisto([string]$MakbuzDizin, [int]$Kova = 12, [int]$KovaDk = 10, [datetime]$Simdi = (Get-Date)) {
+    # Sistem etkinligi: son Kova*KovaDk dakikadaki makbuz sayisi, kova basina (eskiden yeniye). ConvertFrom-Json yerine
+    # yalniz "ts" alani regex ile okunur (hizli). Gece yarisini asan pencerede dunun dosyasi da okunur. Asla firlatmaz.
+    $h = New-Object int[] $Kova
+    try {
+        $bas = $Simdi.AddMinutes(-$Kova * $KovaDk); $rx = [regex]'"ts":"([^"]+)"'
+        foreach ($gun in @($Simdi, $Simdi.AddDays(-1))) {
+            if ($gun.Date -lt $bas.Date) { continue }
+            $f = Join-Path $MakbuzDizin ($gun.ToString('yyyy-MM-dd') + '.jsonl')
+            if (-not (Test-Path -LiteralPath $f)) { continue }
+            foreach ($sat in @(Read-MerkezSonSatirlar -Yol $f -Bayt 262144)) {
+                $m = $rx.Match($sat); if (-not $m.Success) { continue }
+                $t = [datetime]::MinValue; if (-not [datetime]::TryParse($m.Groups[1].Value, [ref]$t)) { continue }
+                if ($t -lt $bas -or $t -gt $Simdi) { continue }
+                $i = [int][Math]::Floor(($t - $bas).TotalMinutes / $KovaDk); if ($i -ge $Kova) { $i = $Kova - 1 }; if ($i -ge 0) { $h[$i]++ }
+            }
+        }
+    } catch { }
+    return ,$h
 }
 
 function Test-MerkezPidCanli([int]$ProcessId, [hashtable]$Onbellek, [datetime]$Simdi) {
@@ -501,7 +524,9 @@ function Get-MerkezAnlik {
     try { if ($mkF -and (Test-Path -LiteralPath $mkF)) { $mkImza = "$((Get-Item -LiteralPath $mkF).Length)|$($simdi.ToString('yyyyMMdd'))" } } catch { }
     if ($Onbellek.ContainsKey('Olaylar') -and ($Hizli -or $Onbellek['imza:Olaylar'] -eq $mkImza)) { $a.Olaylar = $Onbellek.Olaylar } else {
         $a.Olaylar = $(if ($Paths.Makbuz) { Get-MerkezOlaylar $Paths.Makbuz 16 $simdi } else { New-Object System.Collections.Generic.List[object] }); $Onbellek.Olaylar = $a.Olaylar; $Onbellek['imza:Olaylar'] = $mkImza
+        $Onbellek.Etkinlik = $(if ($Paths.Makbuz) { Get-MerkezEtkinlikHisto $Paths.Makbuz 12 10 $simdi } else { New-Object int[] 12 })
     }
+    $a.Etkinlik = $(if ($Onbellek.ContainsKey('Etkinlik')) { $Onbellek.Etkinlik } else { New-Object int[] 12 })
     $kanatOf = @{}; foreach ($ag in $a.Ajanlar) { if ($ag.Tur -eq 'lider' -and $ag.Ad) { $kanatOf[[string]$ag.Ad] = [string]$ag.Kanat } }
     foreach ($ol in $a.Olaylar) { $ol.Kanat = $(if ($ol.Anahtar -and $kanatOf.ContainsKey($ol.Anahtar)) { $kanatOf[$ol.Anahtar] } else { '' }) }
 

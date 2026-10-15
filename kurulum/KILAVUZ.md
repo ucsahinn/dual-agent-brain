@@ -1259,8 +1259,12 @@ ve guncel kosu adimini belirtir.
   gonderildi/kapatildi, onay kaydedildi/kullanildi, yayin, kill guard reddi, hatirlanan
   kavram. Gurultu (her arac cagrisinin "gecti" makbuzu gibi) gosterilmez; ayni ajanin
   ardisik olaylari `xN` ile birlesir. Ekranda kalan bos alani doldurur.
-- **Canli gosterge:** calisan ajanin yaninda kayan tarama cubugu, baslikta nabiz noktasi,
-  renk gecisli cubuklar; uyari/hata/onay varken SIRADA seridi nabiz gibi atar.
+- **Canli gosterge:** calisan ajanin yaninda kayan tarama cubugu (hizi ajanin son olayina
+  bagli; 60 sn+ sessiz ajanda donar), baslikta nabiz noktasi ve "son olay" yasi (veri 2 dk+
+  bayatsa kehribar), renk gecisli cubuklar; uyari/hata/onay varken SIRADA seridi ve rozet
+  nabiz gibi atar.
+- **Egilim grafikleri:** baslikta son 2 saatin sistem etkinligi; AJANLAR ve KAYNAK
+  kartlarinda panel acik kaldikca biriken calisan ajan ve commit egilimi.
 
 Tuslar: `yukari/asagi` sec, `Enter` odak secili ajani (iscide isci panelini,
 liderde ayrintiyi) acar, `p` kosu panosunu acar, `a` sakin ajanlari gosterir/gizler,

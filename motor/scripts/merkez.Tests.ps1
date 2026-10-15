@@ -239,7 +239,7 @@ Describe 'merkez premium gorunum (2026-10-15)' {
     }
     It 'yolunda gorunumu bos degil: calisan ajan ve uyari sayisi soylenir' {
         $s = Get-MerkezSirada @{ Onaylar=@(); Teshis=@(@{Seviye='warn';Metin='x'}); Kosular=@(); Ajanlar=@(@{Durum='calisiyor'},@{Durum='bosta'}) }
-        $s.Metin | Should Be 'sorun yok · 1 uyarı'; $s.Renk | Should Be 'warn'; $s.Neden | Should Match '1 ajan çalışıyor'
+        $s.Metin | Should Be 'hata yok · 1 uyarı bekliyor'; $s.Renk | Should Be 'warn'; $s.Neden | Should Match '1 ajan çalışıyor'
         $s2 = Get-MerkezSirada @{ Onaylar=@(); Teshis=@(@{Seviye='warn';Metin='20 oturum sessiz · beyin bekci'}); Kosular=@(); Ajanlar=@() }
         $s2.Neden | Should Match '^ilk adım: beyin bekci'
         (Get-MerkezSirada @{ Onaylar=@(); Teshis=@(); Kosular=@(); Ajanlar=@(@{Durum='calisiyor'}) }).Metin | Should Be 'her şey yolunda'
@@ -303,6 +303,13 @@ Describe 'merkez sabit veriyle kenar durumlari (onay, hatali kosu, engelli kart)
 
 Describe 'merkez canli panel (1.4.5): olay akisi ve guvenli simgeler' {
     BeforeAll { . (Join-Path $PSScriptRoot 'merkez-veri.ps1') }
+    It 'ev dizini her yol biciminde ~ olur (kullanici adi ekrana cikmaz)' {
+        $u = 'ornek' + 'kisi'
+        (Protect-MerkezSatir ('cd C:\Users\' + $u + '\Desktop') 80) | Should Be 'cd ~\Desktop'
+        (Protect-MerkezSatir ('"C:\\Users\\' + $u + '\\Desktop\\x"') 80) | Should Be '"~\\Desktop\\x"'
+        (Protect-MerkezSatir ('cd /c/Users/' + $u + '/Desktop') 80) | Should Be 'cd ~/Desktop'
+        (Protect-MerkezSatir ('C:/Users/' + $u + '/a') 80) | Should Be '~/a'
+    }
     It 'makbuz gurultusu atilir, anlamli olay Turkce metne cevrilir' {
         ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'kill-guard'; outcome = 'GECTI' } | Should Be $null
         ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'retrieval'; outcome = 'ESIK_ALTI' } | Should Be $null

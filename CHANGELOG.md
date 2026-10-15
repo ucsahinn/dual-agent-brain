@@ -21,6 +21,21 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.4.6 - Merkez: egilim grafikleri ve bir bakista okunur panel
+
+- **Egilim grafikleri (sparkline):** baslikta son 2 saatin sistem etkinligi (10 dk'lik
+  dilimler, makbuz sayisi); AJANLAR ve KAYNAK kartlarinda panel acik kaldikca biriken
+  calisan ajan ve commit egilimi.
+- **Baslik:** uyari/hata rozeti nabiz gibi atar; "son olay N sn" gostergesi, veri 2 dk+
+  bayatsa nokta kehribar olur (pano canli mi, yalniz saat mi akiyor ayirt edilir).
+- **SIRADA:** "hata yok · N uyari bekliyor"; kopyalanacak komut satirin en parlak ogesi.
+- **Tarama hizi nabza bagli:** taze ajan hizli, yavas olan yavas, 60 sn+ sessiz ajanin
+  cubugu donar (takilan ajan sayi okumadan gorunur). Calisan ajanin yasi tazeyse yesil.
+- **Aktarimlar:** yas isisi (3 gun+ kalin sari, proje adi da), konu parlak / ayrinti soluk.
+- **Kartlar:** sari kenar yalniz hatada; uyarida yalniz baslik ve `▲`; sakin ONAYLAR `✓`.
+- **Tus satiri:** tuslar vurgulu, `a` basta; bosta kanat satirindaki tekrar ipucu kalkti.
+- **Gizlilik:** ev dizini her yol biciminde (tek/cift ters bolu, /c/Users) `~` olur.
+
 ## 1.4.5 - Merkez: canli, akici, emojili panel
 
 - **Canli:** calisan ajanin yaninda gidip gelen tarama cubugu (her ajan kendi fazinda),

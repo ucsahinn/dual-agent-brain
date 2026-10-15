@@ -1,4 +1,4 @@
-# Beyin - Kullanim Kilavuzu
+﻿# Beyin - Kullanim Kilavuzu
 
 Bu belge, sistemi hic bilmeyen bir Windows kullanicisi icin yazildi. PowerShell
 penceresi acabiliyorsan yeterli.
@@ -1212,36 +1212,47 @@ yalniz dogrulanmis kosu icin kaydedilir; erken yazilirsa ajan neden kaydedilmedi
   kancasi yalniz bu panonun kosularini tanir.
 
 
-### 13.4 Beyin merkez: tek ekrandan izleme (1.4.0)
+### 13.4 Beyin merkez: kosu panosu gorunumu (1.4.1)
 
 ```powershell
 beyin merkez          # bu terminalde
 beyin merkez -Sekme   # yeni Windows Terminal sekmesinde
 ```
 
-Bir kez acarsin, butun sistemi izlersin. Ekran hicbir sey yazmaz; yalniz okur.
+Merkez, tum sistemi tek ekranda izler. Ekran salt okunurdur; onay satirlarini
+sohbete kendin yazarsin. Dis cerceve baslik ve saglik rozetini tasir. Durum
+renkleri saglik/engel, ajan renkleri Claude/Codex kimligini, mavi vurgu secimi
+ve guncel kosu adimini belirtir.
 
-- **Baslik:** durum sayaclari (calisiyor, incelemede, engelli, kota, sirada, bitti,
-  bosta), commit cubugu, bos RAM, onerilen es zamanli ajan sayisi, 7 gunluk maliyet.
-- **Senin onayin bekleniyor:** sohbete tek basina yazman gereken satirlar
-  (`baslat <runId>`, `birlestir <runId>`, `onayla TASK-x`).
-- **Kanatlar:** her proje bir kutu. Isi olan ajanlar ustte; bostakiler tek sonuk
-  satirda (`a` hepsini acar). Lider = ♛ Claude/Codex oturumu, isci = ⚒ Codex takim iscisi.
-  Her satirda durum noktasi, sure, jeton ve son eylem balonu (`▸ Bash: npm test`,
-  `✎ ...`, `… düşünüyor`) gorunur; sirlar maskelenir.
-- **Kosular:** plan → baslat → isciler → topla → birlestir → dogrula → ana dal
-  ilerlemesi ve siradaki adim.
-- **Pano | Aktarimlar** yan yana, en altta en fazla 5 satirlik **teshis seridi**
-  (sahipsiz kosu, kota, sessiz isci, eski aktarim, commit esigi).
+- **Ozet kartlari:** `AJANLAR`, `KOSULAR`, `ONAYLAR`, `KAYNAK`, `MALIYET` ve
+  `PANO-AKTARIM` toplamlari. Kaynak ve maliyet ozeti veri yoksa gosterilmez.
+  120 sutunun altinda kartlar tek ozet satirina iner (dikey alan canli bolumlere kalir).
+- **SIRADA:** Bekleyen en onemli karari veya kosunun sonraki adimini ve nedenini
+  renkli olarak gosterir.
+- **ONAY BEKLIYOR:** Bekleyen `baslat <runId>`, `birlestir <runId>` veya
+  `onayla TASK-x` satirini ve baglamini gosterir. Satiri yalniz sohbete yaz;
+  ekran kendisi onay vermez.
+- **Siralama:** kritik bolumler ustte: SIRADA, ONAY BEKLIYOR, TESHIS, KANATLAR,
+  KOSULAR, PANO ve AKTARIMLAR. Ekran sigmazsa en altta kac satirin ve hangi
+  bolumlerin gizlendigi yazar.
+- **KANATLAR:** Projeye gore lider oturumlarini ve takim iscilerini gruplar.
+  Etkin ajanlar once, sakinler ozet halinde gorunur; `a` ile tumunu acip
+  kapatabilirsin. Satirlarda durum, sure, jeton ve guvenli bicimde kisaltilmis
+  son eylem bulunur. Ajan metinleri ekranda tek satira indirilir ve sirlar
+  maskelenir.
+- **KOSULAR:** Her kosunun plan, baslat, topla, butunlestir, dogrula ve ana
+  dala alma adimlarini cizgiyle gosterir; etkin adim, rozet, isci ilerlemesi ve
+  sonraki eylem yer alir. Isci sayilari ve degisik dosya sayisi kosu ayrintisina,
+  giris/cikis jetonlari ve onbellek payi, sure ve baslangic saati kosu satirinda
+  gorunur. Biten kosulardan yalniz en yenisi gosterilir (`a` hepsi). Basarisiz, iptal, catismali, dogrulanamamis, uyarili veya onay
+  bekleyen kosular rozetle ayirt edilir.
+- **PANO ve AKTARIMLAR:** Acik kartlar ve bekleyen ajan aktarimlari birlikte
+  izlenir; dar pencerede bolumler alt alta gelir.
+- **TESHIS:** En fazla bes hata/uyariyi gosterir; fazlasi icin `beyin doktor`
+  onerilir.
 
-Durum tek kurala gore turetilir ve yaninda kaynagi yazar: surec olmusse `kapandi`,
-transkriptte son 2 dakikada kayit varsa `calisiyor`, karti `in_progress` ise
-`calisiyor` (⌛ bayat isaretiyle), surec canli ama sessizse `bosta`. Calisan bir
-isciden 10 dakikadir olay gelmiyorsa ⌛ ve teshis satiri cikar.
-
-Tuslar: `↑↓` sec, `Enter` odak (isci: panelini acar; lider: ayrinti satiri),
-`k` secili iscinin kosu panosu, `a` hepsi/aktifler, `r` tazele, `q` cik.
-Onay ve hata olaylari Windows bildirimi olarak da gelir (`BEYIN_BILDIRIM`).
-Yeni olay yoksa ekran yeniden cizilmez; canli veriler 1,5 sn, pano/aktarim/
-kaynak/maliyet/balon 6 sn'de bir tazelenir.
-
+Tuslar: `yukari/asagi` sec, `Enter` odak secili ajani (iscide isci panelini,
+liderde ayrintiyi) acar, `p` kosu panosunu acar, `a` sakin ajanlari gosterir/gizler,
+`r` tazeler, `q` cikar. Onay ve hata olaylari Windows bildirimi olarak da
+gelebilir (`BEYIN_BILDIRIM`). Canli kosu/oturum verisi hizli, pano, aktarim,
+kaynak ve maliyet verisi onbellekli araliklarla yenilenir.

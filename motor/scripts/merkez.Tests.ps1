@@ -108,3 +108,108 @@ Describe 'merkez ekrani (2026-10-15): tek kare duman testi' {
         $cikti | Should Not Match 'Exception'
     }
 }
+
+Describe 'merkez kosu ozeti ve siradaki adim' {
+    BeforeAll { . (Join-Path $PSScriptRoot 'merkez-veri.ps1') }
+    It 'kosu ozeti fixture turlerinde adimlari, rozetleri, sayaclari ve tokenlari toplar' {
+        $cases = @(
+            @{ Run = @{ status='planned'; workers=@() }; Current=1; Badge='onay' },   # plan tamam, sirada baslat (koşu panosu kurali)
+            @{ Run = @{ status='running'; workers=@(@{status='running'; changedPaths=@('a'); usage=@{input_tokens=11;output_tokens=2;cached_input_tokens=1}}) }; Current=2; Badge='calisiyor' },   # basladi: sirada topla
+            @{ Run = @{ status='running'; workers=@(@{status='paused_limit'; changedPaths=@(); usage=@{input_tokens=3;output_tokens=4;cached_input_tokens=2}}) }; Current=2; Badge='sef' },   # kota rozeti yalniz 'paused' kosuda (koşu panosu)
+            @{ Run = @{ status='paused'; workers=@(@{status='paused_limit'}) }; Current=2; Badge='kota' },
+            @{ Run = @{ status='integrated'; integration=@{ ok=$false; checks=@(@{command='a';status=0},@{command='b';status=1}) }; workers=@(@{status='integrated';verdict='fail'}) }; Current=3; Badge='kontrol' },   # gercek sema: ok + status (0 = gecti)
+            @{ Run = @{ status='verified'; workers=@(@{status='integrated';verdict='pass'}) }; Current=5; Badge='dogrulandi' },
+            @{ Run = @{ status='merged'; workers=@(@{status='integrated';verdict='pass'}) }; Current=6; Badge='anadalda' },
+            @{ Run = @{ status='aborted'; workers=@(@{status='aborted'}) }; Current=1; Badge='iptal' }
+        )
+        foreach ($c in $cases) {
+            $o = Get-MerkezKosuOzet $c.Run
+            $o.Adimlar.Count | Should Be 6
+            $o.Guncel | Should Be $c.Current
+            $o.Rozet | Should Be $c.Badge
+            $o.Kirik | Should Be ($c.Badge -in @('kontrol','iptal'))
+            ($o.JetonGiris -ge 0) | Should Be $true
+            ($o.JetonCikis -ge 0) | Should Be $true
+            ($o.JetonOnbellek -ge 0) | Should Be $true
+            $o.Kontrol.ContainsKey('Gecen') | Should Be $true
+            $o.Kontrol.ContainsKey('Toplam') | Should Be $true
+        }
+        $tok = Get-MerkezKosuOzet @{ status='running'; workers=@(@{status='running';usage=@{input_tokens=11;output_tokens=2;cached_input_tokens=1}},@{status='finished';usage=@{input_tokens=7;output_tokens=5;cached_input_tokens=3}}) }
+        $tok.JetonGiris | Should Be 18
+        $tok.JetonCikis | Should Be 7
+        $tok.JetonOnbellek | Should Be 4
+    }
+    It 'sirada onay satiri hata teshisini ve bitmemis kosuyu gecer' {
+        (Get-MerkezSirada @{ Onaylar=@(@{Satir='onayla TASK-1'}); Teshis=@(@{Seviye='err';Metin='hata'}); Kosular=@(@{Guncel=1}) }).Neden | Should Match 'onay'
+        (Get-MerkezSirada @{ Onaylar=@(); Teshis=@(@{Seviye='err';Metin='hata'}); Kosular=@(@{Guncel=1}) }).Renk | Should Be 'err'
+        (Get-MerkezSirada @{ Onaylar=@(); Teshis=@(); Kosular=@(@{Guncel=2}) }).Renk | Should Be 'warn'
+        (Get-MerkezSirada @{ Onaylar=@(); Teshis=@(); Kosular=@() }).Renk | Should Be 'ok'
+    }
+}
+
+Describe 'merkez tek kare boyut ve enjeksiyon regresyonu' {
+    It '90, 120 ve 170 sutunda temiz gecici vault ile cizer' {
+        $root = Join-Path ([IO.Path]::GetTempPath()) ('merkez-render-' + [guid]::NewGuid().ToString('N'))
+        $motor = Join-Path $root 'motor'; $scripts = Join-Path $motor 'scripts'; $hooks = Join-Path $motor 'hooks'
+        New-Item -ItemType Directory -Force -Path $scripts,$hooks | Out-Null
+        try {
+            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts
+            Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
+            foreach ($width in @(90,120,170)) {
+                # Alt surec UTF-8 yazar; ust surec de UTF-8 okumali, yoksa her cerceve karakteri birkac karaktere bolunur.
+                $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+                try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts 'merkez.ps1') -Vault $root -Tek -Genislik $width -Yukseklik 50 2>&1 | Out-String } finally { [Console]::OutputEncoding = $eskiKod }
+                $LASTEXITCODE | Should Be 0
+                $esc = [string][char]27; $bel = [string][char]7; $plain = [regex]::Replace([regex]::Replace($out, ($esc + '\[[0-9;?]*[A-Za-z]'), ''), ($esc + '\][^' + $bel + ']*' + $bel + '?'), '')   # PS 5.1: `e kacisi yok
+                foreach ($line in ($plain -split "`r?`n")) { $line.Length | Should BeLessThan ($width + 1) }
+                foreach ($label in @('SIRADA','KANATLAR','KO','PANO','TE')) { $plain | Should Match $label }
+            }
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'handoff ve kart basligindaki kontrol karakterleri satir veya OSC baslik enjeksiyonu yapmaz' {
+        $safe = Protect-MerkezSatir ("soru`n`e]0;INJECT`a devam")
+        $safe | Should Not Match ([string][char]27 + '\]')
+        $safe | Should Not Match "`n"
+    }
+}
+
+Describe 'merkez ekran metni temizligi (2026-10-15 guvenlik denetimi TASK-075)' {
+    It 'rol, isci adi, kosu kimligi ve siradaki adim metni cizimde kontrol dizisi tasimaz' {
+        $kaynak = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'merkez.ps1') -Raw -Encoding UTF8
+        $kaynak | Should Match 'Protect-MerkezSatir \(\[string\]\$ag\.Rol\)'
+        $kaynak | Should Match 'Protect-MerkezSatir \(\[string\]\$ag\.Ad\) 16'
+        $kaynak | Should Match 'Protect-MerkezSatir \(\[string\]\$k\.RunId\)'
+        $kaynak | Should Match 'Protect-MerkezSatir \(\[string\]\$k\.Sonraki\.Metin\)'
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+        $e = [string][char]27
+        (Protect-MerkezSatir ("R-1" + $e + "]0;SAHTE" + [char]7 + "x`nY") 30) | Should Be 'R-1x Y'
+    }
+}
+
+Describe 'merkez kod incelemesi regresyonlari (2026-10-15)' {
+    BeforeAll { . (Join-Path $PSScriptRoot 'merkez-veri.ps1') }
+    It 'kontrol sayimi gercek semayi okur; suren kosunun suresi simdiye kadar akar, biten kosu son olayda durur' {
+        $o = Get-MerkezKosuOzet @{ status='integrated'; integration=@{ ok=$false; checks=@(@{command='a';status=0},@{command='b';status=1}) }; workers=@() }
+        $o.Kontrol.Gecen | Should Be 1; $o.Kontrol.Toplam | Should Be 2
+        $bas = (Get-Date).ToUniversalTime().AddMinutes(-30).ToString('o'); $eski = (Get-Date).ToUniversalTime().AddMinutes(-27).ToString('o')
+        (Get-MerkezKosuOzet @{ status='running'; startedAt=$bas; history=@(@{at=$eski;event='started'}); workers=@() }).Sure -ge 1700 | Should Be $true
+        (Get-MerkezKosuOzet @{ status='merged'; startedAt=$bas; history=@(@{at=$eski;event='merged'}); workers=@() }).Sure -lt 400 | Should Be $true
+    }
+    It 'kanat: vault ile ayni onekli kardes klasor (Beyin-motor) vault kanadina dusmez' {
+        $v = Join-Path ([IO.Path]::GetTempPath()) 'OrnekVault'
+        $p = @{ Vault = $v }
+        Get-MerkezProje (Join-Path $v 'motor\scripts') $p | Should Be 'OrnekVault'
+        Get-MerkezProje ($v + '-motor') $p | Should Not Be 'OrnekVault'
+    }
+    It 'JSON onbellegi: degismeyen dosya ayni nesne, degisen dosya yeni deger, okunamayan dosya onceki deger' {
+        $f = Join-Path ([IO.Path]::GetTempPath()) ("merkez-json-" + [guid]::NewGuid().ToString('N') + '.json'); $onb = @{}
+        try {
+            Set-Content -LiteralPath $f -Value '{"a":1}' -Encoding UTF8
+            (Read-MerkezJsonOnb $f $onb).a | Should Be 1
+            Start-Sleep -Milliseconds 20; Set-Content -LiteralPath $f -Value '{"a":22}' -Encoding UTF8
+            (Read-MerkezJsonOnb $f $onb).a | Should Be 22
+            Remove-Item -LiteralPath $f -Force
+            (Read-MerkezJsonOnb $f $onb).a | Should Be 22
+        } finally { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+    }
+}

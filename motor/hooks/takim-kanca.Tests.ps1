@@ -38,7 +38,7 @@ function Write-KosuFixture([hashtable]$Tp, [string]$RunId, [string]$Durum = 'pla
               workers = @(@{ taskId = 'TASK-41'; role = 'docs_author'; status = $(if ($Durum -eq 'running') { 'running' } else { 'planned' }); worktree = 'C:\x\wt\TASK-41'; pid = 0; codexThreadId = "thr-$RunId" }) }
     [IO.File]::WriteAllText((Join-Path $Tp.TeamRuns "$RunId.json"), ($run | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
 }
-$isciEnv = @{ AGENTCHEF_TEAM_RUN = 'R-ISCI'; AGENTCHEF_TEAM_TASK = 'TASK-41'; AGENTCHEF_TEAM_WORKTREE = 'C:\x\wt\TASK-41'; BEYIN_AGENT = 'codex' }
+$isciEnv = @{ AGENTCHEF_TEAM_RUN = 'R-ISCI'; AGENTCHEF_TEAM_TASK = 'TASK-41'; AGENTCHEF_TEAM_WORKTREE = 'C:\x\wt\TASK-41'; BEYIN_AGENT = 'codex'; BEYIN_SE_TAVAN_MS = '20000' }   # yuk altinda kararli
 
 Describe 'Takim (2026-10-12): insan onayi fiilleri (prompt-counter)' {
     $tv = New-TakimVault; $tp = Get-BeyinPaths -Vault $tv

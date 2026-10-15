@@ -1,4 +1,4 @@
-# Degisiklik gunlugu
+﻿# Degisiklik gunlugu
 
 Bu dosya motorun surumler arasinda **kullanici icin ne degistigini** anlatir:
 hangi komut geldi, hangi davranis duzeldi, neyi bir daha eskisi gibi
@@ -20,6 +20,14 @@ Surum damgasi vault kokundeki `.beyin-version` dosyasindadir; `beyin durum`
 onu ve yayindaki surumu birlikte basar.
 
 ---
+
+## 1.4.1 - Merkez: kosu panosu gorunumu
+
+- **Beyin merkez yenilendi.** Dis cerceve, saglik rozeti, ozet kartlari ve SIRADA satiri sistem durumunu hizla okunur kilarken; ONAY BEKLIYOR bandi kullanici kararlarini baglamiyla one cikarir.
+- **Kosu ayrintilari eklendi.** Alti asamali ilerleme cizgisi, durum rozeti, isci ilerlemesi ve sonraki adim; kosu ozetinde degisen dosya sayisi, token kullanimi, sure ve baslangic bilgisiyle birlikte gorunur. KANATLAR, PANO, AKTARIMLAR ve TESHIS ekranin bolumleri olarak duzenlendi.
+- **Yenileme dongusu hizlandi**; hizli canli veriler ile onbellekli yavas ozetler ayrildi.
+- Dar ekran genislikleri (90/120/170) icin cizim testleri eklendi; dolu veriyle cizim sonraki adimda.
+- Calisma takim kosusuyla yapildi; ardindan tasarim, kod, guvenlik ve performans incelemeleri gerceklestirildi.
 
 ## 1.4.0 - Beyin merkez: tum sistemin tek izleme ekrani
 

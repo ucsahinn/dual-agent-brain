@@ -130,7 +130,9 @@ if ($seKart) {
     $seRef = "takim:$seRun`:$seKart"
     Write-BeyinMakbuz -Paths $p -Script 'session-end' -Outcome 'TAKIM_ISCI_BITTI' -Agent (Get-BeyinAgent) -Key (Get-BeyinSessionKey -SessionId $hook.session_id) `
         -Reason $seNeden -DurationMs (Get-SeMs) -Note "run=$seRun kart=$seKart prompts=$prompts"
-    if ((Get-SeMs) -lt 1500) {
+    # Zaman tavani (Codex SessionEnd 3 sn) varsayilan 1500 ms; testler yuk altinda kararli olsun diye BEYIN_SE_TAVAN_MS ile yukseltebilir.
+    $seTavan = 1500; if ($env:BEYIN_SE_TAVAN_MS -match '^\d{3,5}$') { $seTavan = [int]$env:BEYIN_SE_TAVAN_MS }
+    if ((Get-SeMs) -lt $seTavan) {
         try {
             $seVar = @(Get-BeyinHandoffListe -Paths $p | Where-Object { [string]$_.ref -eq $seRef }).Count
             if ($seVar -eq 0) {

@@ -102,6 +102,7 @@ TANI
   derin            Tam kontrol + canli 'claude -p' duman testi (gunluk butceden 1 harcar)
   makbuz [gun] [betik]  Motor kosu makbuzlari: ne yazildi, kac bayt, kac butce (varsayilan 1 gun)
   canli [dk]       Su an ne oluyor: aktif oturumlar, kuyruk, calisan is, butce, niyet (yazmaz)
+  merkez [-Sekme]  Tum sistemin canli izleme ekrani: liderler, takim kosulari, isciler, pano, aktarim, kaynak (yazmaz; -Sekme yeni WT sekmesinde acar)
   kullanim [gun]   Enjekte edilen kavram notu sonradan ACILDI mi? (retrieval makbuzu x Claude transkripti; -Json)
   skill-aday [gun] Tekrar eden yordamsal kavram notlarindan skill adayi listesi (86-compiled/skill-adaylari.md;
                    3+ oturum, 2+ gun, liste iceren not; skill'i ai-skill-create ile insan/Claude acar; -KuruCalisma)
@@ -484,6 +485,17 @@ switch ($KomutN) {
     { $_ -in @('derin', 'deep') } {
         $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri') -Bayrak @('-derin', '-ozet') -Slot 0 -Ekle @('-derin')
         Cagir 'doktor.ps1' @($a.Gecen)
+    }
+    { $_ -in @('merkez', 'center') } {
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault') -Bayrak @('-sekme', '-tek') -Slot 0
+        if ($a.Gecen -contains '-Sekme') {
+            $wt = (Get-Command wt.exe -ErrorAction SilentlyContinue).Source
+            if (-not $wt) { Write-Host 'HATA: wt.exe yok; sekmesiz calistir: beyin merkez' -ForegroundColor Red; exit 2 }
+            $yol = Join-Path $scripts 'merkez.ps1'
+            Start-Process -FilePath $wt -ArgumentList (('-w 0 new-tab --title "Beyin merkez" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + $yol + '"' + $(if ($a.Gecen -contains '-Vault') { $vi = [array]::IndexOf(@($a.Gecen), '-Vault'); ' -Vault "' + @($a.Gecen)[$vi + 1] + '"' } else { '' }))) | Out-Null
+            Write-Host 'Beyin merkez yeni sekmede acildi.'; exit 0
+        }
+        Cagir 'merkez.ps1' (@($a.Gecen | Where-Object { $_ -ne '-Sekme' }))
     }
     { $_ -in @('canli', 'live') } {
         $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-dakika') -Bayrak @('-json') -Slot 1

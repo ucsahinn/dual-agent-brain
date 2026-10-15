@@ -21,6 +21,21 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.4.0 - Beyin merkez: tum sistemin tek izleme ekrani
+
+- **Yeni komut `beyin merkez` (`-Sekme`).** Liderler (Claude/Codex oturumlari), takim kosulari ve
+  Codex iscileri, onay bekleyen satirlar, pano kartlari, aktarimlar, kaynak, 7 gunluk maliyet ve
+  teshis seridi tek ekranda. Projeler kanat kutulari; isi olan ajanlar ustte, bostakiler tek satirda.
+  Yalniz okur, hicbir sey yazmaz.
+- **Tek durum kurali.** Ajan durumu kanittan tek yerde turetilir (surec, transkript nabzi, kart,
+  kosu kaydi, gozetmen) ve kaynagiyla birlikte gosterilir; bayat durum ⌛ ile isaretlenir. Oturum
+  dosyasi yalniz kullanici mesajinda yazildigi icin nabiz artik transkriptin son kaydindan okunur.
+- **Etkinlik balonu.** Her ajanin son eylemi transkriptin kuyrugundan okunur (Claude ve Codex
+  bicimleri; dosyanin yalniz son 64 KB'si, onbellekli), 64 karaktere kisaltilir ve sirlar maskelenir.
+- **Odak.** Enter isci panelini acar, `k` kosu panosunu; onay ve hata olaylari Windows bildirimi verir.
+- Kavramlar AgentSpace ofis davranis spec'inden (durum onceligi, masada/geziniyor ayrimi, balon,
+  teshis seridi, iki hizda yoklama); kod, sprite ya da gorsel alinmadi.
+
 ## 1.3.6 - Panelden isci paneli ve kota sonrasi kendiliginden devam
 
 - **1-4 tuslari.** Kosu genel gorunumunde 1-4 tuslari o isciye ait paneli yeni Windows Terminal sekmesinde

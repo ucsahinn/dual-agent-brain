@@ -1103,7 +1103,7 @@ function RenderRun([int]$tick) {
     $L.Add((Row "$cAccent$BOLD▌ SIRADA$RS   $cText$BOLD$adim$RS" $w))
     if ($neden) { $L.Add((Row "$cAccent▌$RS          $nedenCol$neden$RS" $w)) }
     $kD = if ($script:detay) { "$cAccent[d]$RS$cText ayrıntıyı gizle$RS" } else { "$cFaint[d]$RS$cMuted ayrıntı$RS" }
-    $L.Add((HLine $w "$cFaint[q]$RS$cMuted çık$RS  $kD$cFrame  ─  $RS$cFaint[1-$([Math]::Min(4, [Math]::Max(1, $ws.Count)))]$RS$cMuted işçi paneli aç$RS$(if ($script:panelMesaj) { "$cFrame  ─  $RS$cWarn$($script:panelMesaj)$RS" })" '╰' '╯'))
+    $L.Add((HLine $w "$cFaint[q]$RS$cMuted çık$RS  $kD$cFrame  ─  $RS$cFaint[1-$([Math]::Min(4, [Math]::Max(1, $ws.Count)))]$RS$cMuted işçi paneli aç$RS$cFrame  ─  $RS$cFaint tüm sistem: beyin merkez$RS$(if ($script:panelMesaj) { "$cFrame  ─  $RS$cWarn$($script:panelMesaj)$RS" })" '╰' '╯'))
     $sb = New-Object Text.StringBuilder
     [void]$sb.Append("$ESC[H")
     foreach ($ln in $L) { [void]$sb.Append($ln).Append("$RS$ESC[K`n") }

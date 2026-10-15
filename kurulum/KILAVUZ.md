@@ -308,6 +308,7 @@ Asagidaki liste `kurulum\beyin.ps1` icindeki `Yaz-Yardim` fonksiyonunun tamamidi
 | `kullanim [gun]` | Enjekte edilen kavram notlari sonradan Read/Grep ile ACILDI mi, yoksa yalniz cevapta mi anildi? Retrieval makbuzlarini ayni oturumun Claude transkriptiyle eslestirir; Codex oturumlari 'transkript yok' sayilir. Varsayilan 7 gun; `-Json`. Rapor `.state/kullanim-son.json`. | Hayir (makbuz haric) |
 | `geri-getirme-olc` | Geri getirme regresyon kapisi: kavram notlarindan uretilen sorgularla vektor (bge-m3) ve kelime yolunun rank-1 / ilk-2 / bos donus oranlari. `-Dondur` fixture'i (`motor/scripts/fixtures/geri-getirme-holdout.json`, SHA-256'li) yeniden uretir - bilerek yapilir; `-Esik 0.8` altinda cikis 5. Doktor tam taramada son sonucu gosterir. | Yalniz `.state` ve -Dondur ile fixture |
 | `canli [dk]` | Su an ne oluyor: aktif oturumlar, kuyruk, calisan is, butce, niyet. Varsayilan pencere 30 dakika. | Hayir |
+| `merkez [-Sekme]` | **Tum sistemin canli izleme ekrani** (1.4.0): liderler (Claude/Codex oturumlari), takim kosulari ve iscileri, onay bekleyen satirlar, pano, aktarimlar, kaynak, maliyet ve teshis seridi tek ekranda. `-Sekme` yeni Windows Terminal sekmesinde acar. Ayrinti: 13.4. | Hayir |
 
 ```powershell
 beyin durum
@@ -1209,4 +1210,38 @@ yalniz dogrulanmis kosu icin kaydedilir; erken yazilirsa ajan neden kaydedilmedi
 - Pano Beyin'in kasasinda tutulur (`motor\scripts\.state\board.json`). Takimi Claude'da
   dogrudan team-conductor skill'i ile calistirirken de `beyin takim <komut>` kullan: onay
   kancasi yalniz bu panonun kosularini tanir.
+
+
+### 13.4 Beyin merkez: tek ekrandan izleme (1.4.0)
+
+```powershell
+beyin merkez          # bu terminalde
+beyin merkez -Sekme   # yeni Windows Terminal sekmesinde
+```
+
+Bir kez acarsin, butun sistemi izlersin. Ekran hicbir sey yazmaz; yalniz okur.
+
+- **Baslik:** durum sayaclari (calisiyor, incelemede, engelli, kota, sirada, bitti,
+  bosta), commit cubugu, bos RAM, onerilen es zamanli ajan sayisi, 7 gunluk maliyet.
+- **Senin onayin bekleniyor:** sohbete tek basina yazman gereken satirlar
+  (`baslat <runId>`, `birlestir <runId>`, `onayla TASK-x`).
+- **Kanatlar:** her proje bir kutu. Isi olan ajanlar ustte; bostakiler tek sonuk
+  satirda (`a` hepsini acar). Lider = ♛ Claude/Codex oturumu, isci = ⚒ Codex takim iscisi.
+  Her satirda durum noktasi, sure, jeton ve son eylem balonu (`▸ Bash: npm test`,
+  `✎ ...`, `… düşünüyor`) gorunur; sirlar maskelenir.
+- **Kosular:** plan → baslat → isciler → topla → birlestir → dogrula → ana dal
+  ilerlemesi ve siradaki adim.
+- **Pano | Aktarimlar** yan yana, en altta en fazla 5 satirlik **teshis seridi**
+  (sahipsiz kosu, kota, sessiz isci, eski aktarim, commit esigi).
+
+Durum tek kurala gore turetilir ve yaninda kaynagi yazar: surec olmusse `kapandi`,
+transkriptte son 2 dakikada kayit varsa `calisiyor`, karti `in_progress` ise
+`calisiyor` (⌛ bayat isaretiyle), surec canli ama sessizse `bosta`. Calisan bir
+isciden 10 dakikadir olay gelmiyorsa ⌛ ve teshis satiri cikar.
+
+Tuslar: `↑↓` sec, `Enter` odak (isci: panelini acar; lider: ayrinti satiri),
+`k` secili iscinin kosu panosu, `a` hepsi/aktifler, `r` tazele, `q` cik.
+Onay ve hata olaylari Windows bildirimi olarak da gelir (`BEYIN_BILDIRIM`).
+Yeni olay yoksa ekran yeniden cizilmez; canli veriler 1,5 sn, pano/aktarim/
+kaynak/maliyet/balon 6 sn'de bir tazelenir.
 

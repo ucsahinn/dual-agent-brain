@@ -111,7 +111,9 @@ only in `CLAUDE.md`.
   (wrapper over AgentChef team-run.mjs; conductor = the user's Claude session, workers =
   Codex, one worktree per card; human approval is one chat line: `baslat <runId>` before
   start, `birlestir <runId>` before merge; message one worker with
-  `aktar "..." -Isci TASK-x`; view `10-command-center/takim.md`), `kullanim [gun]` did an
+  `aktar "..." -Isci TASK-x`; view `10-command-center/takim.md`),
+  `merkez [-Sekme]` live whole-system monitor (leaders, runs, approvals, board, handoffs,
+  resources, cost, diagnostics; READ-ONLY, the user still types approval lines in chat), `kullanim [gun]` did an
   injected concept note actually get opened afterwards (retrieval receipt x Claude
   transcript; "reached context != used"), `geri-getirme-olc` retrieval regression gate
   (frozen holdout, vector/keyword rank-1; `-Dondur` regenerates the fixture), `kirp`

@@ -29,7 +29,7 @@ $RS = "$ESC[0m"; $BOLD = "$ESC[1m"
 $cText = FG 205 214 244; $cMuted = FG 166 173 200; $cFaint = FG 127 132 156; $cFrame = FG 69 71 90; $cFrame2 = FG 88 91 112
 $cTitle = FG 180 190 254; $cAccent = FG 137 180 250; $cOk = FG 166 227 161; $cWarn = FG 249 226 175; $cErr = FG 243 139 168
 $cPeach = FG 250 179 135; $cTeal = FG 148 226 213; $cMauve = FG 203 166 247; $cSky = FG 137 220 235
-$bgSel = BG 49 50 68; $bgGate = BG 58 50 36; $cBarOff = FG 69 71 90
+$bgSel = BG 49 50 68; $bgGate = BG 58 50 36; $cBarOff = FG 88 91 112; $cIz = FG 54 56 76   # cubuk izi: dolu koyu blok (░ taramasi koyu zeminde gorunmuyordu)
 $bgRun = BG 64 96 62; $bgIdle = BG 110 90 40; $bgDone = BG 49 66 110; $bgBad = BG 120 50 70; $bgWait = BG 49 50 68; $bgPart = BG 110 90 40
 $spin = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'); $script:tik = 0
 # DURUM rolu: dort nokta (calisiyor, insan/karar bekliyor, engelli, bosta); digerleri sozcukle
@@ -77,14 +77,14 @@ function KisaYas([double]$sn) {
 function Fmt([double]$n) { if ($n -ge 1e9) { return ('{0:0.0}Mr' -f ($n / 1e9)) }; if ($n -ge 1e6) { return ('{0:0.0}M' -f ($n / 1e6)) }; if ($n -ge 1e3) { return ('{0:0.0}K' -f ($n / 1e3)) }; return "$([int64]$n)" }
 function Bar([double]$oran, [int]$gen, [string]$renk) {
     $oran = [Math]::Max([double]0, [Math]::Min([double]1, $oran)); $dolu = [int][Math]::Round($oran * $gen)
-    return "$renk" + ('█' * $dolu) + "$cFrame" + ('░' * ($gen - $dolu)) + $RS
+    return "$renk" + ('█' * $dolu) + "$cIz" + ('█' * ($gen - $dolu)) + $RS
 }
 function RolTr([string]$r) { switch ($r) { 'root_cause_debugger' { 'hata ayıklayıcı' } 'docs_author' { 'belge yazarı' } 'qa_lead' { 'QA lideri' } 'spec_author' { 'spek yazarı' } 'test_verifier' { 'doğrulayıcı' } 'code_mapper' { 'kod haritacısı' } 'code_reviewer' { 'kod incelemeci' } 'security_auditor' { 'güvenlik denetçisi' } 'frontend_verifier' { 'arayüz doğrulayıcı' } 'design_reviewer' { 'tasarım incelemeci' } 'performance_auditor' { 'performans denetçisi' } 'docs_researcher' { 'belge araştırmacısı' } 'engineering_planner' { 'mühendislik planlayıcı' } '' { '' } default { $r -replace '_', ' ' } } }
 
 # ---------- cerceve (koşu panosu ile ayni) ----------
 function MiniBar([double]$oran, [int]$gen, [string]$renk) {
     $oran = [Math]::Max([double]0, [Math]::Min([double]1, $oran)); $on = [int][Math]::Round($oran * $gen)
-    return "$renk$('█' * $on)$cBarOff$('░' * ($gen - $on))$RS"
+    return "$renk$('█' * $on)$cIz$('█' * ($gen - $on))$RS"
 }
 function HLine([int]$w, [string]$label, [string]$left, [string]$right) {
     $lab = $(if ($label) { " $label$cFrame " } else { '' })
@@ -371,7 +371,8 @@ function Ciz {
     $aktifMi = { param($g) @($g.Group | Where-Object { $_.Durum -notin @('bosta', 'kapali', 'bitti') }).Count -gt 0 }
     $gruplar = @($a.Ajanlar | Group-Object -Property { $_.Kanat } | Sort-Object -Property @{ Expression = { @($_.Group | Where-Object { $_.Durum -notin @('bosta', 'kapali', 'bitti') }).Count }; Descending = $true }, @{ Expression = { ($_.Group | ForEach-Object { $_.NabizSn } | Measure-Object -Minimum).Minimum } })
     $aktifGrup = @($gruplar | Where-Object { & $aktifMi $_ }); $sakinGrup = @($gruplar | Where-Object { -not (& $aktifMi $_) })
-    $gosterGrup = $(if ($script:hepsi) { $gruplar } else { $aktifGrup })
+    # @(): tek kanatta $(...) diziyi tek GroupInfo'ya acar ve .Count kanattaki AJAN sayisini verir (iki sutun yanlis acilirdi)
+    $gosterGrup = @($(if ($script:hepsi) { $gruplar } else { $aktifGrup }))
     $bolumBas.Add(@{ Ad = 'KANATLAR'; I = $L.Count })
     $L.Add((HLine $w (Sec "KANATLAR ($($gruplar.Count))") '├' '┤'))
     $iki = ($w -ge 170 -and $gosterGrup.Count -ge 2)
@@ -439,7 +440,7 @@ function Ciz {
             for ($j = 0; $j -lt 4; $j++) { $x = $bw * $pay[$j] / [double]$nW; $hucre[$j] = [int][Math]::Floor($x); $kalan[$j] = $x - $hucre[$j] }
             $hedef = [int][Math]::Round($bw * [Math]::Min($nW, ($tz + $kp + $ks + $so)) / [double]$nW)
             while (($hucre | Measure-Object -Sum).Sum -lt $hedef) { $mx = 0; for ($j = 1; $j -lt 4; $j++) { if ($kalan[$j] -gt $kalan[$mx]) { $mx = $j } }; $hucre[$mx]++; $kalan[$mx] = -1 }
-            $iBar = "$cOk$('█' * $hucre[0])$cAccent$('█' * $hucre[1])$cWarn$('█' * $hucre[2])$cErr$('█' * $hucre[3])$cBarOff$('░' * [Math]::Max(0, $bw - ($hucre | Measure-Object -Sum).Sum))$RS"
+            $iBar = "$cOk$('█' * $hucre[0])$cAccent$('█' * $hucre[1])$cWarn$('█' * $hucre[2])$cErr$('█' * $hucre[3])$cIz$('█' * [Math]::Max(0, $bw - ($hucre | Measure-Object -Sum).Sum))$RS"
             $parca = @("$iBar $cText$($k.Biten)/$($k.Isci)$RS$cMuted işçi$RS$(if ($kp) { "$cAccent · $kp şef kapsadı$RS" })")
             if ($k.Kontrol -and $k.Kontrol.Toplam) { $parca += $(if ($k.Kontrol.Gecen -eq $k.Kontrol.Toplam) { "$cOk✔ $($k.Kontrol.Gecen)/$($k.Kontrol.Toplam) kontrol$RS" } else { "$cErr✖ $($k.Kontrol.Gecen)/$($k.Kontrol.Toplam) kontrol$RS" }) }
             if ($k.JetonGiris -or $k.JetonCikis) { $parca += "${cMuted}jeton$RS $cText$(Fmt ([double]$k.JetonGiris))$RS$cFaint↓ $RS$cText$(Fmt ([double]$k.JetonCikis))$RS$cFaint↑$RS$(if ($k.JetonOnbellek -and $k.JetonGiris) { "$cMuted · önbellek %$([int][Math]::Round(100.0 * $k.JetonOnbellek / $k.JetonGiris))$RS" })" } elseif ($k.Jeton) { $parca += "$cMuted$(Fmt $k.Jeton) jeton$RS" }
@@ -454,7 +455,8 @@ function Ciz {
 
     # ---- PANO | AKTARIMLAR ----
     # Yan yana: pano tarafi %42 (kart satiri kisa, aktarim metni uzun), en az 52 hucre
-    $yan = ($w -ge 140); $kw = $(if ($yan) { [Math]::Max(52, [int][Math]::Floor(($ic - 2) * 0.42)) } else { $ic })
+    # biri bossa yan yana koyma: bos taraf uzun listenin yaninda bos sutun birakir
+    $yan = ($w -ge 140 -and $a.Kartlar.Count -gt 0 -and $a.Aktarimlar.Count -gt 0); $kw = $(if ($yan) { [Math]::Max(52, [int][Math]::Floor(($ic - 2) * 0.42)) } else { $ic })
     $pL = New-Object System.Collections.Generic.List[string]; $aL = New-Object System.Collections.Generic.List[string]
     foreach ($kt in @($a.Kartlar | Select-Object -First 6)) {
         $st = [string]$kt.status; $r = switch ($st) { 'blocked' { $cErr } 'review' { $cWarn } 'in_progress' { $cOk } default { $cFaint } }

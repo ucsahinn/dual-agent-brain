@@ -295,6 +295,7 @@ Describe 'merkez sabit veriyle kenar durumlari (onay, hatali kosu, engelli kart)
                 $plain | Should Match 'onayla TASK-9'
                 $plain | Should Match 'KONTROL DÜŞTÜ'
                 $plain | Should Match '1 HATA'
+                @($satirlar | Where-Object { $_ -match '▣ demo' })[0].Split([char]0x2502).Count | Should Be 3   # tek kanat: ortada sutun ayraci yok
             }
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }

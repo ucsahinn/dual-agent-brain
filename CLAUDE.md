@@ -124,6 +124,8 @@ Her anlamli oturum iz birakir: ya bir not, ya bir karar, ya guncellenmis bir dos
   Claude oturumu, isciler = Codex, kart basina worktree; insan onayi sohbete tek satir:
   `baslat <runId>` start'tan once, `birlestir <runId>` merge'den once; isciye mesaj
   `aktar "..." -Isci TASK-x`; gorunum `10-command-center/takim.md`),
+  `merkez [-Sekme]` tum sistemin canli izleme ekrani (liderler, kosular, onaylar, pano,
+  aktarimlar, kaynak, maliyet, teshis; SALT OKUNUR, onay satirini yine sohbete sen yazarsin),
   `kullanim [gun]` enjekte edilen kavram notu sonradan gercekten acildi mi (retrieval
   makbuzu x Claude transkripti; "baglama geldi != kullanildi"), `geri-getirme-olc`
   geri getirme regresyon kapisi (dondurulmus holdout, vektor/kelime rank-1; `-Dondur`

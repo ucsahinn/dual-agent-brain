@@ -21,6 +21,16 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.4.4 - Merkez: gercek terminalde dogrulama duzeltmeleri
+
+- Tek kanat varken ekran yanlislikla iki sutuna bolunup sag yarisi bos kaliyordu
+  (PowerShell tek ogeli diziyi acinca .Count ajan sayisini veriyordu); duzeldi.
+- Pano bos ya da aktarim yoksa iki liste yan yana konmaz (bos sutun kalmaz).
+- Ilerleme cubuklarinin bos kismi koyu dolu blokla cizilir; eskiden tarama
+  deseni koyu zeminde gorunmuyordu.
+- Bagimsiz dogrulama: xterm.js 5.5.0 ile 90/120/170/210 sutun, canli ve kenar
+  durumlarinda 8 karenin hepsinde cerceve kapali, tasma yok.
+
 ## 1.4.3 - Merkez: eksiksiz ve okunur panel
 
 - **Kartlar satiri tam doldurur** (sagda bosluk kalmaz) ve ucuncu satir kazandi:

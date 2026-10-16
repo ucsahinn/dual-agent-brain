@@ -21,6 +21,34 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.5.1 - Merkez: canli etkinlik, sakin islemci, ic ice surec yok, QA duzeltmeleri
+
+Uc uzman ajanin (QA lideri, performans denetcisi, tasarim incelemecisi) bulgulari:
+
+- **Ic ice surec yok:** yeniden yukleme eskiden yeni panel surecini iceriden baslatip bekliyordu; her yayin bellekte
+  135-205 MB'lik bir surec birakiyordu (11 saatlik panelde dort surec zinciri). Simdi kucuk bir baslatici dongusu
+  paneli acik sekmesiyle yeniden baslatir (cikis kodu 75); bellekte en cok baslatici + bir panel kalir.
+- **Islemci:** bostaki panel cekirdegin ~%35'ini yiyordu (her 120 ms'de butun kare). Simdi: canlanmayan bolumler
+  (BUGUN, kartlar, SIRADA/TESHIS, pano/aktarim, olaylar) veri degismedikce yeniden kurulmaz; ajan satiri saniyede bir
+  kurulur, yalniz doner simge ve nabiz yerlestirilir; olcum/kesme/satir onbellekli; hareket yokken kare saniyede bir
+  (tuslar yine aninda); aktarim listesi (426 dosya, 20 sn'de bir ~400 ms) yalniz klasor degisince okunur; 7 gunden eski
+  kosu kayitlari okunmaz.
+- **Canli etkinlik seridi:** her calisan ajanin satirinda son 2 dakikanin etkinligi (kimlik renginden yesile); yeni
+  olayda son hucre atar. Ozdes tarama cubuklari kalkti: kim gercekten is yapiyor, kim takili, bir bakista.
+- **Anlamli hareket:** hata rozeti 60 sn, onay rozeti 30 sn atar sonra sabit (alarm yorgunlugu yok); baslik koseleri
+  en agir durumun renginde; calisan kosunun guncel adimi atar; BUGUN sayilari yeni degere yuvarlanir.
+- **Temiz akis:** ayni ajanin ardisik rutin olaylari tek satir ("✎ özet ×8 · ⇄ aktarım ×4  20:31–22:16");
+  gorulmemis olay sayaci yalniz anlamli olaylari sayar (99 ust sinir).
+- **Kartlar:** bos KOSULAR/ONAYLAR kartlari tek sessiz satira iner; maliyet kartinda 7 gunluk harcama seridi; ajan
+  egilimi sabitse "sabit N", degisiyorsa farki gosterir; eski maliyet taramasi uyari renginde ve TESHIS'te tazeleme
+  komutu (sabahki kismi rakam dunun tam gunuyle kiyaslanmaz).
+- **QA duzeltmeleri:** secim ekran disina tasarsa liste kayar (gorunmeyen satir kopyalanmaz); engelli isci teshis alir
+  ve kanatta "aktif" sayilmaz; kosu panosu basligi/isci tablosu alanlari temizlenir ve kesilir (OSC/ANSI enjeksiyonu,
+  tasma); tek olayli gunde "OLAYLAR (9)" hatasi; 32+ karakterlik proje adlari "***" maskelenmiyordu; 90 sutundan dar
+  pencerede net uyari; "sigmadi" bildirimi kismen gizlenen bolumleri de sayar; kosu kaydi silinmis kart yetim; bozuk
+  maliyet dosyasi kareyi dusurmez; ortadan kisaltilan uzun komut (bas + son gorunur).
+- **Hata SIRADA'da:** aciklama baslikta, komutu kopyalanabilir "ilk adim" olarak.
+
 ## 1.5.0 - Merkez: sekmeler, Aurora paleti, ajan ayrintisi, BUGUN, panoya kopyalama
 
 - **Sekmeler:** 1 Genel, 2 Ajanlar, 3 Kosular, 4 Olaylar (`Tab` / `1`-`4`). Dar ekranda her sey

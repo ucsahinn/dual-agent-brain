@@ -23,7 +23,7 @@ $script:MerkezYol = @{}      # "ajan|id" -> transkript yolu
 $script:MerkezYok = @{}      # "ajan|id" -> son basarisiz arama zamani
 $script:MerkezSonuc = @{}    # "ajan|id" -> @{ Len; Mtime; Sonuc }
 $script:MerkezAyristirma = 0 # test/teshis: gercek ayristirma sayaci
-$script:MerkezMaxMetin = 160   # ekran Cut ile kendi genisligine keser; kaynakta 64 genis ekranda balonu bosuna kisaltiyordu
+$script:MerkezMaxMetin = 400   # ekran Cut ile kendi genisligine keser; kaynakta 64 genis ekranda balonu bosuna kisaltiyordu
 
 function Clear-MerkezOnbellek {
     $script:MerkezYol = @{}; $script:MerkezYok = @{}; $script:MerkezSonuc = @{}; $script:MerkezAyristirma = 0

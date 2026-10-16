@@ -294,7 +294,7 @@ Describe 'merkez sabit veriyle kenar durumlari (onay, hatali kosu, engelli kart)
                 $plain | Should Match 'baslat R-ONAY'
                 $plain | Should Match 'onayla TASK-9'
                 $plain | Should Match 'KONTROL DÜŞTÜ'
-                $plain | Should Match '1 HATA'
+                $plain | Should Match '\d HATA'   # makinenin bellek durumu ikinci bir hata ekleyebilir
                 @($satirlar | Where-Object { $_ -match '▣ demo' })[0].Split([char]0x2502).Count | Should Be 3   # tek kanat: ortada sutun ayraci yok
             }
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
@@ -563,5 +563,59 @@ Describe 'merkez-balon 1.5.0: ajan ayrintisi' {
             ($null -ne $r.SonIstem) | Should Be $true
             $n = Get-MerkezAyristirmaSayisi; [void](Get-MerkezAyrinti -Ajan claude -OturumId $id -Adim 5); (Get-MerkezAyristirmaSayisi) | Should Be $n
         } finally { Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; Remove-Item -LiteralPath $kok -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'merkez 1.5.1: QA kenar durumlari' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+        function YeniVault {
+            $root = Join-Path ([IO.Path]::GetTempPath()) ('merkez-qa-' + [guid]::NewGuid().ToString('N'))
+            $scripts = Join-Path $root 'motor\scripts'; $hooks = Join-Path $root 'motor\hooks'
+            New-Item -ItemType Directory -Force -Path $scripts, $hooks, (Join-Path $scripts '.state\team-runs'), (Join-Path $scripts '.state\makbuz') | Out-Null
+            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
+            Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
+            return $root
+        }
+        function Ciz([string]$root, [string[]]$ek) {
+            $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+            try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'motor\scripts\merkez.ps1') -Vault $root -Tek @ek 2>&1 | Out-String } finally { [Console]::OutputEncoding = $eskiKod }
+            return [regex]::Replace($out, ([string][char]27 + '\[[0-9;?]*[A-Za-z]'), '')
+        }
+    }
+    It 'uzun kebab/klasor adi sir sayilip *** olmaz; gercek sir yine maskelenir' {
+        Protect-MerkezSatir 'my-very-long-project-folder-name-2026-q4' 80 | Should Be 'my-very-long-project-folder-name-2026-q4'
+        Protect-MerkezSatir ('tok ' + 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7') 80 | Should Match '\*\*\*'
+    }
+    It 'engelli isci teshis alir; kaydi silinmis kosunun karti yetim sayilir' {
+        $root = YeniVault
+        try {
+            $p = Get-BeyinPaths -Vault $root
+            @{ runId = 'R-ENG'; repoName = 'demo'; status = 'running'; workers = @(@{ taskId = 'TASK-1'; status = 'failed'; role = 'qa_lead' }, @{ taskId = 'TASK-2'; status = 'running'; role = 'docs_author'; pid = $PID }) } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $p.TeamRuns 'R-ENG.json')
+            @{ tasks = @(@{ id = 'TASK-7'; status = 'todo'; title = 'Team run R-YOK: qa_lead'; owner = @{ agent = 'codex'; session = 'team-R-YOK' } }) } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 $p.Board
+            $a = Get-MerkezAnlik -Paths $p
+            (@($a.Teshis | ForEach-Object { $_.Metin }) -join '|') | Should Match 'TASK-1 işçisi engelli \(failed\)'
+            $a.Yetim['TASK-7'].Durum | Should Be 'kayip'
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'tek olayli gun: Olaylar basligi (1) der (tek oge hashtable olarak acilmaz)' {
+        $root = YeniVault
+        try {
+            $f = Join-Path $root ('motor\scripts\.state\makbuz\' + (Get-Date).ToString('yyyy-MM-dd') + '.jsonl')
+            [IO.File]::WriteAllText($f, ((@{ ts = (Get-Date).ToString('o'); script = 'yayinla'; outcome = 'YAYIN_OK'; agent = 'claude'; key = 'K' } | ConvertTo-Json -Compress) + "`n"))
+            $o = Ciz $root @('-Sekme', 'Olaylar', '-Genislik', '120', '-Yukseklik', '30')
+            $o | Should Match 'OLAYLAR \(1\)'
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'bozuk maliyet dosyasi kareyi dusurmez, yalniz kart "okunamadi" der' {
+        $root = YeniVault
+        try {
+            $d = Join-Path $root 'motor\scripts\.state\maliyet'; New-Item -ItemType Directory -Force -Path $d | Out-Null
+            Set-Content -LiteralPath (Join-Path $d 'son.json') -Encoding UTF8 -Value '{"v":1,"gun":7,"claudeUsd":"abc","codexJeton":1,"buyukBaglamUsd":0}'
+            $o = Ciz $root @('-Genislik', '170', '-Yukseklik', '50')
+            $o | Should Match 'maliyet dosyası okunamadı'
+            $o | Should Match 'SIRADA'
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }

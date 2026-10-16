@@ -1274,6 +1274,8 @@ Maliyette bu tam gundur.
   - 5+ dk tek aracta kalan oturum, izin istemi olabilir;
   - kosusu kapanmis yetim pano karti;
   - 3 gunden eski aktarim.
+- **Etkinlik seridi:** calisan ajanin satirindaki 6 hucre son 2 dakikanin etkinligidir (20 sn'lik kovalar); yeni olayda
+  son hucre atar, 60 sn sessiz ajanda donar.
 - **KANATLAR:** tek ajanli kanat tek satirdir. Siralama sabittir: once dikkat
   isteyen, sonra uzun islem, sonra calisan, sonra ad. Calisan ajanin yaninda
   tarama cubugu doner; 2+ dk tek aracta kalan ajan `◷ uzun islem` olarak gosterilir.
@@ -1308,7 +1310,8 @@ dizisi iceren satir kopyalanmaz.
 
 Onay ve hata olaylari Windows bildirimi olarak da gelebilir (`BEYIN_BILDIRIM`).
 Motor dosyalari guncellenince panel, hepsi birkac saniye oturduktan sonra acik
-sekmesiyle kendini yeniden yukler.
+sekmesiyle kendini yeniden yukler; kucuk bir baslatici dongusu bunu yaptigi icin eski panel sureci bellekte
+birikmez. Hareket yokken panel saniyede bir cizilir (islemci sakin), tuslar yine aninda islenir.
 
 Test ve ekran goruntusu icin su parametreler var:
 - `beyin merkez` betigi: `-Tek -Sekme Genel|Ajanlar|Kosular|Olaylar|Hepsi -Genislik N -Yukseklik N -Ayrinti -Zemin boya`, cizim suresi icin `-Olcum N`;

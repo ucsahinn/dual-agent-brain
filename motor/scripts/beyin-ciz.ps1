@@ -83,10 +83,25 @@ function Get-CizGuvenliMetin([string]$s) {
     return $rxCizEmojiBmp.Replace($s, '•')
 }
 function Strip([string]$s) { return $rxAnsi.Replace($s, '') }
-function VisLen([string]$s) { $t = $rxAnsi.Replace($s, ''); return $t.Length + $rxGenis.Matches($t).Count }
+# Olcum onbellegi: ayni metin kare basina onlarca kez olculuyor (Pad/Row/Cut); kare suresinin ~%22'si (performans denetimi).
+$script:CizVisOnb = New-Object 'System.Collections.Generic.Dictionary[string,int]'
+function VisLen([string]$s) {
+    $v = 0; if ($script:CizVisOnb.TryGetValue($s, [ref]$v)) { return $v }
+    $t = $rxAnsi.Replace($s, ''); $v = $t.Length + $rxGenis.Matches($t).Count
+    if ($script:CizVisOnb.Count -gt 8000) { $script:CizVisOnb.Clear() }
+    $script:CizVisOnb[$s] = $v; return $v
+}
+# Saf islev onbellekleri (Cut/Pad/Row): degismeyen satir her karede ayni ciktiyi uretir. $RS zemin kipiyle degisir: anahtarda.
+$script:CizCutOnb = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+function Clear-CizOnbellek { $script:CizCutOnb.Clear(); $script:CizVisOnb.Clear() }
 function Cut([string]$s, [int]$w) {
     if ($w -le 0) { return '' }
     if ((VisLen $s) -le $w) { return $s }
+    $ok = "c$w|$RS|$s"; $v = $null; if ($script:CizCutOnb.TryGetValue($ok, [ref]$v)) { return $v }
+    if ($script:CizCutOnb.Count -gt 8000) { $script:CizCutOnb.Clear() }
+    $v = CutHam $s $w; $script:CizCutOnb[$ok] = $v; return $v
+}
+function CutHam([string]$s, [int]$w) {
     $out = New-Object Text.StringBuilder; $vis = 0; $pos = 0; $hedef = $w - 1; $bitti = $false
     $parcalar = @($rxAnsi.Matches($s)) + @($null)
     foreach ($m in $parcalar) {
@@ -111,8 +126,15 @@ function Cut([string]$s, [int]$w) {
     }
     return $out.ToString() + "…$RS"
 }
-function Pad([string]$s, [int]$w) { $v = VisLen $s; if ($v -le $w) { return $s + (' ' * ($w - $v)) }; $s = Cut $s $w; return $s + (' ' * [Math]::Max(0, $w - (VisLen $s))) }
+function Pad([string]$s, [int]$w) { $v = VisLen $s; if ($v -le $w) { return $s + (' ' * ($w - $v)) }; $s = Cut $s $w; return $s + (' ' * [Math]::Max(0, $w - (VisLen $s))) }   # VisLen + Cut onbellekli
 function PadL([string]$s, [int]$w) { $s = Cut $s $w; return (' ' * [Math]::Max(0, $w - (VisLen $s))) + $s }
+function CutMid([string]$s, [int]$w) {
+    # ortadan kisaltir: bas (arac adi) ve son (dosya/yol) gorunur; "Bash: mkdir -p ~/…/scratchpad". ANSI/genis karakterde Cut'a duser.
+    if ($w -le 0) { return '' }; if ((VisLen $s) -le $w) { return $s }
+    if ($w -lt 12 -or $rxAnsi.IsMatch($s) -or $rxGenisVeyaVekil.IsMatch($s)) { return (Cut $s $w) }
+    $bas = [int][Math]::Floor(($w - 1) * 0.55); $son = $w - 1 - $bas
+    return $s.Substring(0, $bas) + '…' + $s.Substring($s.Length - $son)
+}
 function CutLeft([string]$s, [int]$w) {
     # duz metni SOLDAN keser (yol gibi: sonu onemli). Genislige duyarli.
     if ($w -le 0) { return '' }; if ((VisLen $s) -le $w) { return $s }
@@ -213,7 +235,7 @@ function Spark([double[]]$v, [int]$gen, [int[]]$c1, [int[]]$c2, [double]$maks = 
     }
     return "$sb$RS"
 }
-function Nabiz([int[]]$c, [double]$hiz = 0.55) { return (Karis $rgbIz $c (0.35 + 0.65 * (([Math]::Sin($script:tik * $hiz) + 1) / 2))) }
+function Nabiz([int[]]$c, [double]$hiz = 0.55) { $script:CizCanli = $true; return (Karis $rgbIz $c (0.35 + 0.65 * (([Math]::Sin($script:tik * $hiz) + 1) / 2))) }
 
 # ---------- hareket durumu: parlama ve yumusak gecis ----------
 # Parlama: bir anahtarin imzasi ILK goruldukten SONRA degisirse 2.5 sn sonen vurgu (ilk okumada hicbir sey parlamaz).
@@ -227,14 +249,14 @@ function Set-CizFlas([hashtable]$Durum, [string]$Anahtar, [string]$Imza, [dateti
 function Get-CizFlasOran([hashtable]$Durum, [string]$Anahtar, [datetime]$Simdi, [int]$Ms = 2500) {
     $e = $Durum[$Anahtar]; if ($null -eq $e -or $e.Zaman -eq [datetime]::MinValue) { return 0.0 }
     $g = ($Simdi - $e.Zaman).TotalMilliseconds; if ($g -lt 0 -or $g -ge $Ms) { return 0.0 }
-    $x = 1.0 - $g / $Ms; return $x * $x   # sonerken yavaslar
+    $script:CizCanli = $true; $x = 1.0 - $g / $Ms; return $x * $x   # sonerken yavaslar
 }
 # Yumusak gecis: gosterilen deger hedefe her karede kalan farkin $Adim kadarini yaklasir (cubuk ziplamaz, dolar).
 function Get-CizTween([hashtable]$Durum, [string]$Anahtar, [double]$Hedef, [double]$Adim = 0.35) {
     if (-not $Durum.ContainsKey($Anahtar)) { $Durum[$Anahtar] = $Hedef; return $Hedef }
     $v = [double]$Durum[$Anahtar]; $d = $Hedef - $v
     if ([Math]::Abs($d) -lt 0.004) { $Durum[$Anahtar] = $Hedef; return $Hedef }
-    $v += $d * $Adim; $Durum[$Anahtar] = $v; return $v
+    $script:CizCanli = $true; $v += $d * $Adim; $Durum[$Anahtar] = $v; return $v
 }
 
 # ---------- cerceve ----------
@@ -243,7 +265,11 @@ function HLine([int]$w, [string]$label, [string]$left, [string]$right) {
     $fill = $w - 2 - (VisLen $lab) - $(if ($right) { 1 } else { 0 }); if ($fill -lt 0) { $fill = 0 }
     return "$cFrame$left─$lab$('─' * $fill)$right$RS"
 }
-function Row([string]$c, [int]$w) { return "$cFrame│$RS " + (Pad $c ($w - 4)) + " $cFrame│$RS" }
+function Row([string]$c, [int]$w) {
+    $ok = "r$w|$RS|$c"; $v = $null; if ($script:CizCutOnb.TryGetValue($ok, [ref]$v)) { return $v }
+    if ($script:CizCutOnb.Count -gt 8000) { $script:CizCutOnb.Clear() }
+    $v = "$cFrame│$RS " + (Pad $c ($w - 4)) + " $cFrame│$RS"; $script:CizCutOnb[$ok] = $v; return $v
+}
 function Blank([int]$w) { return (Row '' $w) }
 function Cols([string]$a, [string]$b, [int]$w, [int]$solW) { return (Pad $a ($solW - 1)) + " $cFrame│ $RS" + (Pad $b ($w - 4 - $solW - 2)) }
 function Sec([string]$ad, [string]$renk = $cAccent) { return "$renk$BOLD$ad$RS" }

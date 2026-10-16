@@ -839,9 +839,9 @@ function RenderRun([int]$tick) {
 
     # ---- baslik: taban dal saat'i ezmesin diye gerekirse kirpilir ----
     $clockLab = "$cFrame─ $cFaint$((Get-Date).ToString('HH:mm'))$RS$cFrame ─╮$RS"
-    $sabit = "$cTitle$BOLD$Run$RS$cFrame · $cMuted koşu panosu$RS$cFrame · $cMuted taban dal $RS" + $(if ($rr.repoName) { "$cFrame · $cMuted repo $cText$($rr.repoName)$RS" } else { '' })
+    $sabit = "$cTitle$BOLD$Run$RS$cFrame · $cMuted koşu panosu$RS$cFrame · $cMuted taban dal $RS" + $(if ($rr.repoName) { "$cFrame · $cMuted repo $cText$(Cut (Clean ([string]$rr.repoName)) 30)$RS" } else { '' })
     $tabanGen = [Math]::Max(8, ($w - 9 - 6) - (VisLen $sabit))
-    $titleLab = "$cTitle$BOLD$Run$RS$cFrame · $cMuted koşu panosu$RS$cFrame · $cMuted taban dal $cText$(Cut ([string]$rr.baseBranch) $tabanGen)$RS" + $(if ($rr.repoName) { "$cFrame · $cMuted repo $cText$($rr.repoName)$RS" } else { '' })
+    $titleLab = "$cTitle$BOLD$Run$RS$cFrame · $cMuted koşu panosu$RS$cFrame · $cMuted taban dal $cText$(Cut (Clean ([string]$rr.baseBranch)) $tabanGen)$RS" + $(if ($rr.repoName) { "$cFrame · $cMuted repo $cText$(Cut (Clean ([string]$rr.repoName)) 30)$RS" } else { '' })
     $L.Add((HLine ($w - 9) $titleLab '╭' '') + $clockLab)
 
     # ---- zamanlar ----
@@ -985,7 +985,7 @@ function RenderRun([int]$tick) {
         $sha = if ($wk.commit) { " $cFaint$(([string]$wk.commit).Substring(0, [Math]::Min(7, ([string]$wk.commit).Length)))$RS" } else { '' }
         $dosyaH = "$cText$(@($wk.changedPaths | Where-Object { $null -ne $_ }).Count)$RS$sha"
         $sonuc = if (-not $wk.verdict -and $wk.note) { "$cWarn◐ şef$RS" } else { (VerdictTr ([string]$wk.verdict)) + $(if ($o1 -and $o1.toplam -gt 0 -and $wk.verdict -and $o1.gecen -lt $o1.toplam) { " $cFaint$($o1.gecen)/$($o1.toplam)$RS" } else { '' }) }
-        $L.Add((Row ("  $cText$(Pad ([string]$wk.taskId) 9)$RS $cMuted$(Pad (RolTr ([string]$wk.role)) $rolW)$RS $dc$(Pad ($dm + (IsciDurumTr $d)) 14)$RS $(Pad $sureHucre (11 + $(if ($barG) { $barG + 1 } else { 0 }))) $cMuted$(Pad $jeton 11)$RS $(Pad $dosyaH 13) $(Pad $sonuc 14)" + $(if (-not $dar) { "$sonCol$son$RS" } else { '' })) $w))
+        $L.Add((Row ("  $cText$(Pad (Clean ([string]$wk.taskId)) 9)$RS $cMuted$(Pad (RolTr (Clean ([string]$wk.role))) $rolW)$RS $dc$(Pad ($dm + (IsciDurumTr $d)) 14)$RS $(Pad $sureHucre (11 + $(if ($barG) { $barG + 1 } else { 0 }))) $cMuted$(Pad $jeton 11)$RS $(Pad $dosyaH 13) $(Pad $sonuc 14)" + $(if (-not $dar) { "$sonCol$son$RS" } else { '' })) $w))
         if ($wk.failure) { $L.Add((Row "            $cErr↳ $(CutWord (MotorHataTr ([string]$wk.failure)) ($inner - 16))$RS" $w)) }
         if ($wk.note) {
             $nl2 = @(Wrap ((Clean ([string]$wk.note)) -replace '\s+', ' ') ($inner - 34))

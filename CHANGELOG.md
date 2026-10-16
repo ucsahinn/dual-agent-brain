@@ -21,6 +21,30 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.5.0 - Merkez: sekmeler, Aurora paleti, ajan ayrintisi, BUGUN, panoya kopyalama
+
+- **Sekmeler:** 1 Genel, 2 Ajanlar, 3 Kosular, 4 Olaylar (`Tab` / `1`-`4`). Dar ekranda her sey
+  tek sayfaya sigmak zorunda kalmaz; sekme cipinde calisan ajan, acik kosu ve gorulmemis olay sayisi.
+- **Ajan ayrintisi** (`Enter`): son 5 arac adimi, model, baglam cubugu, oturum suresi, "siranı bekliyor"
+  suresi, bugunku maliyet, surdurme komutu. 170 sutun ve ustunde yan panel, daha darda satir ici.
+- **BUGUN seridi** ve Olaylar sekmesinde bugun/dun tablosu: oturum, ozet, commit (git calistirmadan
+  reflog'dan), yayin, derleme, hata, Claude maliyeti ve saatlik etkinlik. "dun" = dunun ayni saatine kadar.
+- **`c` panoya kopyala:** secili satirin guvenli komutu (aktarim kapatma, yetim kart iptali, teshis komutu,
+  oturum surdurme, onay satiri). Beyaz liste, kabuk islecli metin reddedilir, satir sonu eklenmez.
+- **Aurora paleti** ve ortak cizim katmani `beyin-ciz.ps1`: renk anlam rolu olarak tek yerde, olculmus
+  kontrast (soluk metin 4.3:1, cerceve 2.4:1; eski cerceve gercek ekranda gorunmuyordu). Zemin `BEYIN_MERKEZ_ZEMIN`:
+  `osc` (Windows Terminal sekmesi laciverte boyanir, cikista geri alinir), `boya`, `kapali`.
+- **Anlamli hareket:** uyari rozeti ve uyari durumundaki SIRADA artik sabit (yalniz hata nabiz atar),
+  baslik noktasi yalniz veri bayatsa atar, cubuklar yumusak gecisle dolar, yeni olay/durum degisimi 2.5 sn parlar.
+- **Simge politikasi:** emoji yalniz bolum/kart basliginda; satir ici durum tek hucreli simge. Ajan metnindeki
+  ✅ ❌ ⚠ gibi BMP emojiler guvenli simgeye cevrilir; kesim emoji ciftini bolmez.
+- **Kosu panosu (takim-izle) hatalari:** Windows Terminal'de 2 hucre cizilip yanindaki harfe binen
+  ⚠ ✔ ✖ ▶ ⚙ ℹ ⟡ simgeleri, tam genislikteki satirda sag kenari silen `ESC[K`, kesimde sonraki metne sizan
+  renk, `.Length` ile olculen sarma (CJK/emoji tasmasi), koyu zeminde gorunmeyen ░ cubuk izi ve kart
+  satirinin sag bosluğu giderildi; tek kare modu (`-Tek`) ve testleri eklendi.
+- **Diger:** durdurulan (aborted) isci kosu ozetinde sorunlu sayilmaz (durum kurali ile tutarli); kendini
+  yeniden yukleme yalniz butun motor dosyalari 3 sn oturduktan sonra (yayin sirasinda karisik surum yok).
+
 ## 1.4.8 - Merkez: yetim kartlar, izin bekleyen oturumlar, sikisik kanatlar
 
 - **Yetim kart:** kosusu iptal/basarisiz/ana dalda olan acik pano karti artik "bekliyor" degil

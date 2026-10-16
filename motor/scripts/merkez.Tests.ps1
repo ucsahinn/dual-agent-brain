@@ -153,7 +153,7 @@ Describe 'merkez tek kare boyut ve enjeksiyon regresyonu' {
         $motor = Join-Path $root 'motor'; $scripts = Join-Path $motor 'scripts'; $hooks = Join-Path $motor 'hooks'
         New-Item -ItemType Directory -Force -Path $scripts,$hooks | Out-Null
         try {
-            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts
+            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
             Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
             foreach ($width in @(90,120,170)) {
                 # Alt surec UTF-8 yazar; ust surec de UTF-8 okumali, yoksa her cerceve karakteri birkac karaktere bolunur.
@@ -276,7 +276,7 @@ Describe 'merkez sabit veriyle kenar durumlari (onay, hatali kosu, engelli kart)
         $scripts = Join-Path $root 'motor\scripts'; $hooks = Join-Path $root 'motor\hooks'; $runs = Join-Path $scripts '.state\team-runs'
         New-Item -ItemType Directory -Force -Path $scripts, $hooks, $runs | Out-Null
         try {
-            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts
+            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
             Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
             $simdi = (Get-Date).ToUniversalTime()
             @{ runId = 'R-ONAY'; repoName = 'demo'; status = 'planned'; workers = @(@{ taskId = 'TASK-1'; status = 'planned'; role = 'docs_author' }) } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $runs 'R-ONAY.json')
@@ -314,7 +314,7 @@ Describe 'merkez canli panel (1.4.5): olay akisi ve guvenli simgeler' {
         ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'kill-guard'; outcome = 'GECTI' } | Should Be $null
         ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'retrieval'; outcome = 'ESIK_ALTI' } | Should Be $null
         $o = ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'kill-guard'; outcome = 'RED'; agent = 'codex'; note = 'Stop-Process -Name x' }
-        $o.Renk | Should Be 'err'; $o.Metin | Should Match 'kill guard engelledi'
+        $o.Renk | Should Be 'warn'; $o.Metin | Should Match 'kill guard engelledi'   # engel: koruma calisti, hata degil
         (ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'retrieval'; outcome = 'ENJEKSIYON'; concepts = @('ornek-kavram.md') }).Metin | Should Match '1 kavram hatırlandı: ornek kavram'
     }
     It 'ayni oturumun ardisik ayni olaylari tek satirda birlesir; makbuz yoksa bos liste' {
@@ -381,5 +381,187 @@ Describe 'merkez 1.4.8: yetim kart, bilgi teshisi, onay atlandi olayi' {
     It 'gecersiz kosu icin baslat satiri olay akisinda Turkce gorunur' {
         $o = ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'takim'; outcome = 'ONAY_ATLANDI'; agent = 'claude'; note = 'baslat R-1 durum aborted' }
         $o.Renk | Should Be 'warn'; $o.Metin | Should Match '^onay satırı işlenmedi · baslat R-1'
+    }
+}
+
+Describe 'merkez 1.5.0: sekmeler, ayrinti, bugun verisi, satir komutu' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+        $script:esc = [string][char]27
+        function Duz([string]$s) { return [regex]::Replace([regex]::Replace($s, ($script:esc + '\[[0-9;?]*[A-Za-z]'), ''), ($script:esc + '\][^' + [char]7 + ']*' + [char]7 + '?'), '') }
+    }
+    It 'gercek vault: dort sekme, ayrinti acik ve kapali, 90/120/170/210 sutunda her satir tam genislikte' {
+        $vault = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        foreach ($g in @(@{ W = 90; A = $false }, @{ W = 120; A = $true }, @{ W = 170; A = $false }, @{ W = 210; A = $true })) {
+            $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+            try {
+                $arg = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'merkez.ps1'), '-Vault', $vault, '-Tek', '-Sekme', 'Hepsi', '-Genislik', $g.W, '-Yukseklik', 50); if ($g.A) { $arg += '-Ayrinti' }
+                $out = & powershell.exe @arg 2>&1 | Out-String
+            } finally { [Console]::OutputEncoding = $eskiKod }
+            $LASTEXITCODE | Should Be 0
+            $parcalar = @((Duz $out) -split '=== SEKME \w+ ===\r?\n' | Where-Object { $_.Trim() })
+            $parcalar.Count | Should Be 4
+            $i = 0
+            foreach ($p in $parcalar) {
+                $satirlar = @($p -split "`r?`n" | Where-Object { $_ })
+                $satirlar[0] | Should Match '^╭'; $satirlar[$satirlar.Count - 1] | Should Match '╯$'
+                foreach ($l in $satirlar) { "$($g.W)/$i`:$($l.Length)" | Should Be "$($g.W)/$i`:$($g.W)" }
+                $i++
+            }
+            $parcalar[0] | Should Match 'SIRADA'; $parcalar[1] | Should Match 'KANATLAR'; $parcalar[2] | Should Match 'KOŞULAR'; $parcalar[3] | Should Match 'OLAYLAR'
+            $out | Should Not Match '[\u26A0\u2714\u2716\u25B6\u23F8\u2699]'
+        }
+    }
+    It 'emoji yalniz baslikta: kaynakta her emoji bir BUYUK harfli bolum/kart adindan once gelir' {
+        $tok = $null; $err = $null; [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'merkez.ps1'), [ref]$tok, [ref]$err)
+        $kod = (@($tok | Where-Object { $_.Kind -ne 'Comment' } | ForEach-Object { $_.Text }) -join "`n")
+        $kotu = @([regex]::Matches($kod, '[\uD800-\uDBFF][\uDC00-\uDFFF](?! [A-ZÇĞİÖŞÜ]{3,})') | ForEach-Object { $kod.Substring([Math]::Max(0, $_.Index - 20), 40) })
+        "$($kotu.Count): $($kotu -join ' | ')" | Should Be '0: '
+    }
+    It 'gun sayaci: oturum benzersiz anahtarla, ozet/yayin sayilir; ek satirlar artimli okunur; dun ayni saate kadar' {
+        $d = Join-Path ([IO.Path]::GetTempPath()) ('merkez-gun-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $d | Out-Null
+        try {
+            $simdi = Get-Date; $f = Join-Path $d ($simdi.ToString('yyyy-MM-dd') + '.jsonl'); $o = @{}
+            $sat = { param($t, $sc, $oc, $k) (@{ ts = $t.ToString('o'); script = $sc; agent = 'claude'; key = $k; outcome = $oc } | ConvertTo-Json -Compress) }
+            [IO.File]::WriteAllLines($f, [string[]]@((& $sat $simdi 'session-start' 'ENJEKSIYON' 'K1'), (& $sat $simdi 'session-start' 'ENJEKSIYON' 'K1'), (& $sat $simdi 'session-start' 'ENJEKSIYON' 'K2'), (& $sat $simdi 'flush' 'FLUSH_OK' 'K1'), (& $sat $simdi 'yayinla' 'YAYIN_OK' '')))
+            $g = Get-MerkezGunSayac $d $simdi.Date $o
+            (Get-MerkezDakikaToplam $g.Oturum) | Should Be 2
+            (Get-MerkezDakikaToplam $g.Ozet) | Should Be 1
+            (Get-MerkezDakikaToplam $g.Yayin) | Should Be 1
+            [IO.File]::AppendAllText($f, (& $sat $simdi 'flush' 'FLUSH_OK' 'K2') + "`n")
+            $g = Get-MerkezGunSayac $d $simdi.Date $o
+            (Get-MerkezDakikaToplam $g.Ozet) | Should Be 2
+            (Get-MerkezDakikaToplam $g.Oturum) | Should Be 2
+            $dun = $simdi.AddDays(-1); $fd = Join-Path $d ($dun.ToString('yyyy-MM-dd') + '.jsonl')
+            $sonra = $dun.AddMinutes(30); if ($sonra.Date -ne $dun.Date) { $sonra = $dun }
+            [IO.File]::WriteAllLines($fd, [string[]]@((& $sat $dun.AddMinutes(-1) 'flush' 'FLUSH_OK' 'A'), (& $sat $sonra 'flush' 'FLUSH_OK' 'B')))
+            $y = Get-MerkezGunSayac $d $dun.Date $o
+            $dk = $simdi.Hour * 60 + $simdi.Minute
+            (Get-MerkezDakikaToplam $y.Ozet $dk) -ge 1 | Should Be $true
+            (Get-MerkezDakikaToplam $y.Ozet) | Should Be 2
+        } finally { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'maliyet gun dosyasi: Claude USD, Codex jeton, oturum basina USD' {
+        $d = Join-Path ([IO.Path]::GetTempPath()) ('merkez-mal-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $d | Out-Null
+        try {
+            $gun = (Get-Date).Date; $f = Join-Path $d ($gun.ToString('yyyy-MM-dd') + '.json')
+            Set-Content -LiteralPath $f -Encoding UTF8 -Value '{"v":1,"k":{"claude|P|S1|m":{"usd":1.5,"in":10,"out":5,"cr":0},"claude|P|S1|n":{"usd":0.5,"in":1,"out":1,"cr":0},"codex|P|S2|m":{"usd":0,"in":100,"out":50,"cr":0}}}'
+            $m = Get-MerkezMaliyetGun $d $gun @{}
+            $m.ClaudeUsd | Should Be 2
+            $m.CodexJeton | Should Be 150
+            $m.Oturum['S1'].Usd | Should Be 2
+            (Get-MerkezMaliyetGun $d $gun.AddDays(-5) @{}) | Should Be $null
+        } finally { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'git kaydi: bugunun ve dunun commitleri, worktree gitdir dosyasi izlenir (git calistirilmaz)' {
+        $d = Join-Path ([IO.Path]::GetTempPath()) ('merkez-git-' + [guid]::NewGuid().ToString('N'))
+        $gd = Join-Path $d 'repo\.git'; New-Item -ItemType Directory -Force -Path (Join-Path $gd 'logs') | Out-Null
+        try {
+            $simdi = Get-Date; $ep = { param($t) [DateTimeOffset]::new($t).ToUnixTimeSeconds() }
+            $z = '0' * 40; $h = 'a' * 40
+            $s1 = "$z $h Ad <a@b> $(& $ep $simdi.AddMinutes(-1)) +0300`tcommit: bugun"
+            $s2 = "$h $h Ad <a@b> $(& $ep $simdi.AddMinutes(-1)) +0300`tcheckout: moving"
+            $s3 = "$h $h Ad <a@b> $(& $ep $simdi.AddDays(-1).AddMinutes(-2)) +0300`tcommit (amend): dun"
+            [IO.File]::WriteAllLines((Join-Path $gd 'logs\HEAD'), [string[]]@($s3, $s1, $s2))
+            $wt = Join-Path $d 'wt'; New-Item -ItemType Directory -Force -Path $wt | Out-Null
+            Set-Content -LiteralPath (Join-Path $wt '.git') -Value "gitdir: $gd" -Encoding ASCII
+            (Get-MerkezGitDizin $wt) | Should Be $gd
+            $r = Get-MerkezGitBugun @($gd) $simdi @{}
+            $r.Bugun | Should Be 1; $r.Dun | Should Be 1; $r.DunSimdiye | Should Be 1
+        } finally { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'isci adimlari: son 5 adim yeniden eskiye, started+completed cifti tek adim' {
+        $d = Join-Path ([IO.Path]::GetTempPath()) ('merkez-isci-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $d | Out-Null
+        try {
+            $f = Join-Path $d 'events.jsonl'
+            $sat = @(1..7 | ForEach-Object { (@{ type = 'item.completed'; item = @{ type = 'command_execution'; command = "komut-$_" } } | ConvertTo-Json -Compress -Depth 4) })
+            $sat += (@{ type = 'item.started'; item = @{ type = 'command_execution'; command = 'komut-7' } } | ConvertTo-Json -Compress -Depth 4)
+            [IO.File]::WriteAllLines($f, [string[]]$sat)
+            $a = @(Get-MerkezIsciAdimlar $f 5)
+            $a.Count | Should Be 5
+            $a[0].Metin | Should Match 'komut-7'
+            $a[4].Metin | Should Match 'komut-3'
+        } finally { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'satir komutu: beyaz liste; ajan metninden kabuk islecli komut reddedilir; sonda satir sonu yok' {
+        (Get-MerkezSatirKomut @{ Tur = 'aktarim'; Nesne = @{ id = '20261011T125258-13ee' } }).Komut | Should Be 'beyin aktar -Tamam 20261011T125258-13ee'
+        (Get-MerkezSatirKomut @{ Tur = 'kart'; Yetim = $true; Nesne = @{ id = 'TASK-1' } }).Komut | Should Match "^beyin pano transition --task TASK-1 --status cancelled --reason 'koşu kapandı'$"
+        (Get-MerkezSatirKomut @{ Tur = 'kart'; Nesne = @{ id = 'TASK-2'; status = 'review' } }).Komut | Should Be 'onayla TASK-2'
+        (Get-MerkezSatirKomut @{ Tur = 'onay'; Nesne = @{ Satir = 'birlestir R20261015-4368' } }).Ipucu | Should Match 'sohbete'
+        (Get-MerkezSatirKomut @{ Tur = 'lider'; Nesne = @{ Ajan = 'codex'; Ad = '01a0-ab' } }).Komut | Should Be 'codex resume 01a0-ab'
+        Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = @{ Metin = 'x · beyin aktar -Tamam 1; Remove-Item C:\' } } | Should Be $null
+        Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = @{ Metin = ('x · beyin bekci' + [char]27 + '[2J') } } | Should Be $null
+        Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = @{ Metin = 'yalniz bilgi' } } | Should Be $null
+        Test-MerkezGuvenliKomut "beyin bekci`n" | Should Be $false
+        Test-MerkezGuvenliKomut 'beyin bekci | iex' | Should Be $false
+        Test-MerkezGuvenliKomut 'beyin bekci' | Should Be $true
+    }
+    It 'Protect-MerkezSatir: BMP emoji guvenli simgeye cevrilir, vekil cift kesimde bolunmez' {
+        (Protect-MerkezSatir ('tamam ' + [char]0x2705 + ' dikkat ' + [char]0x26A0 + [char]0xFE0F) 80) | Should Be 'tamam ✓ dikkat ▲'
+        $e = [char]::ConvertFromUtf32(0x1F680)
+        $k = Protect-MerkezSatir ('abc' + $e + $e + $e) 5
+        ($k -match '[\uD800-\uDBFF](?![\uDC00-\uDFFF])') | Should Be $false
+    }
+}
+
+Describe 'takim-izle 1.5.0: tek kare, ortak katman, simge' {
+    It 'kosu panosu ve isci paneli -Tek ile 90/120/170 sutunda tam genislikte cizilir, yasak simge yok' {
+        $root = Join-Path ([IO.Path]::GetTempPath()) ('takim-izle-' + [guid]::NewGuid().ToString('N'))
+        $hooks = Join-Path $root 'motor\hooks'; New-Item -ItemType Directory -Force -Path $hooks | Out-Null
+        try {
+            Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
+            . (Join-Path $hooks 'lib.ps1'); $pp = Get-BeyinPaths -Vault $root
+            $tr = $pp.TeamRuns; New-Item -ItemType Directory -Force -Path (Join-Path $tr 'R-T\TASK-1') | Out-Null
+            $bas = (Get-Date).ToUniversalTime().AddMinutes(-3).ToString('o')
+            $kos = @{ runId = 'R-T'; repoName = 'demo'; status = 'running'; baseBranch = 'main'; startedAt = $bas; approvals = @{ start = @{ at = $bas } }
+                      supervisor = @{ pid = $PID; heartbeatAt = (Get-Date).ToUniversalTime().ToString('o') }
+                      workers = @(@{ taskId = 'TASK-1'; role = 'qa_lead'; status = 'running'; startedAt = $bas; pid = $PID }, @{ taskId = 'TASK-2'; role = 'docs_author'; status = 'finished'; startedAt = $bas; finishedAt = $bas; verdict = 'pass' }) }
+            Set-Content -LiteralPath (Join-Path $tr 'R-T.json') -Value ($kos | ConvertTo-Json -Depth 6) -Encoding UTF8
+            $ev = @((@{ type = 'thread.started'; thread_id = 'th-1' } | ConvertTo-Json -Compress), (@{ type = 'item.completed'; item = @{ type = 'command_execution'; command = 'npm test'; exit_code = 0; aggregated_output = 'ok' } } | ConvertTo-Json -Compress -Depth 4), (@{ type = 'item.completed'; item = @{ type = 'agent_message'; text = 'Testleri calistirdim, hepsi gecti.' } } | ConvertTo-Json -Compress -Depth 4))
+            [IO.File]::WriteAllLines((Join-Path $tr 'R-T\TASK-1\events.jsonl'), [string[]]$ev)
+            foreach ($w in @(90, 120, 170)) {
+                foreach ($kart in @('', 'TASK-1')) {
+                    $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+                    try {
+                        $arg = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'takim-izle.ps1'), '-Vault', $root, '-Run', 'R-T', '-Tek', '-Genislik', $w, '-Yukseklik', 45); if ($kart) { $arg += @('-Kart', $kart) }
+                        $out = & powershell.exe @arg 2>&1 | Out-String
+                    } finally { [Console]::OutputEncoding = $eskiKod }
+                    $LASTEXITCODE | Should Be 0
+                    $esc = [string][char]27; $plain = [regex]::Replace($out, ($esc + '\[[0-9;?]*[A-Za-z]'), '')
+                    $satirlar = @($plain -split "`r?`n" | Where-Object { $_ })
+                    $satirlar.Count | Should BeGreaterThan 8
+                    $satirlar[0] | Should Match '^╭'; $satirlar[$satirlar.Count - 1] | Should Match '╯$'
+                    foreach ($l in $satirlar) { "$w/$kart`:$($l.Length)" | Should Be "$w/$kart`:$w" }
+                    $out | Should Not Match '[\u26A0\u2714\u2716\u25B6\u23F8\u2699\u2139\u27E1]'
+                }
+            }
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'merkez-balon 1.5.0: ajan ayrintisi' {
+    BeforeAll { . (Join-Path $PSScriptRoot 'merkez-balon.ps1') }
+    It 'Claude transkripti: son 5 arac adimi, model, baglam (onbellek dahil), tur bitisi; onbellek ikinci cagrida ayristirmaz' {
+        $kok = Join-Path ([IO.Path]::GetTempPath()) ('merkez-ay-' + [guid]::NewGuid().ToString('N')); $env:CLAUDE_CONFIG_DIR = $kok
+        $proj = Join-Path $kok 'projects\x'; New-Item -ItemType Directory -Force -Path $proj | Out-Null
+        try {
+            Clear-MerkezOnbellek
+            $id = 'aaaa1111-2222-3333-4444-555566667777'; $f = Join-Path $proj "$id.jsonl"
+            $t = (Get-Date).ToUniversalTime()
+            $sat = @((@{ type = 'user'; timestamp = $t.AddMinutes(-9).ToString('o'); message = @{ role = 'user'; content = 'gorev' } } | ConvertTo-Json -Compress -Depth 6))
+            foreach ($i in 1..7) { $sat += (@{ type = 'assistant'; timestamp = $t.AddMinutes(-8 + $i).ToString('o'); message = @{ model = 'claude-opus-5-5'; usage = @{ input_tokens = 10; cache_read_input_tokens = 1000; cache_creation_input_tokens = 5 }; content = @(@{ type = 'tool_use'; name = 'Read'; input = @{ file_path = "C:\x\dosya$i.ps1" } }) } } | ConvertTo-Json -Compress -Depth 8) }
+            $sat += (@{ type = 'assistant'; timestamp = $t.ToString('o'); message = @{ model = 'claude-opus-5-5'; stop_reason = 'end_turn'; usage = @{ input_tokens = 20; cache_read_input_tokens = 2000; cache_creation_input_tokens = 0 }; content = @(@{ type = 'text'; text = 'bitti' }) } } | ConvertTo-Json -Compress -Depth 8)
+            [IO.File]::WriteAllLines($f, [string[]]$sat)
+            $r = Get-MerkezAyrinti -Ajan claude -OturumId $id -Adim 5
+            $r.Ok | Should Be $true
+            @($r.Adimlar).Count | Should Be 5
+            $r.Adimlar[0].Metin | Should Match 'dosya7'
+            $r.Model | Should Be 'claude-opus-5-5'
+            $r.Baglam | Should Be 2020
+            ($null -ne $r.SonBitis) | Should Be $true
+            ($null -ne $r.SonIstem) | Should Be $true
+            $n = Get-MerkezAyristirmaSayisi; [void](Get-MerkezAyrinti -Ajan claude -OturumId $id -Adim 5); (Get-MerkezAyristirmaSayisi) | Should Be $n
+        } finally { Remove-Item Env:\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; Remove-Item -LiteralPath $kok -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }

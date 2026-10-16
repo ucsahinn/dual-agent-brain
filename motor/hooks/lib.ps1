@@ -203,6 +203,7 @@ function Get-BeyinAyarKayitlari {
         @{ Ad = 'BEYIN_AGENTCHEF_KOK';  Varsayilan = '';                       Secenekler = @(); Aciklama = 'AgentChef checkout yolu; bos ise otomatik bulunur (ev, Belgeler, Masaustu, source\repos, src, dev, code ...). Pano, takim ve bekci kullanir.' },
         @{ Ad = 'BEYIN_PANO_KOORDINATOR'; Varsayilan = 'leadership_coordinator'; Secenekler = @('backend_coordinator', 'devops_coordinator', 'leadership_coordinator', 'product_coordinator', 'qa_coordinator', 'ui_coordinator', 'marketing_coordinator'); Aciklama = 'beyin pano create icin varsayilan --owner-coordinator (AgentChef katalog koordinatoru); -Koordinator ile ezilir' },
         @{ Ad = 'BEYIN_BILDIRIM';       Varsayilan = 'acik';                 Secenekler = @('acik', 'kapali');           Aciklama = 'Kosu paneli Windows bildirimi: onay bekliyor, isci bitti, kota siniri, dogrulama/kontrol dustu, gozetmen durdu. Yalniz kosu genel gorunumu acikken.' },
+        @{ Ad = 'BEYIN_MERKEZ_ZEMIN';   Varsayilan = 'osc';                  Secenekler = @('osc', 'boya', 'kapali');    Aciklama = 'beyin merkez zemini: osc = Windows Terminal sekme zeminini Aurora laciverti yapar (cikista geri alir), boya = her satiri zeminle boyar (diger terminaller), kapali = terminal zemini.' },
         @{ Ad = 'BEYIN_BRAIN_CLI';   Varsayilan = '';                       Secenekler = @();                          Aciklama = 'brain-cli.mjs yolu (istege bagli, beyin yedek)' },
         @{ Ad = 'BEYIN_DEPO';        Varsayilan = 'https://github.com/ucsahinn/dual-agent-brain'; Secenekler = @();    Aciklama = 'Motor guncelleme deposu (fork ettiysen kendi adresini yaz)' },
         # Dosyaya = $false: 'beyin ayar' listesinde GORUNUR (etkin vault ve kaynagi
@@ -339,7 +340,7 @@ function Test-BeyinAyarDeger {
             $s.Ok = $false
             $s.Hata = "gecerli degerler: $($secenek -join ' | ')  (verilen: '$v')"
         } else { $s.Deger = $k }
-    } elseif ($Ad -eq 'BEYIN_BRIFING_KIME' -or $Ad -eq 'BEYIN_PANO_ONAY' -or $Ad -eq 'BEYIN_SONME' -or $Ad -eq 'BEYIN_KILL_GUARD' -or $Ad -eq 'BEYIN_BILDIRIM') {
+    } elseif ($Ad -eq 'BEYIN_BRIFING_KIME' -or $Ad -eq 'BEYIN_PANO_ONAY' -or $Ad -eq 'BEYIN_SONME' -or $Ad -eq 'BEYIN_KILL_GUARD' -or $Ad -eq 'BEYIN_BILDIRIM' -or $Ad -eq 'BEYIN_MERKEZ_ZEMIN') {
         $k = $v.Trim().ToLowerInvariant()
         $secenek = @((Get-BeyinAyarKayit -Ad $Ad).Secenekler)
         if ($secenek -notcontains $k) {

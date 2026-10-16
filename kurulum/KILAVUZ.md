@@ -308,7 +308,7 @@ Asagidaki liste `kurulum\beyin.ps1` icindeki `Yaz-Yardim` fonksiyonunun tamamidi
 | `kullanim [gun]` | Enjekte edilen kavram notlari sonradan Read/Grep ile ACILDI mi, yoksa yalniz cevapta mi anildi? Retrieval makbuzlarini ayni oturumun Claude transkriptiyle eslestirir; Codex oturumlari 'transkript yok' sayilir. Varsayilan 7 gun; `-Json`. Rapor `.state/kullanim-son.json`. | Hayir (makbuz haric) |
 | `geri-getirme-olc` | Geri getirme regresyon kapisi: kavram notlarindan uretilen sorgularla vektor (bge-m3) ve kelime yolunun rank-1 / ilk-2 / bos donus oranlari. `-Dondur` fixture'i (`motor/scripts/fixtures/geri-getirme-holdout.json`, SHA-256'li) yeniden uretir - bilerek yapilir; `-Esik 0.8` altinda cikis 5. Doktor tam taramada son sonucu gosterir. | Yalniz `.state` ve -Dondur ile fixture |
 | `canli [dk]` | Su an ne oluyor: aktif oturumlar, kuyruk, calisan is, butce, niyet. Varsayilan pencere 30 dakika. | Hayir |
-| `merkez [-Sekme]` | **Tum sistemin canli izleme ekrani** (1.4.0): liderler (Claude/Codex oturumlari), takim kosulari ve iscileri, onay bekleyen satirlar, pano, aktarimlar, kaynak, maliyet ve teshis seridi tek ekranda. `-Sekme` yeni Windows Terminal sekmesinde acar. Ayrinti: 13.4. | Hayir |
+| `merkez [-Sekme]` | **Tum sistemin canli izleme ekrani** (1.4.0; 1.5.0 sekmeli): liderler (Claude/Codex oturumlari), takim kosulari ve iscileri, onay bekleyen satirlar, pano, aktarimlar, kaynak, maliyet, bugun/dun ve teshis. Dort sekme (Genel, Ajanlar, Kosular, Olaylar), ajan ayrintisi, `c` ile secili satirin komutunu panoya kopyalama. `-Sekme` yeni Windows Terminal sekmesinde acar. Ayrinti: 13.4. | Hayir |
 
 ```powershell
 beyin durum
@@ -1212,62 +1212,104 @@ yalniz dogrulanmis kosu icin kaydedilir; erken yazilirsa ajan neden kaydedilmedi
   kancasi yalniz bu panonun kosularini tanir.
 
 
-### 13.4 Beyin merkez: kosu panosu gorunumu (1.4.1)
+### 13.4 Beyin merkez: tum sistemin izleme ekrani (1.5.0)
 
 ```powershell
 beyin merkez          # bu terminalde
 beyin merkez -Sekme   # yeni Windows Terminal sekmesinde
 ```
 
-Merkez, tum sistemi tek ekranda izler. Ekran salt okunurdur; onay satirlarini
-sohbete kendin yazarsin. Dis cerceve baslik ve saglik rozetini tasir. Durum
-renkleri saglik/engel, ajan renkleri Claude/Codex kimligini, mavi vurgu secimi
-ve guncel kosu adimini belirtir.
+Merkez, tum sistemi tek ekranda izler. Ekran **salt okunurdur**: hicbir seyi
+calistirmaz ya da yazmaz. Onay satirlarini (`baslat`, `birlestir`, `onayla`)
+sohbete yine kendin yazarsin.
 
-- **Ozet kartlari:** `AJANLAR`, `KOSULAR`, `ONAYLAR`, `KAYNAK`, `MALIYET` ve
-  `PANO-AKTARIM` toplamlari, her kartta uc satir. Kaynak ve maliyet ozeti veri
-  yoksa gosterilmez. Uyari/hata durumundaki kartin kenari o renktedir.
-  120 sutunun altinda kartlar iki ozet satirina iner (dikey alan canli bolumlere kalir).
-- **SIRADA:** Bekleyen en onemli karari veya kosunun sonraki adimini ve nedenini
-  renkli olarak gosterir. Yalniz uyari varsa "sorun yok · N uyari" ve ilk adimin
-  komutunu yazar; hicbir sey yoksa "her sey yolunda" ve kac ajanin calistigini.
-- **ONAY BEKLIYOR:** Bekleyen `baslat <runId>`, `birlestir <runId>` veya
-  `onayla TASK-x` satirini ve baglamini gosterir. Satiri yalniz sohbete yaz;
-  ekran kendisi onay vermez.
-- **Siralama:** kritik bolumler ustte: SIRADA, ONAY BEKLIYOR, TESHIS, KANATLAR,
-  KOSULAR, PANO ve AKTARIMLAR. Ekran sigmazsa en altta kac satirin ve hangi
-  bolumlerin gizlendigi yazar.
-- **KANATLAR:** Projeye gore lider oturumlarini ve takim iscilerini gruplar.
-  Etkin ajanlar once, sakinler ozet halinde gorunur; `a` ile tumunu acip
-  kapatabilirsin. Satirlarda durum, sure, jeton ve guvenli bicimde kisaltilmis
-  son eylem bulunur. Ajan metinleri ekranda tek satira indirilir ve sirlar
-  maskelenir.
-- **KOSULAR:** Her kosunun plan, baslat, topla, butunlestir, dogrula ve ana
-  dala alma adimlarini cizgiyle gosterir; etkin adim, rozet, isci ilerlemesi ve
-  sonraki eylem yer alir. Isci sayilari ve degisik dosya sayisi kosu ayrintisina,
-  giris/cikis jetonlari ve onbellek payi, sure ve baslangic saati kosu satirinda
-  gorunur. Biten kosulardan yalniz en yenisi gosterilir (`a` hepsi). Basarisiz, iptal, catismali, dogrulanamamis, uyarili veya onay
-  bekleyen kosular rozetle ayirt edilir. Salt okunur inceleme kosusunun cizgisi
-  `topla`da biter; sefin `integrate --covers` ile kapsadigi isci ayrica sayilir.
-- **PANO ve AKTARIMLAR:** Acik kartlar ve bekleyen ajan aktarimlari birlikte
-  izlenir; dar pencerede bolumler alt alta gelir. Aktarimlarda en eski ustte,
-  kimligin son 4 hanesi (`beyin aktar -Tamam <id>` icin) ve 3 gunden eski satir
-  uyari renginde.
-- **TESHIS:** En fazla bes hata/uyariyi gosterir; fazlasi icin `beyin doktor`
-  onerilir.
-- **SON OLAYLAR:** Motor makbuzlarindan canli akis: oturum ozeti yazildi, aktarim
-  gonderildi/kapatildi, onay kaydedildi/kullanildi, yayin, kill guard reddi, hatirlanan
-  kavram. Gurultu (her arac cagrisinin "gecti" makbuzu gibi) gosterilmez; ayni ajanin
-  ardisik olaylari `xN` ile birlesir. Ekranda kalan bos alani doldurur.
-- **Canli gosterge:** calisan ajanin yaninda kayan tarama cubugu (hizi ajanin son olayina
-  bagli; 60 sn+ sessiz ajanda donar), baslikta nabiz noktasi ve "son olay" yasi (veri 2 dk+
-  bayatsa kehribar), renk gecisli cubuklar; uyari/hata/onay varken SIRADA seridi ve rozet
-  nabiz gibi atar.
-- **Egilim grafikleri:** baslikta son 2 saatin sistem etkinligi; AJANLAR ve KAYNAK
-  kartlarinda panel acik kaldikca biriken calisan ajan ve commit egilimi.
+**Gorsel dil.** Aurora paleti (ortak cizim katmani `motor\scripts\beyin-ciz.ps1`,
+kosu panosu da ayni katmani kullanir). Renkler anlam tasir:
+- yesil: calisiyor/saglikli; kehribar: uyari, bekleyen is; kirmizi: hata/engel;
+  mavi: bilgi, secim ve guncel adim;
+- seftali: Claude, camgobegi: Codex.
 
-Tuslar: `yukari/asagi` sec, `Enter` odak secili ajani (iscide isci panelini,
-liderde ayrintiyi) acar, `p` kosu panosunu acar, `a` sakin ajanlari gosterir/gizler,
-`r` tazeler, `q` cikar. Onay ve hata olaylari Windows bildirimi olarak da
-gelebilir (`BEYIN_BILDIRIM`). Canli kosu/oturum verisi hizli, pano, aktarim,
-kaynak ve maliyet verisi onbellekli araliklarla yenilenir.
+Renkli emoji yalniz bolum ve kart basliginda bulunur. Satir ici durum her yerde tek
+hucreli renkli simgedir (`✓ ✕ ▲ ● ◐ ◷ ‖ ○`). Windows Terminal'de iki hucre
+cizilen belirsiz simgeler kullanilmaz.
+
+**Zemin.** `BEYIN_MERKEZ_ZEMIN` ayari (`beyin ayar`) zemini belirler:
+- `osc` (varsayilan): Windows Terminal sekmesinin zeminini Aurora laciverti yapar
+  ve cikista geri alir;
+- `boya`: satirlari zeminle boyar (diger terminaller);
+- `kapali`: terminalin kendi zemini.
+
+**Sekmeler** (`Tab` / `Shift+Tab` ya da `1`-`4`):
+- **1 Genel:** saglik rozeti, BUGUN seridi, ozet kartlari, SIRADA, ONAY BEKLIYOR,
+  TESHIS, aktif kanatlar, acik kosular, PANO ve AKTARIMLAR, SON OLAYLAR.
+- **2 Ajanlar:** butun kanatlar (projeler) ve oturumlar. `Enter` secili ajanin
+  ayrintisini acar; 170 sutun ve ustunde sagda yan panel, daha darda satirin
+  altinda. Ayrintida sunlar bulunur:
+  - durum ve kaynagi;
+  - oturum suresi, son istem ve "siranı bekliyor" suresi;
+  - model ve baglam cubugu (jeton / tavan);
+  - bugunku API esdegeri maliyet;
+  - son 5 arac adimi;
+  - surdurme komutu.
+- **3 Kosular:** son 6 saatin takim kosulari. Her kosuda rozet, adim cizgisi,
+  isci cubugu, sonraki adim, kosunun iscileri ve bagli pano kartlari gorunur.
+  `Enter` kosu panosunu acar.
+- **4 Olaylar:** motor makbuzlarindan olay akisi, en cok 60 kayit; `PgUp`/`PgDn` ile
+  kayar. Sagda BUGUN tablosu:
+  - bugun ve dun (ayni saate kadar) oturum, ozet, commit, yayin, derleme, hata;
+  - Claude maliyeti, saatlik etkinlik ve depo bazinda commit.
+
+  Sekme cipindeki sayi, gormedigin yeni olaylari sayar.
+
+**BUGUN.** Oturum, ozet, yayin ve derleme sayilari makbuzlardan, commit sayisi
+calisilan depolarin `.git\logs\HEAD` kaydindan gelir; git calistirilmaz. Maliyet
+`beyin maliyet` / gece taramasinin gunluk dosyasindan gelir. Yaninda tarandigi saat
+yazar; panel taramayi kendisi baslatmaz. "dun N", dunun ayni saatine kadarki degerdir.
+Maliyette bu tam gundur.
+
+**Bolumler:**
+- **SIRADA:** en onemli karar ya da kosunun sonraki adimi; ilk adim komutu
+  kesilmez, sigmazsa sarilir.
+- **TESHIS:** hata (✕), uyari (▲) ve bilgi (●). Bilgi uyari sayilmaz. Ornekler:
+  - 5+ dk tek aracta kalan oturum, izin istemi olabilir;
+  - kosusu kapanmis yetim pano karti;
+  - 3 gunden eski aktarim.
+- **KANATLAR:** tek ajanli kanat tek satirdir. Siralama sabittir: once dikkat
+  isteyen, sonra uzun islem, sonra calisan, sonra ad. Calisan ajanin yaninda
+  tarama cubugu doner; 2+ dk tek aracta kalan ajan `◷ uzun islem` olarak gosterilir.
+
+**Hareket** yalniz anlam tasidiginda gorulur:
+- calisan ajan doner ve tarar;
+- hata rozeti ve hata durumundaki SIRADA nabiz gibi atar; uyari sabittir;
+- veri bayatsa baslik noktasi nabiz atar;
+- cubuk yeni degere yumusakca dolar;
+- yeni olay, durum degistiren ajan, yeni onay ya da teshis 2,5 sn parlar.
+
+Bostaki hicbir sey kipirdamaz.
+
+**Tuslar:**
+
+| Tus | Is |
+| --- | --- |
+| `Tab` / `Shift+Tab`, `1`-`4` | sekme |
+| `yukari/asagi`, `j`/`k` | sec (Olaylar'da kaydir) |
+| `Enter` | ayrinti / isci paneli / kosu panosu / aktarimin tam metni |
+| `Esc` | ayrintiyi kapat |
+| `c` | secili satirin guvenli komutunu panoya kopyala (calistirmaz, satir sonu eklemez; onay satiri sohbete yapistirilir) |
+| `p` | kosu panosu |
+| `a` | bostakiler / biten kosular |
+| `PgUp`/`PgDn` | olay kaydir |
+| `r` | tazele |
+| `q` | cik |
+
+Kopyalanan komutlar beyaz listeden gecer (`beyin ...`, `onayla`, `baslat`,
+`birlestir`, `claude --resume`, `codex resume`). Kabuk islecleri ya da kontrol
+dizisi iceren satir kopyalanmaz.
+
+Onay ve hata olaylari Windows bildirimi olarak da gelebilir (`BEYIN_BILDIRIM`).
+Motor dosyalari guncellenince panel, hepsi birkac saniye oturduktan sonra acik
+sekmesiyle kendini yeniden yukler.
+
+Test ve ekran goruntusu icin su parametreler var:
+- `beyin merkez` betigi: `-Tek -Sekme Genel|Ajanlar|Kosular|Olaylar|Hepsi -Genislik N -Yukseklik N -Ayrinti -Zemin boya`, cizim suresi icin `-Olcum N`;
+- kosu panosu: `takim-izle.ps1 -Run <id> [-Kart TASK-x] -Tek -Genislik N`.

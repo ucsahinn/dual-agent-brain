@@ -115,7 +115,10 @@ function Protect-MerkezSatir([string]$Metin, [int]$Uzunluk = 64) {
     # Get-Command her cagrida milisaniyeler suruyordu (kare basina yuzlerce cagri): bulununca onbellekte kalir
     if (-not $script:MerkezProtVar) { $script:MerkezProtVar = [bool](Get-Command Protect-MerkezMetin -ErrorAction SilentlyContinue) }
     if ($script:MerkezProtVar) { try { $m = [string](Protect-MerkezMetin $m) } catch { } }
-    if ($m.Length -gt $Uzunluk) { $m = $m.Substring(0, [Math]::Max(1, $Uzunluk - 1)) + '…' }
+    # BMP emoji (✅ ❌ ⚠ ⭐ ⚡ ✨...) Windows Terminal'de 2 hucre cizilir ama genislik olcusu 1 sayar: guvenli simgeye cevrilir
+    if (Get-Command Get-CizGuvenliMetin -ErrorAction SilentlyContinue) { $m = Get-CizGuvenliMetin $m }
+    else { $m = $m -replace '[\u2705\u2714]', '✓' -replace '[\u274C\u274E\u2716]', '✕' -replace '\u26A0', '▲' -replace '\u25B6', '▸' -replace '[\u200B-\u200F\uFE0E\uFE0F]', '' -replace '[\u231A\u231B\u23E9-\u23FA\u2600-\u270D\u270F-\u2712\u2717-\u27BF\u2B00-\u2BFF]', '•' }
+    if ($m.Length -gt $Uzunluk) { $kes = [Math]::Max(1, $Uzunluk - 1); if ([char]::IsHighSurrogate($m[$kes - 1])) { $kes-- }; $m = $m.Substring(0, [Math]::Max(0, $kes)) + '…' }   # vekil cift ortadan bolunmez
     if ($script:MerkezProtVar) { $script:MerkezProtOnb[$ok] = $m }   # balon modulu yuklenmeden onbelleklenmez (maske kurallari eksik kalmasin)
     return $m
 }
@@ -225,7 +228,7 @@ function Get-MerkezKosuOzet($Kosu, [bool]$Sahipsiz = $false, [datetime]$Simdi = 
     $guncel = 6; for ($i = 0; $i -lt 6; $i++) { if (-not $asamalar[$i]) { $guncel = $i; break } }
     $calisan = @($ws | Where-Object { $_.status -in @('queued','spawning','running') }).Count
     $bekleyen = @($ws | Where-Object { $_.status -in @('planned','paused_limit') }).Count
-    $sorunKod = @('failed','timed_out','scope_violation','rejected_content','conflict','aborted')
+    $sorunKod = @('failed','timed_out','scope_violation','rejected_content','conflict')   # aborted: durduruldu, sorun degil (durum kurali 'kapali')
     # karar fail/blocked olan isci de sorunludur (kirmizi); kismen yalniz partial/warn (sari)
     $sorunlu = @($ws | Where-Object { $_.status -in $sorunKod -or [string]$_.verdict -in @('fail', 'blocked') }).Count
     $kismen = @($ws | Where-Object { $_.status -notin $sorunKod -and $_.verdict -and [string]$_.verdict -notin @('pass', 'fail', 'blocked') }).Count
@@ -299,7 +302,7 @@ function ConvertTo-MerkezOlay($Kayit) {
     if ("$sc/$oc" -eq 'session-start/ENJEKSIYON') { return $null }   # acilislar KANATLAR'da gorunur; akista tekrar gurultusu
     $not = Protect-MerkezSatir ([string]$Kayit.note) 80
     $o = switch ("$sc/$oc") {
-        'flush/FLUSH_OK'                 { @('✎', 'ok', 'oturum özeti günlüğe yazıldı') }
+        'flush/FLUSH_OK'                 { @('✎', 'muted', 'oturum özeti günlüğe yazıldı') }
         'session-start/ENJEKSIYON'       { @('○', 'muted', $(if ([string]$Kayit.reason -eq 'hafif') { 'oturum açıldı · vault dışı' } else { 'oturum açıldı · tam hafıza' })) }
         'session-end/SESSIONEND_OK'      { @('●', 'muted', 'oturum kapandı') }
         'session-end/KUYRUK'             { @('●', 'muted', 'oturum kapandı · özet kuyrukta') }
@@ -319,7 +322,7 @@ function ConvertTo-MerkezOlay($Kayit) {
         'takim/ONAY_ATLANDI'             { @('⊘', 'warn', "onay satırı işlenmedi$(if ($not) { ' · ' + $not })") }
         'takim/ONAY_KAYDEDILDI'          { @('◐', 'warn', "takım onayı kaydedildi$(if ($not) { ' · ' + $not })") }
         'yayinla/YAYIN_OK'               { @('↑', 'ok', 'motor yayınlandı') }
-        'kill-guard/RED'                 { @('✕', 'err', "kill guard engelledi$(if ($not) { ' · ' + $not })") }
+        'kill-guard/RED'                 { @('⊘', 'warn', "kill guard engelledi$(if ($not) { ' · ' + $not })") }   # engel: koruma calisti, hata degil
         'compile/COMPILE_OK'             { @('◆', 'ok', 'derleme: yeni kavram notları') }
         'gom/GOM_OK'                     { @('◆', 'muted', 'vektör gömme tazelendi') }
         'compile/COMPILE_BOS'            { @('◆', 'muted', 'derleme: yeni kavram yok') }
@@ -332,13 +335,14 @@ function ConvertTo-MerkezOlay($Kayit) {
         'gecmis-toparla/TOPLA_OK'        { @('✎', 'muted', 'eski oturumlar toplandı') }
         'takim/ONAY_YOK'                 { @('⊘', 'warn', "onay satırı bulunamadı$(if ($not) { ' · ' + $not })") }
         default {
-            $sev = $(if ($oc -match 'HATA|RED|DUSTU|BOZUK') { 'err' } elseif ($oc -match '_OK$') { 'muted' } else { 'muted' })
+            $sev = $(if ($oc -match 'HATA|DUSTU|BOZUK') { 'err' } elseif ($oc -match 'RED') { 'warn' } elseif ($oc -match '_OK$') { 'muted' } else { 'muted' })
             $ocT = ($oc -replace '_', ' ').ToLowerInvariant(); if ($ocT.StartsWith("$sc ")) { $ocT = $ocT.Substring($sc.Length + 1) }   # "zamanli · zamanli ok" tekrari
             @('·', $sev, "$sc · $ocT")
         }
     }
     $z = $null; try { $z = [datetime]$Kayit.ts } catch { return $null }
-    return @{ Zaman = $z; Ajan = [string]$Kayit.agent; Ikon = $o[0]; Renk = $o[1]; Metin = $o[2]; Anahtar = [string]$Kayit.key; Tur = "$sc/$oc"; Adet = 1 }
+    $ajan = $(if ($sc -in @('zamanli', 'gom', 'compile', 'bagla', 'copcu', 'maliyet', 'bekci', 'gecmis-toparla', 'kirp', 'kullanim')) { 'motor' } else { [string]$Kayit.agent })   # zamanli gorevler oturum degil
+    return @{ Zaman = $z; Ajan = $ajan; Ikon = $o[0]; Renk = $o[1]; Metin = $o[2]; Anahtar = [string]$Kayit.key; Tur = "$sc/$oc"; Adet = 1 }
 }
 
 function Get-MerkezOlaylar([string]$MakbuzDizin, [int]$Adet = 14, [datetime]$Simdi = (Get-Date)) {
@@ -395,7 +399,8 @@ function Test-MerkezPidCanli([int]$ProcessId, [hashtable]$Onbellek, [datetime]$S
 }
 
 function Get-MerkezAnlik {
-    param([hashtable]$Paths, [int]$SonKosuSaat = 6, [switch]$Hizli, [hashtable]$Onbellek)
+    param([hashtable]$Paths, [int]$SonKosuSaat = 6, [switch]$Hizli, [hashtable]$Onbellek, [string]$AyrintiAnahtar = '')
+    # -AyrintiAnahtar 'Tur:Kosu:Ad': yalniz o ajanin ayrintisi (son adimlar, jeton, bekleme) hesaplanir; hizli turda da (onbellekli).
     # $Onbellek: yavas veriler (pano, aktarim, kaynak, maliyet, balon) icin cagiran tarafin tuttugu sozluk.
     # -Hizli: yavas verileri onbellekten al, yalniz koşu + oturum + surec canliligini tazele.
     if (-not $Onbellek) { $Onbellek = @{} }
@@ -556,7 +561,7 @@ function Get-MerkezAnlik {
         $a.Maliyet = $m; $Onbellek.Maliyet = $m
     }
     if ($a.Kaynak -and $a.Kaynak.Ok) {
-        if ($a.Kaynak.CommitYuzde -ge 85) { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = 'commit'; Metin = "commit %$($a.Kaynak.CommitYuzde) · beyin bekci" }) }
+        if ($a.Kaynak.CommitYuzde -ge 85) { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = 'commit'; Metin = "bellek (commit) %$($a.Kaynak.CommitYuzde) · beyin bekci" }) }
         if ($a.Kaynak.BostaOturum -ge 5) { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "son 24 saatte açılmış $($a.Kaynak.BostaOturum) oturum 2+ saattir sessiz (kapanmış olabilir) · beyin bekci" }) }
     }
 
@@ -565,7 +570,7 @@ function Get-MerkezAnlik {
     $mkF = $(if ($Paths.Makbuz) { Join-Path $Paths.Makbuz ($simdi.ToString('yyyy-MM-dd') + '.jsonl') } else { '' }); $mkImza = ''
     try { if ($mkF -and (Test-Path -LiteralPath $mkF)) { $mkImza = "$((Get-Item -LiteralPath $mkF).Length)|$($simdi.ToString('yyyyMMdd'))" } } catch { }
     if ($Onbellek.ContainsKey('Olaylar') -and ($Hizli -or $Onbellek['imza:Olaylar'] -eq $mkImza)) { $a.Olaylar = $Onbellek.Olaylar } else {
-        $a.Olaylar = $(if ($Paths.Makbuz) { Get-MerkezOlaylar $Paths.Makbuz 16 $simdi } else { New-Object System.Collections.Generic.List[object] }); $Onbellek.Olaylar = $a.Olaylar; $Onbellek['imza:Olaylar'] = $mkImza
+        $a.Olaylar = $(if ($Paths.Makbuz) { Get-MerkezOlaylar $Paths.Makbuz 60 $simdi } else { New-Object System.Collections.Generic.List[object] }); $Onbellek.Olaylar = $a.Olaylar; $Onbellek['imza:Olaylar'] = $mkImza
         $Onbellek.Etkinlik = $(if ($Paths.Makbuz) { Get-MerkezEtkinlikHisto $Paths.Makbuz 12 10 $simdi } else { New-Object int[] 12 })
     }
     $a.Etkinlik = $(if ($Onbellek.ContainsKey('Etkinlik')) { $Onbellek.Etkinlik } else { New-Object int[] 12 })
@@ -574,6 +579,233 @@ function Get-MerkezAnlik {
 
     # --- sayaclar ---
     foreach ($ag in $a.Ajanlar) { $s = [string]$ag.Durum; if ($a.Sayac.ContainsKey($s)) { $a.Sayac[$s]++ } else { $a.Sayac[$s] = 1 } }
+    # --- Bugun seridi (yavas kaynaklar; yalniz tam turda, onbellekli) ---
+    if ($Hizli -and $Onbellek.ContainsKey('Bugun')) { $a.Bugun = $Onbellek.Bugun } else {
+        try { $a.Bugun = Get-MerkezBugun $Paths $Onbellek $a.Ajanlar $simdi } catch { $a.Bugun = $null }
+        $Onbellek.Bugun = $a.Bugun
+    }
+
+    # --- acik ajanin ayrintisi ---
+    $a.Ayrinti = $null
+    if ($AyrintiAnahtar) {
+        foreach ($ag in $a.Ajanlar) {
+            if ("$($ag.Tur):$($ag.Kosu):$($ag.Ad)" -ne $AyrintiAnahtar) { continue }
+            try {
+                if ($ag.Tur -eq 'isci') {
+                    $ev = Join-Path (Join-Path (Join-Path $Paths.TeamRuns $ag.Kosu) $ag.Ad) 'events.jsonl'
+                    $a.Ayrinti = @{ Ok = $true; Adimlar = @(Get-MerkezIsciAdimlar $ev 5); Baglam = $null; Toplam = $(if ($ag.Jeton) { [int64]$ag.Jeton } else { $null }); Model = ''; SonIstem = $null; SonBitis = $ag.Bitti }
+                } elseif (Get-Command Get-MerkezAyrinti -ErrorAction SilentlyContinue) {
+                    $ak = "ayrinti:$AyrintiAnahtar"
+                    if ($Onbellek.ContainsKey($ak) -and ($simdi - $Onbellek[$ak].Zaman).TotalSeconds -lt 4) { $a.Ayrinti = $Onbellek[$ak].Sonuc }
+                    else { $a.Ayrinti = Get-MerkezAyrinti -Ajan $ag.Ajan -OturumId $ag.Ad -Cwd $ag.Cwd -Adim 5; $Onbellek[$ak] = @{ Zaman = $simdi; Sonuc = $a.Ayrinti } }
+                }
+                if ($a.Ayrinti -and $a.Bugun -and $a.Bugun.MalOturum -and $a.Bugun.MalOturum.ContainsKey([string]$ag.Ad)) { $a.Ayrinti.MaliyetUsd = $a.Bugun.MalOturum[[string]$ag.Ad].Usd; $a.Ayrinti.MaliyetZaman = $a.Bugun.UsdZaman }
+            } catch { $a.Ayrinti = $null }
+            break
+        }
+    }
     $a.Sirada = Get-MerkezSirada $a
     return $a
+}
+
+# =====================================================================================================================
+# 1.5.0: Bugun seridi, ajan ayrintisi, satir komutu. Hepsi SALT OKUNUR, asla firlatmaz; her kaynak boyut+zaman ya da
+# kalinan bayt konumuyla onbellekli (kare basina dosya taramasi yok).
+# =====================================================================================================================
+
+function Read-MerkezEkSatirlar([string]$Yol, [long]$Ofset) {
+    # Dosyanin $Ofset'ten sonraki TAM satirlari (son yarim satir bir sonraki okumaya kalir). @{ Satirlar; Ofset }
+    $fs = [System.IO.File]::Open($Yol, 'Open', 'Read', ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+    try {
+        if ($Ofset -gt $fs.Length) { $Ofset = 0 }   # dosya kuculdu/yenilendi: bastan
+        $n = [int][Math]::Min(8MB, $fs.Length - $Ofset); if ($n -le 0) { return @{ Satirlar = @(); Ofset = $Ofset } }
+        [void]$fs.Seek($Ofset, 'Begin'); $buf = New-Object byte[] $n; $okunan = 0
+        while ($okunan -lt $n) { $r = $fs.Read($buf, $okunan, $n - $okunan); if ($r -le 0) { break }; $okunan += $r }
+        $son = [Array]::LastIndexOf($buf, [byte]10, $okunan - 1); if ($son -lt 0) { return @{ Satirlar = @(); Ofset = $Ofset } }
+        $metin = [Text.Encoding]::UTF8.GetString($buf, 0, $son + 1)
+        return @{ Satirlar = @($metin -split "`n"); Ofset = $Ofset + $son + 1 }
+    } finally { $fs.Dispose() }
+}
+
+$script:MerkezRxTs = [regex]'"ts":"([^"]+)"'; $script:MerkezRxSc = [regex]'"script":"([^"]+)"'
+$script:MerkezRxOc = [regex]'"outcome":"([^"]+)"'; $script:MerkezRxKey = [regex]'"key":"([^"]*)"'
+function Get-MerkezGunSayac([string]$MakbuzDizin, [datetime]$Gun, [hashtable]$Onbellek) {
+    # Bir gunun makbuz sayaclari, DAKIKA cozunurlugunde (dun "bu saate kadar" karsilastirmasi icin). Bugunun dosyasi
+    # artimli okunur (kalinan bayt), gecmis gun dosyasi bir kez. Donus: Oturum/Ozet/Yayin/Derleme/Hata her biri int[1440].
+    $ad = $Gun.ToString('yyyy-MM-dd'); $k = "gun:$ad"
+    if (-not $Onbellek.ContainsKey($k)) {
+        $Onbellek[$k] = @{ Ofset = [long]0; Oturum = (New-Object int[] 1440); Ozet = (New-Object int[] 1440); Yayin = (New-Object int[] 1440)
+                           Derleme = (New-Object int[] 1440); Hata = (New-Object int[] 1440); Engel = (New-Object int[] 1440); Anahtar = (New-Object 'System.Collections.Generic.HashSet[string]') }
+    }
+    $d = $Onbellek[$k]
+    try {
+        $f = Join-Path $MakbuzDizin "$ad.jsonl"
+        if (Test-Path -LiteralPath $f) {
+            if ((Get-Item -LiteralPath $f).Length -lt $d.Ofset) { foreach ($ad in @('Oturum', 'Ozet', 'Yayin', 'Derleme', 'Hata', 'Engel')) { [Array]::Clear($d[$ad], 0, 1440) }; $d.Anahtar.Clear(); $d.Ofset = 0 }
+            $r = Read-MerkezEkSatirlar $f $d.Ofset
+            foreach ($sat in $r.Satirlar) {
+                $mt = $script:MerkezRxTs.Match($sat); if (-not $mt.Success) { continue }
+                $t = [datetime]::MinValue; if (-not [datetime]::TryParse($mt.Groups[1].Value, [ref]$t)) { continue }
+                if ($t.Date -ne $Gun.Date) { continue }
+                $dk = $t.Hour * 60 + $t.Minute
+                $sc = $script:MerkezRxSc.Match($sat).Groups[1].Value; $oc = $script:MerkezRxOc.Match($sat).Groups[1].Value
+                switch ("$sc/$oc") {
+                    'session-start/ENJEKSIYON' { $ky = $script:MerkezRxKey.Match($sat).Groups[1].Value; if ($ky -and $d.Anahtar.Add($ky)) { $d.Oturum[$dk]++ } }
+                    'flush/FLUSH_OK' { $d.Ozet[$dk]++ }
+                    'yayinla/YAYIN_OK' { $d.Yayin[$dk]++ }
+                    'compile/COMPILE_OK' { $d.Derleme[$dk]++ }
+                }
+                if ($oc -match 'HATA|DUSTU|BOZUK') { $d.Hata[$dk]++ } elseif ($oc -eq 'RED') { $d.Engel[$dk]++ }   # kill guard engeli hata degil
+            }
+            $d.Ofset = $r.Ofset
+        }
+    } catch { }
+    return $d
+}
+function Get-MerkezDakikaToplam([int[]]$Dizi, [int]$Dakika = 1439) { $s = 0; for ($i = 0; $i -le [Math]::Min(1439, $Dakika); $i++) { $s += $Dizi[$i] }; return $s }
+
+function Get-MerkezMaliyetGun([string]$Dizin, [datetime]$Gun, [hashtable]$Onbellek) {
+    # maliyet\gun\<gun>.json (beyin maliyet / gece maliyet-tara yazar): Claude USD + Codex jeton + dosya zamani + oturum
+    # basina USD/jeton (ayrinti paneli). Dosya yoksa $null. Panel taramayi KENDISI baslatmaz (~18 sn surer).
+    $f = Join-Path $Dizin ($Gun.ToString('yyyy-MM-dd') + '.json')
+    try {
+        if (-not (Test-Path -LiteralPath $f)) { return $null }
+        $o = Read-MerkezJsonOnb $f $Onbellek; if (-not $o -or -not $o.k) { return $null }
+        $ck = "malgun:$f"; $imza = [string]$Onbellek["json:$f"].Imza
+        if ($Onbellek.ContainsKey($ck) -and $Onbellek[$ck].Imza -eq $imza) { return $Onbellek[$ck].Sonuc }
+        $usd = 0.0; $cj = [int64]0; $ot = @{}
+        foreach ($p in $o.k.PSObject.Properties) {
+            $par = $p.Name -split '\|'; $v = $p.Value
+            if ($par[0] -eq 'claude') { $usd += [double]$v.usd } elseif ($par[0] -eq 'codex') { $cj += [int64]$v.in + [int64]$v.out }
+            if ($par.Count -ge 3) { $s = $par[2]; if (-not $ot.ContainsKey($s)) { $ot[$s] = @{ Usd = 0.0; Jeton = [int64]0 } }; $ot[$s].Usd += [double]$v.usd; $ot[$s].Jeton += [int64]$v.in + [int64]$v.out + [int64]$v.cr }
+        }
+        $sonuc = @{ ClaudeUsd = $usd; CodexJeton = $cj; Zaman = (Get-Item -LiteralPath $f).LastWriteTime; Oturum = $ot }
+        $Onbellek[$ck] = @{ Imza = $imza; Sonuc = $sonuc }
+        return $sonuc
+    } catch { return $null }
+}
+
+$script:MerkezGitKokOnb = @{}
+function Get-MerkezGitDizin([string]$Cwd) {
+    # Calisma klasorunden yukari .git'i bulur; .git DOSYA ise (worktree) gitdir: izlenir. Sonuc klasor basina onbellekte.
+    if (-not $Cwd) { return $null }
+    if ($script:MerkezGitKokOnb.ContainsKey($Cwd)) { return $script:MerkezGitKokOnb[$Cwd] }
+    $sonuc = $null
+    try {
+        $d = $Cwd
+        for ($i = 0; $i -lt 12 -and $d; $i++) {
+            $g = Join-Path $d '.git'
+            if (Test-Path -LiteralPath $g -PathType Container) { $sonuc = $g; break }
+            if (Test-Path -LiteralPath $g -PathType Leaf) {
+                $ic = [IO.File]::ReadAllText($g); if ($ic -match 'gitdir:\s*(.+)') { $gd = $Matches[1].Trim(); if (-not [IO.Path]::IsPathRooted($gd)) { $gd = Join-Path $d $gd }; $sonuc = $gd }
+                break
+            }
+            $d = Split-Path -Parent $d
+        }
+    } catch { }
+    if ($sonuc) { $script:MerkezGitKokOnb[$Cwd] = $sonuc }; return $sonuc
+}
+$script:MerkezRxReflog = [regex]'^[0-9a-f]{40} [0-9a-f]{40} [^\t]*? (\d{9,11}) [+-]\d{4}\t(commit(?: \((?:amend|merge|initial)\))?):'
+function Get-MerkezGitBugun([string[]]$GitDizinler, [datetime]$Simdi, [hashtable]$Onbellek) {
+    # git CALISTIRMADAN: her deponun logs\HEAD kuyrugu (64 KB) okunur; bugunun ve dunun commit'leri.
+    # Bu makinede yapilan commit'leri sayar (cekme/yeniden temelleme sayilmaz). @{ Bugun; Dun; DunSimdiye; Depo }
+    $bugun = 0; $dun = 0; $dunSimdi = 0; $depo = @{}; $dk = $Simdi.Hour * 60 + $Simdi.Minute
+    $tek = @{}; foreach ($x in @($GitDizinler | Where-Object { $_ })) { try { $n0 = [IO.Path]::GetFullPath([string]$x).TrimEnd('\', '/').ToLowerInvariant() } catch { $n0 = ([string]$x).ToLowerInvariant() }; if (-not $tek.ContainsKey($n0)) { $tek[$n0] = [string]$x } }
+    foreach ($gd in @($tek.Values | Select-Object -First 12)) {
+        try {
+            $lf = Join-Path $gd 'logs\HEAD'; if (-not (Test-Path -LiteralPath $lf)) { continue }
+            $fi = Get-Item -LiteralPath $lf; $imza = "$($fi.Length)|$($fi.LastWriteTimeUtc.Ticks)|$($Simdi.ToString('yyyyMMdd'))"; $ck = "reflog:$lf"
+            if (-not ($Onbellek.ContainsKey($ck) -and $Onbellek[$ck].Imza -eq $imza)) {
+                $zl = New-Object System.Collections.Generic.List[datetime]
+                foreach ($s in @(Read-MerkezSonSatirlar -Yol $lf -Bayt 65536)) {
+                    $m = $script:MerkezRxReflog.Match($s); if (-not $m.Success) { continue }
+                    $t = [DateTimeOffset]::FromUnixTimeSeconds([int64]$m.Groups[1].Value).LocalDateTime
+                    if ($t.Date -ge $Simdi.Date.AddDays(-1)) { $zl.Add($t) }
+                }
+                $Onbellek[$ck] = @{ Imza = $imza; Zaman = $zl }
+            }
+            $n = 0
+            foreach ($t in $Onbellek[$ck].Zaman) {
+                if ($t.Date -eq $Simdi.Date) { $bugun++; $n++ } elseif ($t.Date -eq $Simdi.Date.AddDays(-1)) { $dun++; if (($t.Hour * 60 + $t.Minute) -le $dk) { $dunSimdi++ } }
+            }
+            if ($n) { $depoAd = Split-Path -Leaf ($gd -replace '[\\/]\.git([\\/].*)?$', ''); $depo[$depoAd] = [int]$depo[$depoAd] + $n }   # worktree: ...\.git\worktrees\x -> depo adi
+        } catch { }
+    }
+    return @{ Bugun = $bugun; Dun = $dun; DunSimdiye = $dunSimdi; Depo = $depo }
+}
+
+function Get-MerkezBugun([hashtable]$Paths, [hashtable]$Onbellek, $Ajanlar, [datetime]$Simdi) {
+    # Bugun seridi: bugun ve dun (AYNI SAATE KADAR) oturum, ozet, yayin, commit; maliyet gunluk dosyadan; 24 saatlik dagilim.
+    $b = @{ Ok = $true; Saatlik = (New-Object int[] 24) }
+    $dk = $Simdi.Hour * 60 + $Simdi.Minute
+    if ($Paths.Makbuz) {
+        $g = Get-MerkezGunSayac $Paths.Makbuz $Simdi.Date $Onbellek; $y = Get-MerkezGunSayac $Paths.Makbuz $Simdi.Date.AddDays(-1) $Onbellek
+        foreach ($ad in @('Oturum', 'Ozet', 'Yayin', 'Derleme', 'Hata', 'Engel')) { $b[$ad] = (Get-MerkezDakikaToplam $g[$ad]); $b["${ad}Dun"] = (Get-MerkezDakikaToplam $y[$ad] $dk) }
+        for ($i = 0; $i -lt 1440; $i++) { $b.Saatlik[[int][Math]::Floor($i / 60)] += $g.Oturum[$i] + $g.Ozet[$i] + $g.Yayin[$i] + $g.Derleme[$i] }
+    }
+    $mDir = Join-Path $Paths.ScrState 'maliyet\gun'
+    $mb = Get-MerkezMaliyetGun $mDir $Simdi.Date $Onbellek; $my = Get-MerkezMaliyetGun $mDir $Simdi.Date.AddDays(-1) $Onbellek
+    $b.Usd = $(if ($mb) { $mb.ClaudeUsd } else { $null }); $b.UsdZaman = $(if ($mb) { $mb.Zaman } else { $null }); $b.UsdDun = $(if ($my) { $my.ClaudeUsd } else { $null })
+    $b.CodexJeton = $(if ($mb) { $mb.CodexJeton } else { $null }); $b.MalOturum = $(if ($mb) { $mb.Oturum } else { @{} })
+    # git kokleri: vault + liderlerin calisma klasorleri; en cok 12
+    $gd = @((Get-MerkezGitDizin $Paths.Vault)); foreach ($ag in $Ajanlar) { if ($ag.Tur -eq 'lider' -and $ag.Cwd) { $gd += (Get-MerkezGitDizin ([string]$ag.Cwd)) } }
+    $gt = Get-MerkezGitBugun $gd $Simdi $Onbellek
+    $b.Commit = $gt.Bugun; $b.CommitDun = $gt.DunSimdiye; $b.CommitDepo = $gt.Depo
+    return $b
+}
+
+$script:MerkezIsciAdimOnb = @{}
+function Get-MerkezIsciAdimlar([string]$EventsYol, [int]$Adet = 5) {
+    # Isci events.jsonl kuyrugundan son $Adet adim (yeniden eskiye) @{ Zaman; Metin }; boyut+zaman onbellegi.
+    if (-not $EventsYol -or -not (Test-Path -LiteralPath $EventsYol)) { return @() }
+    try {
+        $fi = Get-Item -LiteralPath $EventsYol; $imza = "$($fi.Length)|$($fi.LastWriteTimeUtc.Ticks)|$Adet"
+        if ($script:MerkezIsciAdimOnb.ContainsKey($EventsYol) -and $script:MerkezIsciAdimOnb[$EventsYol].Imza -eq $imza) { return $script:MerkezIsciAdimOnb[$EventsYol].Adim }
+        $sonuc = New-Object System.Collections.Generic.List[object]
+        $satirlar = @(Read-MerkezSonSatirlar -Yol $EventsYol -Bayt 131072)
+        for ($i = $satirlar.Count - 1; $i -ge 0 -and $sonuc.Count -lt $Adet; $i--) {
+            $s = $satirlar[$i].Trim(); if (-not $s.StartsWith('{')) { continue }
+            $o = $null; try { $o = $s | ConvertFrom-Json } catch { continue }
+            $it = $o.item; if (-not $it -or [string]$it.type -notin @('command_execution', 'file_change', 'mcp_tool_call', 'web_search')) { continue }
+            $m = switch ([string]$it.type) {
+                'command_execution' { "▸ Shell: $(([string]$it.command) -replace '^"?[^"]*powershell(\.exe)?"?\s+(-\w+\s+)*', '' -replace '^-Command\s+', '')" }
+                'file_change' { $ch = @($it.changes | Where-Object { $_ }); "▸ Edit: $(if ($ch.Count) { Split-Path -Leaf ([string]$ch[0].path) })$(if ($ch.Count -gt 1) { " +$($ch.Count - 1)" })" }
+                'mcp_tool_call' { "▸ mcp: $($it.server).$($it.tool)" }
+                default { "▸ Web: $($it.query)" }
+            }
+            $m = Protect-MerkezSatir $m 160
+            if ($sonuc.Count -and $sonuc[$sonuc.Count - 1].Metin -eq $m) { continue }   # started + completed cifti tek adim
+            $z = $null; try { if ($o.timestamp) { $z = [datetime]$o.timestamp } } catch { }
+            $sonuc.Add(@{ Zaman = $z; Metin = $m })
+        }
+        $arr = [object[]]$sonuc.ToArray(); $script:MerkezIsciAdimOnb[$EventsYol] = @{ Imza = $imza; Adim = $arr }; return $arr
+    } catch { return @() }
+}
+
+# --- satir komutu (c: panoya kopyala) ---
+# Yalniz BEYAZ LISTEDEKI bicimler kopyalanir; ajan metninden turetilen parca kontrol dizisi ya da kabuk isleci (; | & $ ` < > ( ) { })
+# iceriyorsa reddedilir. Sonda satir sonu YOK: yapistirinca kendiliginden calismaz. Onay satirlari (onayla/baslat/birlestir)
+# SOHBETE yapistirilir, terminale degil.
+$script:MerkezKomutRx = [regex]"^(beyin [a-z][\w-]*|onayla TASK-[\w-]+|baslat R[\w-]+|birlestir R[\w-]+|claude --resume [\w-]+|codex resume [\w-]+)( [\w\-\.:/\\'=~ ışğüöçİŞĞÜÖÇ]*)?$"
+function Test-MerkezGuvenliKomut([string]$Komut) {
+    if (-not $Komut -or $Komut.Length -gt 300) { return $false }
+    if ($Komut -match '[\x00-\x1f\x7f;|&`$<>(){}"]') { return $false }
+    return $script:MerkezKomutRx.IsMatch($Komut)
+}
+function Get-MerkezSatirKomut($Oge) {
+    # $Oge: @{ Tur = onay|aktarim|kart|kosu|teshis|lider|isci|bugun; Nesne; Yetim(bool) }. Donus: @{ Komut; Ipucu } ya da $null
+    if (-not $Oge) { return $null }
+    $n = $Oge.Nesne; $k = ''; $ip = 'terminale yapıştır'
+    switch ([string]$Oge.Tur) {
+        'onay'    { $k = [string]$n.Satir; $ip = 'sohbete tek başına yapıştır' }
+        'aktarim' { $k = "beyin aktar -Tamam $([string]$n.id)" }
+        'kart'    { if ($Oge.Yetim) { $k = "beyin pano transition --task $([string]$n.id) --status cancelled --reason 'koşu kapandı'" } elseif ([string]$n.status -eq 'review') { $k = "onayla $([string]$n.id)"; $ip = 'sohbete tek başına yapıştır (önce bağımsız doğrulama)' } else { $k = "beyin pano show --task $([string]$n.id)" } }
+        'kosu'    { $sm = [string]$n.Sonraki.Metin; if ($sm -match '^onay bekliyor → (.+)$') { $k = $Matches[1].Trim(); $ip = 'sohbete tek başına yapıştır' } elseif ($sm -match '(beyin [^·→]+?)\s*$') { $k = $Matches[1].Trim() } else { $k = "beyin takim durum $([string]$n.RunId)" } }
+        'teshis'  { if ([string]$n.Metin -match '·\s*(beyin [^·]+)$') { $k = $Matches[1].Trim() } }
+        'lider'   { $k = $(if ($n.Ajan -eq 'codex') { "codex resume $([string]$n.Ad)" } else { "claude --resume $([string]$n.Ad)" }); $ip = 'yeni terminalde oturumu sürdürür' }
+        'isci'    { $k = "beyin takim izle $([string]$n.Kosu) $([string]$n.Ad)" }
+        'bugun'   { $k = 'beyin maliyet' }
+    }
+    if (-not $k -or -not (Test-MerkezGuvenliKomut $k)) { return $null }
+    return @{ Komut = $k; Ipucu = $ip }
 }

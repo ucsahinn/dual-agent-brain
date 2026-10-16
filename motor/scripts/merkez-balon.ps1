@@ -377,3 +377,72 @@ function Get-MerkezEtkinlik {
         return $yok
     }
 }
+
+# ---------- ajan ayrintisi (merkez Enter / yan panel) ----------
+# Yalniz ACIK ayrintidaki tek oturum icin cagrilir. Ucuzluk sozlesmesi ayni: kuyruk (256 KB, 5 adim yoksa 1 MB),
+# boyut + mtime onbellegi. Donen metin maskelidir. Alanlar:
+#   Adimlar: son en cok $Adim arac adimi (yeniden eskiye) @{ Zaman; Metin }
+#   Baglam: son model cagrisinin girdi baglami (jeton) | Toplam: oturum toplam jetonu (Codex kesin; Claude $null)
+#   Model | SonIstem: son gercek kullanici istemi | SonBitis: son tur bitisi (end_turn / task_complete)
+$script:MerkezAyrintiOnb = @{}
+function Get-MerkezAyrinti {
+    param([ValidateSet('claude', 'codex')][string]$Ajan, [string]$OturumId, [string]$Cwd, [int]$Adim = 5)
+    $bos = @{ Ok = $false; Adimlar = @(); Baglam = $null; Toplam = $null; Model = ''; SonIstem = $null; SonBitis = $null }
+    try {
+        if ($OturumId -notmatch '^[A-Za-z0-9\-_]+$') { return $bos }
+        $yol = Resolve-MerkezTranskript $Ajan $OturumId $Cwd; if (-not $yol) { return $bos }
+        $fi = New-Object IO.FileInfo($yol); $fi.Refresh(); if (-not $fi.Exists) { return $bos }
+        $anahtar = "$Ajan|$OturumId|$Adim"; $onceki = $script:MerkezAyrintiOnb[$anahtar]
+        if ($onceki -and $onceki.Len -eq $fi.Length -and $onceki.Mtime -eq $fi.LastWriteTimeUtc.Ticks) { return $onceki.Sonuc }
+        $script:MerkezAyristirma++
+        $r = @{ Ok = $true; Adimlar = New-Object System.Collections.Generic.List[object]; Baglam = $null; Toplam = $null; Model = ''; SonIstem = $null; SonBitis = $null }
+        foreach ($bayt in @(262144, 1048576)) {
+            $r.Adimlar.Clear(); $r.Baglam = $null; $r.Toplam = $null; $r.Model = ''; $r.SonIstem = $null; $r.SonBitis = $null
+            $k = Read-MerkezKuyruk $yol $bayt; $s = $k.Satirlar
+            for ($i = $s.Count - 1; $i -ge 0; $i--) {
+                $ln = $s[$i].Trim(); if (-not $ln -or $ln[0] -ne '{') { continue }
+                if ($Ajan -eq 'claude' -and $ln -notmatch '"type"\s*:\s*"(assistant|user)"') { continue }
+                if ($Ajan -eq 'codex' -and $ln -notmatch '"type"\s*:\s*"(response_item|event_msg|turn_context)"') { continue }
+                $o = $null; try { $o = $ln | ConvertFrom-Json } catch { continue }; if ($null -eq $o) { continue }
+                $z = ConvertTo-MerkezZaman $o.timestamp
+                if ($Ajan -eq 'claude') {
+                    if ($o.PSObject.Properties['isSidechain'] -and $o.isSidechain -eq $true) { continue }
+                    $msg = $o.message; if ($null -eq $msg) { continue }
+                    if ([string]$o.type -eq 'assistant') {
+                        if (-not $r.Model -and $msg.model) { $r.Model = [string]$msg.model }
+                        if ($null -eq $r.Baglam -and $msg.usage) { try { $u = $msg.usage; $r.Baglam = [int64]$u.input_tokens + [int64]$u.cache_read_input_tokens + [int64]$u.cache_creation_input_tokens } catch { } }
+                        if (-not $r.SonBitis -and [string]$msg.stop_reason -eq 'end_turn') { $r.SonBitis = $z }
+                        $bl = @($msg.content)
+                        for ($j = $bl.Count - 1; $j -ge 0 -and $r.Adimlar.Count -lt $Adim; $j--) { if ($bl[$j] -and [string]$bl[$j].type -eq 'tool_use') { $r.Adimlar.Add(@{ Zaman = $z; Metin = (Format-MerkezMetin (Format-MerkezClaudeArac ([string]$bl[$j].name) $bl[$j].input)) }) } }
+                    } elseif (-not $r.SonIstem -and -not ($o.PSObject.Properties['isMeta'] -and $o.isMeta -eq $true)) {
+                        $ic = $msg.content
+                        if (($ic -is [string] -and $ic.Trim()) -or (@($ic | Where-Object { $_ -and $_.type -eq 'text' -and $_.text }).Count -and -not @($ic | Where-Object { $_ -and $_.type -eq 'tool_result' }).Count)) { $r.SonIstem = $z }
+                    }
+                } else {
+                    $p = $o.payload; if ($null -eq $p) { continue }; $pt = [string]$p.type
+                    if ([string]$o.type -eq 'turn_context') { if (-not $r.Model -and $p.model) { $r.Model = [string]$p.model }; continue }
+                    if ([string]$o.type -eq 'event_msg') {
+                        if ($pt -eq 'token_count' -and $p.info) {
+                            try { if ($null -eq $r.Baglam -and $p.info.last_token_usage) { $r.Baglam = [int64]$p.info.last_token_usage.input_tokens } } catch { }
+                            try { if ($null -eq $r.Toplam -and $p.info.total_token_usage) { $r.Toplam = [int64]$p.info.total_token_usage.total_tokens } } catch { }
+                        } elseif ($pt -eq 'task_complete' -and -not $r.SonBitis) { $r.SonBitis = $z }
+                        continue
+                    }
+                    if ($pt -eq 'message' -and [string]$p.role -eq 'user' -and -not $r.SonIstem) {
+                        $mt = (@($p.content) | Where-Object { $_ -and $_.PSObject.Properties['text'] } | ForEach-Object { [string]$_.text }) -join ' '
+                        if ($mt.Trim() -and -not $mt.TrimStart().StartsWith('<')) { $r.SonIstem = $z }
+                        continue
+                    }
+                    if ($r.Adimlar.Count -lt $Adim -and $pt -in @('function_call', 'custom_tool_call', 'local_shell_call', 'web_search_call')) {
+                        $c = Convert-MerkezCodexKayit $o; if ($c -and $c.Tur -eq 'arac') { $r.Adimlar.Add(@{ Zaman = $z; Metin = $c.Metin }) }
+                    }
+                }
+                if ($r.Adimlar.Count -ge $Adim -and $r.Model -and $null -ne $r.Baglam -and $r.SonIstem) { break }
+            }
+            if ($r.Adimlar.Count -ge $Adim -or $k.Tam) { break }
+        }
+        $r.Adimlar = [object[]]$r.Adimlar.ToArray()
+        $script:MerkezAyrintiOnb[$anahtar] = @{ Len = $fi.Length; Mtime = $fi.LastWriteTimeUtc.Ticks; Sonuc = $r }
+        return $r
+    } catch { return $bos }
+}

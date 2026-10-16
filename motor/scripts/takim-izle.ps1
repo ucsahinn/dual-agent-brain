@@ -2,7 +2,10 @@
     [string]$Vault = '',
     [Parameter(Mandatory = $true)][string]$Run,
     [string]$Kart = '',
-    [string]$Model = ''
+    [string]$Model = '',
+    [switch]$Tek,          # bir kare ciz ve cik (test / ekran goruntusu); bildirim, zil, pencere basligi yok
+    [int]$Genislik = 0,
+    [int]$Yukseklik = 0
 )
 # takim-izle.ps1 v15 - Takim kosusu isci paneli + kosu panosu (Beyin). v13: stat kartlari (widget), asama ilerleme cubugu, Turkce rol/pano adlari, jeton ozeti, dar ekranda kartlar alt alta. v12: Catppuccin Mocha paleti, cerceveye gomulu bolum basliklari, durum = glif + sozcuk, titreme onleme. v9: genislik-duyarli (CJK), Turkce is adlari, yabanci dildeki isci notlari gizli. Motorun (AgentChef team-run.mjs) kosu kaydini ve iscinin
 # events.jsonl'ini YALNIZ OKUR; isciye dokunmaz, dosya yaratmaz. Sekmeyi kapatmak isciyi durdurmaz; 'q' cikar.
@@ -33,32 +36,14 @@ $OutputEncoding = [Text.Encoding]::UTF8
 $env:GIT_OPTIONAL_LOCKS = '0'
 try { [Console]::CursorVisible = $false } catch { }
 
-# ---------- palet ----------
-$ESC = [char]27
-function FG([int]$r, [int]$g, [int]$b) { return "$ESC[38;2;$r;$g;${b}m" }
-function BG([int]$r, [int]$g, [int]$b) { return "$ESC[48;2;$r;$g;${b}m" }
-$RS = "$ESC[0m"; $BOLD = "$ESC[1m"; $ITAL = "$ESC[3m"
-# Palet: Catppuccin Mocha (koyu zemin icin kanitli notr palet); tek vurgu (mavi) + uc durum rengi (yesil/sari/kirmizi)
-$cText   = FG 205 214 244   # text #cdd6f4
-$cMuted  = FG 166 173 200   # subtext #a6adc8
-$cFaint  = FG 127 132 156   # overlay #7f849c
-$cFrame  = FG 69 71 90      # surface1 #45475a
-$cTitle  = FG 180 190 254   # lavender #b4befe
-$cAccent = FG 137 180 250   # blue #89b4fa
-$cOk     = FG 166 227 161   # green #a6e3a1
-$cWarn   = FG 249 226 175   # yellow #f9e2af
-$cErr    = FG 243 139 168   # red #f38ba8
-$cCmd    = FG 205 214 244
-$cMsg    = FG 205 214 244
-$cFile   = FG 205 214 244
-$cThink  = FG 127 132 156
-$cBarOff = FG 69 71 90
-$cGutCmd = FG 88 91 112
-$pOku = FG 137 180 250; $pDuz = FG 203 166 247; $pTest = FG 249 226 175; $pGit = FG 166 227 161; $pTakim = FG 250 179 135
-$bgPanel = ''              # v13: panel zemini terminalin kendi zemini; yamali arka plan kutulari kalkti
-$bgBody  = BG 30 30 46
-$bgFail  = BG 49 50 68
-$bgRun = BG 64 96 62; $bgIdle = BG 110 90 40; $bgDone = BG 49 66 110; $bgBad = BG 120 50 70; $bgWait = BG 49 50 68; $bgPart = BG 110 90 40
+# ---------- palet: ortak cizim katmani (beyin-ciz.ps1; Aurora rolleri, genislik olcusu, kartlar, kare yazici) ----------
+$cizYol = Join-Path $PSScriptRoot 'beyin-ciz.ps1'
+if (-not (Test-Path -LiteralPath $cizYol)) { Write-Host 'takim-izle: beyin-ciz.ps1 bulunamadi (motor eksik kurulmus) · beyin guncelle'; exit 2 }
+. $cizYol
+$ITAL = "$ESC[3m"
+$cCmd = $cText; $cMsg = $cText; $cFile = $cText; $cThink = $cFaint; $cGutCmd = $cFrame2
+$pOku = $cAccent; $pDuz = $cMauve; $pTest = $cWarn; $pGit = $cOk; $pTakim = $cPeach
+$bgPanel = ''; $bgBody = CizBG $CizRgb.Zemin; $bgFail = $bgWait
 
 # ---------- dosyalar ----------
 $dir = Join-Path (Join-Path $p.TeamRuns $Run) $Kart
@@ -102,48 +87,28 @@ $rows = New-Object System.Collections.Generic.List[object]   # ham kayitlar; ren
 $pos = 0L; $carry = New-Object byte[] 0; $replay = $true; $replayDividerAdded = $false
 $spin = @('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
 $spark = @('▁', '▂', '▃', '▄', '▅', '▆', '▇', '█')
-$rxAnsi = [regex]::new("$ESC\[[0-9;]*m")
 $rxCtl1 = [regex]::new("$ESC\[[0-9;?]*[ -/]*[@-~]")
 $rxCtl2 = [regex]::new("$ESC\][^$([char]7)]*$([char]7)|[\x00-\x08\x0B-\x1F\x7F]")
 
 # ---------- yardimcilar ----------
-function Clean([string]$s) { if ($null -eq $s) { return '' }; $s = $rxCtl1.Replace($s, ''); $s = $rxCtl2.Replace($s, ''); return $s.Replace("`t", '  ') }
-function Strip([string]$s) { return $rxAnsi.Replace($s, '') }
-function CellW([char]$c) {
-    $u = [int]$c
-    if ($u -lt 0x1100) { return 1 }
-    if (($u -ge 0x1100 -and $u -le 0x115F) -or ($u -ge 0x2E80 -and $u -le 0xA4CF) -or ($u -ge 0xAC00 -and $u -le 0xD7A3) -or ($u -ge 0xF900 -and $u -le 0xFAFF) -or ($u -ge 0xFE30 -and $u -le 0xFE4F) -or ($u -ge 0xFF00 -and $u -le 0xFF60) -or ($u -ge 0xFFE0 -and $u -le 0xFFE6)) { return 2 }
-    return 1
-}
-function VisLen([string]$s) { $t = Strip $s; $n = 0; for ($i = 0; $i -lt $t.Length; $i++) { if ([char]::IsHighSurrogate($t[$i])) { $n += 2; $i++ } else { $n += CellW $t[$i] } }; return $n }
-function Cut([string]$s, [int]$w) {
-    if ($w -lt 2) { return '' }
-    if ((VisLen $s) -le $w) { return $s }
-    $out = New-Object Text.StringBuilder; $vis = 0; $i = 0
-    while ($i -lt $s.Length -and $vis -lt ($w - 1)) {
-        if ($s[$i] -eq $ESC) { $j = $s.IndexOf('m', $i); if ($j -lt 0) { break }; [void]$out.Append($s.Substring($i, $j - $i + 1)); $i = $j + 1; continue }
-        if ([char]::IsHighSurrogate($s[$i]) -and ($i + 1) -lt $s.Length) { if ($vis + 2 -gt ($w - 1)) { break }; [void]$out.Append($s.Substring($i, 2)); $i += 2; $vis += 2; continue }
-        $cw = CellW $s[$i]; if ($vis + $cw -gt ($w - 1)) { break }
-        [void]$out.Append($s[$i]); $vis += $cw; $i++
-    }
-    return "$($out.ToString())$cMuted…"
-}
-function Pad([string]$s, [int]$w) { $s = Cut $s $w; return $s + (' ' * [Math]::Max(0, $w - (VisLen $s))) }
+function Clean([string]$s) { if ($null -eq $s) { return '' }; $s = $rxCtl1.Replace($s, ''); $s = $rxCtl2.Replace($s, ''); return (Get-CizGuvenliMetin $s.Replace("`t", '  ')) }   # BMP emoji satiri tasirmasin
 function Fmt([long]$n) { if ($n -ge 1000000) { return ('{0:N1}M' -f ($n / 1000000.0)) }; if ($n -ge 1000) { return ('{0:N1}K' -f ($n / 1000.0)) }; return "$n" }
 function Ago($t) { if (-not $t) { return '—' }; $s = [int]((Get-Date) - $t).TotalSeconds; if ($s -lt 0) { $s = 0 }; if ($s -lt 60) { return "$s sn" }; if ($s -lt 3600) { return "$([int][Math]::Floor($s/60)) dk $($s%60) sn" }; return "$([int][Math]::Floor($s/3600)) sa $([int][Math]::Floor(($s%3600)/60)) dk" }
 function Span($a, $b) { if (-not $a) { return '—' }; if (-not $b) { $b = Get-Date }; $d = $b - $a; if ($d.TotalDays -ge 1) { return ('{0}g {1:hh\:mm\:ss}' -f [int]$d.TotalDays, $d) }; return ('{0:hh\:mm\:ss}' -f $d) }
 function DurS([double]$sec) { if ($sec -lt 59.95) { return ('{0:0.0} sn' -f $sec) }; $t = [int][Math]::Round($sec); if ($t -lt 3600) { return "$([int][Math]::Floor($t/60)) dk $($t%60) sn" }; return "$([int][Math]::Floor($t/3600)) sa $([int][Math]::Floor(($t%3600)/60)) dk" }
 function Wrap([string]$s, [int]$w) {
+    # genislige duyarli sarma (eskiden .Length: CJK/emoji iceren satir cerceveden tasiyordu); sozcuk sinirindan, uzun sozcuk bolunur
     if ($w -lt 8) { $w = 8 }
     $out = New-Object System.Collections.Generic.List[string]
     foreach ($para in (($s -replace "`r", '') -split "`n")) {
         $p = $para.Trim(); if (-not $p) { continue }
-        while ($p.Length -gt $w) {
-            $cut = $p.LastIndexOf(' ', [Math]::Min($w, $p.Length - 1)); if ($cut -lt ($w / 2)) { $cut = $w }
-            if ([char]::IsHighSurrogate($p[$cut - 1])) { $cut-- }
-            $out.Add($p.Substring(0, $cut).TrimEnd()); $p = $p.Substring($cut).TrimStart()
+        $cur = ''
+        foreach ($soz in ($p -split ' ')) {
+            if (-not $soz) { continue }
+            while ((VisLen $soz) -gt $w) { if ($cur) { $out.Add($cur); $cur = '' }; $par = Cut $soz ($w + 1); $par = $par.Substring(0, $par.Length - "…$RS".Length); if (-not $par) { break }; $out.Add($par); $soz = $soz.Substring($par.Length) }
+            if (-not $cur) { $cur = $soz } elseif ((VisLen "$cur $soz") -le $w) { $cur = "$cur $soz" } else { $out.Add($cur); $cur = $soz }
         }
-        $out.Add($p)
+        if ($cur) { $out.Add($cur) }
     }
     return $out
 }
@@ -194,16 +159,16 @@ function Handle([string]$line) {
     $now = Get-Date; $st.lastEvent = $now
     if (-not $script:replay) { Bump $now '' }
     switch ($ev.type) {
-        'thread.started' { $st.thread = [string]$ev.thread_id; AddRow 'info' @{ text = "⟡ oturum $($st.thread)" } }
+        'thread.started' { $st.thread = [string]$ev.thread_id; AddRow 'info' @{ text = "◆ oturum $($st.thread)" } }
         'turn.started' { $st.turns++ }
         'turn.completed' {
             $u = $ev.usage
             if ($u) { $st.inTok += [long]$u.input_tokens; $st.cachedTok += [long]$u.cached_input_tokens; $st.outTok += [long]$u.output_tokens }
             $st.turnDone = $true
-            AddRow 'ok' @{ text = "✔ tur tamamlandı   giriş $(Fmt $st.inTok) · önbellek $(Fmt $st.cachedTok) · çıkış $(Fmt $st.outTok)" }
+            AddRow 'ok' @{ text = "✓ tur tamamlandı   giriş $(Fmt $st.inTok) · önbellek $(Fmt $st.cachedTok) · çıkış $(Fmt $st.outTok)" }
         }
-        'turn.failed' { $st.errors++; AddRow 'err' @{ text = "✖ tur başarısız: " + (Clean (($ev | ConvertTo-Json -Compress -Depth 4))) } }
-        'error' { $st.errors++; AddRow 'err' @{ text = "✖ hata: " + (Clean ([string]$ev.message)) } }
+        'turn.failed' { $st.errors++; AddRow 'err' @{ text = "✕ tur başarısız: " + (Clean (($ev | ConvertTo-Json -Compress -Depth 4))) } }
+        'error' { $st.errors++; AddRow 'err' @{ text = "✕ hata: " + (Clean ([string]$ev.message)) } }
         'item.started' {
             $it = $ev.item
             if ($it -and $it.type -eq 'command_execution') { $st.current = Clean (CleanCmd ([string]$it.command)); $st.currentStart = $now; $st.started[[string]$it.id] = $now }
@@ -225,7 +190,7 @@ function Handle([string]$line) {
                     if ($st.current -eq $c) { $st.current = $null }
                     $o = Clean ([string]$it.aggregated_output)
                     $detail = ''
-                    if ($o -match 'ℹ pass (\d+)[\s\S]*?ℹ fail (\d+)') { $st.lastTest = "$($Matches[1]) pass / $($Matches[2]) fail"; $detail = "$($Matches[1])/$([int]$Matches[1]+[int]$Matches[2])"; if ($Matches[2] -eq '0') { $st.lastFail = $null } }
+                    if ($o -match '\u2139 pass (\d+)[\s\S]*?\u2139 fail (\d+)') { $st.lastTest = "$($Matches[1]) pass / $($Matches[2]) fail"; $detail = "$($Matches[1])/$([int]$Matches[1]+[int]$Matches[2])"; if ($Matches[2] -eq '0') { $st.lastFail = $null } }
                     elseif ($o -match '(\d+) passed, (\d+) failed') { $st.lastTest = "$($Matches[1]) pass / $($Matches[2]) fail"; $detail = "$($Matches[1])/$([int]$Matches[1]+[int]$Matches[2])"; if ($Matches[2] -eq '0') { $st.lastFail = $null } }
                     elseif ($o -match 'no leaks found') { $detail = 'temiz' }
                     elseif ($o -match 'leaks found: (\d+)') { $detail = "$($Matches[1]) sızıntı" }
@@ -258,7 +223,7 @@ function Handle([string]$line) {
                         $st.lastFiles.Add($p)
                     }
                 }
-                'mcp_tool_call' { AddRow 'info' @{ text = "⚙ mcp $(Clean ([string]$it.server))/$(Clean ([string]$it.tool))" } }
+                'mcp_tool_call' { AddRow 'info' @{ text = "▸ mcp $(Clean ([string]$it.server))/$(Clean ([string]$it.tool))" } }
                 'web_search' { AddRow 'info' @{ text = "⌕ web: $(Clean ([string]$it.query))" } }
                 default { }
             }
@@ -370,7 +335,7 @@ function RefreshSide {
 
 # ======================= v8 GORUNUM =======================
 # Tasarim incelemesi (design_reviewer, 2026-10-13) sonrasi: akis tek satir ve soluk, bant uc sayi, gercek "su an",
-# yalniz cozulmemis hata, tek vurgu rengi (camgobegi), yesil yalniz ✔/rozet, sari yalniz uyari, kirmizi yalniz cozulmemis hata.
+# yalniz cozulmemis hata, tek vurgu rengi (camgobegi), yesil yalniz ✓/rozet, sari yalniz uyari, kirmizi yalniz cozulmemis hata.
 # Sutunlar: bolum etiketi x=2, icerik x=4, ŞU AN/son soz degeri x=12.
 
 function ShortCmd([string]$c, [int]$w) {
@@ -379,12 +344,6 @@ function ShortCmd([string]$c, [int]$w) {
     $parts = @($s -split '\s*(?:&&|;|\|\|)\s*' | Where-Object { $_ })
     if ($parts.Count -gt 1) { $s = $parts[0] }
     return (Cut $s $w)
-}
-function CutLeft([string]$p, [int]$w) { if ($p.Length -le $w) { return $p }; return "$cFaint…$RS" + $p.Substring($p.Length - ($w - 1)) }
-function CutWord([string]$s, [int]$w) {
-    if ($s.Length -le $w) { return $s }
-    $k = $s.LastIndexOf(' ', [Math]::Min($w - 1, $s.Length - 1)); if ($k -lt [int]($w / 2)) { $k = $w - 1 }
-    return $s.Substring(0, $k).TrimEnd() + "$cFaint…$RS"
 }
 function Num([double]$v, [int]$dec) { return $v.ToString("N$dec", [Globalization.CultureInfo]::GetCultureInfo('tr-TR')) }
 function Sure($a, $b) {
@@ -420,11 +379,6 @@ function IsAdi([string]$c, [string]$ph, [string]$ck, [string]$detail) {
     if ($c -match '^node (\S+\.mjs)') { return "node $($Matches[1])" }
     return 'Komut'
 }
-function MiniBar([double]$ratio, [int]$w, [string]$col) {
-    if ($ratio -lt 0) { $ratio = 0 }; if ($ratio -gt 1) { $ratio = 1 }
-    $on = [int][Math]::Round($ratio * $w)
-    return "$col$('█' * $on)$cBarOff$('░' * ($w - $on))$RS"
-}
 function HLine([int]$w, [string]$label, [string]$left, [string]$right) {
     $lab = if ($label) { " $label$cFrame " } else { '' }
     $fill = $w - 2 - (VisLen $lab) - 1; if ($fill -lt 0) { $fill = 0 }
@@ -444,27 +398,11 @@ function SureK($a, $b) {
     return "$([int][Math]::Floor($sec/3600)) sa $([int][Math]::Floor(($sec%3600)/60)) dk"
 }
 function Yuzde([double]$pay, [double]$payda) { if ($payda -le 0) { return '—' }; return ('%{0}' -f [int][Math]::Round(100.0 * $pay / $payda)) }
-function Cards([object[]]$cards, [int]$inner) {
-    # stat kartlari (widget): her kart @{ t = 'BAŞLIK'; l = @('satır', ...) }; genis ekranda yan yana, darda 3'lu / 2'li satirlara boler
-    $out = New-Object System.Collections.Generic.List[string]
-    $n = $cards.Count; if ($n -eq 0) { return $out }
-    $perRow = 1; foreach ($cand in @($n, [int][Math]::Ceiling($n / 2.0), [int][Math]::Ceiling($n / 3.0), 2, 1)) { if ($cand -lt 1 -or $cand -gt $n) { continue }; if ([int][Math]::Floor(($inner - ($cand - 1)) / $cand) -ge 32) { $perRow = $cand; break } }
-    for ($s0 = 0; $s0 -lt $n; $s0 += $perRow) {
-        $grp = @($cards[$s0..([Math]::Min($n, $s0 + $perRow) - 1)])
-        $cw = [int][Math]::Floor(($inner - ($grp.Count - 1)) / $grp.Count)
-        $hh = 0; foreach ($c in $grp) { if (@($c.l).Count -gt $hh) { $hh = @($c.l).Count } }
-        $top = ''; $bot = ''; $mid = @(); for ($k = 0; $k -lt $hh; $k++) { $mid += '' }
-        foreach ($c in $grp) {
-            $lab = " $cAccent$BOLD$($c.t)$RS$cFrame "
-            $fill = $cw - 2 - (VisLen $lab); if ($fill -lt 0) { $fill = 0 }
-            $top += "$cFrame┌$lab$('─' * $fill)┐$RS "
-            $bot += "$cFrame└$('─' * ($cw - 2))┘$RS "
-            for ($k = 0; $k -lt $hh; $k++) { $txt = if ($k -lt @($c.l).Count) { [string]@($c.l)[$k] } else { '' }; $mid[$k] += "$cFrame│$RS " + (Pad $txt ($cw - 4)) + " $cFrame│$RS " }
-        }
-        $out.Add($top.TrimEnd()); foreach ($m in $mid) { $out.Add($m.TrimEnd()) }; $out.Add($bot.TrimEnd())
-    }
-    return $out
+function KareYaz($L, [int]$w) {
+    if ($Tek) { foreach ($ln in $L) { [Console]::Write("$ln$RS`n") }; return }
+    $script:lastFrame = Write-CizKare ([System.Collections.Generic.List[string]]$L) $w $script:lastFrame
 }
+function PencereBoyu { $w = 160; $h = 50; try { $w = $Host.UI.RawUI.WindowSize.Width; $h = $Host.UI.RawUI.WindowSize.Height } catch { }; if ($Genislik -gt 0) { $w = $Genislik }; if ($Yukseklik -gt 0) { $h = $Yukseklik }; return @($w, $h) }
 function LastMsg { for ($i = $rows.Count - 1; $i -ge 0; $i--) { if ($rows[$i].kind -eq 'msg') { return $rows[$i] } }; return $null }
 function OkSinceFail {
     # son basarisiz komuttan sonra basarili bir komut geldi mi (cozulmus sayilir)
@@ -478,14 +416,14 @@ function FeedLine($r, [int]$w, [string]$tsShow, $lastMsgRef) {
     $body = $w - 10
     switch ($r.kind) {
         'cmd' {
-            if ($r.ok) { $mark = "$cFaint✔$RS"; $col = $cText } elseif ($r.sandbox) { $mark = "$cWarn◐$RS"; $col = $cText } else { $mark = "$cErr✖$RS"; $col = $cText }
+            if ($r.ok) { $mark = "$cFaint✓$RS"; $col = $cText } elseif ($r.sandbox) { $mark = "$cWarn◐$RS"; $col = $cText } else { $mark = "$cErr✕$RS"; $col = $cText }
             $dur = if ($r.dur) { "  $cFaint$($r.dur)$RS" } else { '' }
             $code = if ($r.ok) { '' } elseif ($r.sandbox) { "  $cWarn sandbox engeli$RS$cFaint (spawn EPERM; host'ta koşar)$RS" } else { "  $cErr başarısız · rc $($r.code)$RS" }
             $ad = IsAdi $r.cmd $r.ph $r.ck $r.detail
             $kalan = $body - 6 - (VisLen $code) - (VisLen $dur) - (VisLen $ad) - 4
             $kisa = if ($kalan -ge 24 -and $ad -notmatch '^(Test|Tam kontrol|Denetim|Sır|Commit|Takım|Üretilen)') { "  $cFaint$(ShortCmd $r.cmd ([Math]::Min(60, $kalan)))$RS" } else { '' }
-            $tek = if ($r.tekrar) { "  $cFaint×$($r.tekrar)$RS" } else { '' }
-            return "$ts $mark $col$ad$RS$kisa$code$dur$tek"
+            $tekrS = if ($r.tekrar) { "  $cFaint×$($r.tekrar)$RS" } else { '' }
+            return "$ts $mark $col$ad$RS$kisa$code$dur$tekrS"
         }
         'msg' {
             if ($lastMsgRef -and [object]::ReferenceEquals($r, $lastMsgRef)) { return $null }   # son soz zaten ustte
@@ -497,8 +435,8 @@ function FeedLine($r, [int]$w, [string]$tsShow, $lastMsgRef) {
         }
         'think' { return "$ts $cThink∙ $ITAL$(CutWord $r.text ([Math]::Min(100, $body - 4)))$RS" }
         'file' { return $null }   # DOSYALAR bolumu gosteriyor
-        'ok' { return "$ts $cOk✔$RS $cText$(Cut ($r.text -replace '^✔\s*', '') ($body - 4))$RS" }
-        'err' { return "$ts $cErr✖$RS $cText$(CutWord (($r.text -replace '^✖\s*', '') -replace '\s+', ' ') ([Math]::Min(100, $body - 4)))$RS" }
+        'ok' { return "$ts $cOk✓$RS $cText$(Cut ($r.text -replace '^✓\s*', '') ($body - 4))$RS" }
+        'err' { return "$ts $cErr✕$RS $cText$(CutWord (($r.text -replace '^✕\s*', '') -replace '\s+', ' ') ([Math]::Min(100, $body - 4)))$RS" }
         'divider' { return $null }
         default { return "$ts $cFaint$(Cut $r.text ($body - 2))$RS" }
     }
@@ -511,7 +449,7 @@ function CheckRows([int]$w, [int]$max) {
     $nameW = [Math]::Max(16, [Math]::Min(30, $w - 24))
     foreach ($kv in $items) {
         $v = $kv.Value
-        $mark = if ($v.ok) { "$cOk✔$RS" } elseif ($v.sandbox) { "$cWarn◐$RS" } else { "$cErr✖$RS" }
+        $mark = if ($v.ok) { "$cOk✓$RS" } elseif ($v.sandbox) { "$cWarn◐$RS" } else { "$cErr✕$RS" }
         $det = if ($v.sandbox -and -not $v.ok) { 'sandbox' } elseif ($v.detail) { $v.detail } elseif ($v.ok) { 'geçti' } else { 'başarısız' }
         $detCol = if ($v.ok) { $cMuted } elseif ($v.sandbox) { $cWarn } else { $cErr }
         $dur = if ($v.dur) { "$cFaint$($v.dur)$RS" } else { '' }
@@ -529,7 +467,7 @@ function FileRows([int]$w, [int]$max) {
 }
 
 function Render([int]$tick) {
-    $w = $Host.UI.RawUI.WindowSize.Width; $h = $Host.UI.RawUI.WindowSize.Height
+    $pb = PencereBoyu; $w = $pb[0]; $h = $pb[1]
     if ($w -lt 60) { $w = 60 }
     $inner = $w - 4
     $twoCol = $w -ge 110
@@ -537,19 +475,19 @@ function Render([int]$tick) {
     $evAge = if ($st.lastEvent) { ((Get-Date) - $st.lastEvent).TotalSeconds } else { -1 }
     $silent = (-not $done -and $evAge -gt 180)
     $okEnd = ($st.rc -eq 0 -or ($null -eq $st.rc -and $st.turnDone))
-    $glyph = if ($done) { if ($okEnd) { '✔' } else { '✖' } } elseif ($silent) { '◐' } elseif ($st.start) { $spin[$tick % $spin.Count] } else { '…' }
-    $badge = if ($st.rc -ne $null -and $st.rc -ne 0) { "$bgBad$BOLD ✖ HATA rc=$($st.rc) $RS" }
-             elseif ($done) { switch ($st.verdict) { 'pass' { "$bgRun$BOLD ✔ BİTTİ $RS" } 'partial' { "$bgPart$BOLD ◐ KISMEN $RS" } 'warn' { "$bgPart$BOLD ◐ UYARI $RS" } '' { "$bgDone$BOLD ✔ BİTTİ $RS" } default { "$bgBad$BOLD ✖ $($st.verdict.ToUpper([cultureinfo]'tr-TR')) $RS" } } }
+    $glyph = if ($done) { if ($okEnd) { '✓' } else { '✕' } } elseif ($silent) { '◐' } elseif ($st.start) { $spin[$tick % $spin.Count] } else { '…' }
+    $badge = if ($st.rc -ne $null -and $st.rc -ne 0) { "$bgBad$BOLD ✕ HATA rc=$($st.rc) $RS" }
+             elseif ($done) { switch ($st.verdict) { 'pass' { "$bgRun$BOLD ✓ BİTTİ $RS" } 'partial' { "$bgPart$BOLD ◐ KISMEN $RS" } 'warn' { "$bgPart$BOLD ◐ UYARI $RS" } '' { "$bgDone$BOLD ✓ BİTTİ $RS" } default { "$bgBad$BOLD ✕ $($st.verdict.ToUpper([cultureinfo]'tr-TR')) $RS" } } }
              elseif (-not $st.start) { "$bgWait$BOLD BEKLİYOR $RS" }
              elseif ($silent) { "$bgIdle$BOLD ◐ SESSİZ $(Sure $st.lastEvent) $RS" }
              else { "$bgPart$BOLD $glyph ÇALIŞIYOR $RS" }
     $badgeKey = (Strip $badge) -replace '[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]', ''
-    if ($st.prevBadge -and $badgeKey -ne $st.prevBadge -and $done) { try { [Console]::Write([char]7) } catch { } }
+    if (-not $Tek -and $st.prevBadge -and $badgeKey -ne $st.prevBadge -and $done) { try { [Console]::Write([char]7) } catch { } }
     $st.prevBadge = $badgeKey
     $endAt = if ($st.finish) { $st.finish } elseif ($done -and $st.lastEvent) { $st.lastEvent } else { Get-Date }
     $mins = if ($st.start) { [int](($endAt - $st.start).TotalMinutes) } else { 0 }
     $phaseName = if ($done) { 'bitti' } elseif ($st.current) { 'komut' } else { 'bekliyor' }
-    try { $Host.UI.RawUI.WindowTitle = "$glyph $Kart $phaseName $mins dk" } catch { }
+    if (-not $Tek) { try { $Host.UI.RawUI.WindowTitle = "$glyph $Kart $phaseName $mins dk" } catch { } }
     $unresolved = ($st.lastFail -and -not $done -and -not (OkSinceFail))
 
     if ($h -lt 12) {
@@ -578,7 +516,7 @@ function Render([int]$tick) {
     $s1 = "$badge$oranTxt$leaseTxt$commitTxt   $cMuted model$RS $cFaint$Model$RS" + $(if ($st.turns -gt 1) { "   $cMuted tur$RS $cText$($st.turns)$RS" } else { '' }) + $(if ($st.thread) { "   $cMuted oturum$RS $cFaint$($st.thread.Substring(0, [Math]::Min(8, $st.thread.Length)))$RS" } else { '' })
     $L.Add((Row $s1 $w))
     $dogF = 0; $kesF = 0; foreach ($rw in $rows) { if ($rw.kind -eq 'cmd' -and -not $rw.ok) { if ($rw.ck -or $rw.ph -eq 'test' -or $rw.ph -eq 'takim') { $dogF++ } else { $kesF++ } } }
-    $failTxt = "$(if ($unresolved) { $cErr } elseif ($dogF) { $cWarn } else { $cFaint })doğrulama ✖ $dogF$RS   $cFaint keşif ✖ $kesF$RS"
+    $failTxt = "$(if ($unresolved) { $cErr } elseif ($dogF) { $cWarn } else { $cFaint })doğrulama ✕ $dogF$RS   $cFaint keşif ✕ $kesF$RS"
     $warns = @()
     if (-not $done -and $evAge -gt 60) { $warns += "$cWarn son olay $(Sure $st.lastEvent) önce$RS" }
     if (-not $done -and $st.procChecked -and $st.start -and -not $st.proc -and $evAge -gt 60) { $warns += "$cErr süreç bulunamadı$RS" }
@@ -600,7 +538,7 @@ function Render([int]$tick) {
         @{ t = 'TEST'; l = @($testTxt, $testAlt) },
         @{ t = 'SON OLAY'; l = @($sonTxt, $sonAlt) }
     )
-    foreach ($cl in @(Cards $cards $inner)) { $L.Add((Row $cl $w)) }
+    foreach ($cl in @(Cards $cards $inner 32)) { $L.Add((Row $cl $w)) }
 
     # ---- su an / sonuc ----
     $lastMsg = LastMsg
@@ -619,7 +557,7 @@ function Render([int]$tick) {
                else { $lastCmdAt = $null; for ($i = $rows.Count - 1; $i -ge 0; $i--) { if ($rows[$i].kind -eq 'cmd' -and $rows[$i].ts) { $lastCmdAt = $rows[$i].ts; break } }; "$cMuted bekliyor$RS" + $(if ($st.lastEvent) { "   $cFaint· son olaydan $(Sure $st.lastEvent)$RS" } else { '' }) }
         $evre = 'kesif'; for ($i = $rows.Count - 1; $i -ge 0; $i--) { $rr2 = $rows[$i]; if ($rr2.kind -ne 'cmd') { continue }; if ($rr2.ck -eq 'git commit') { $evre = 'teslim' } elseif ($rr2.ck -or $rr2.ph -eq 'test') { $evre = 'dogrulama' } elseif ($rr2.ph -eq 'duzenle') { $evre = 'yazma' } else { $evre = 'kesif' }; break }
         $evreler = @(@('kesif', 'keşif'), @('yazma', 'yazma'), @('dogrulama', 'doğrulama'), @('teslim', 'teslim')); $ei = [Array]::IndexOf(@($evreler | ForEach-Object { $_[0] }), $evre)
-        $es = @(); for ($i = 0; $i -lt 4; $i++) { if ($i -lt $ei) { $es += "$cFaint✔ $($evreler[$i][1])$RS" } elseif ($i -eq $ei) { $es += "$cAccent● $($evreler[$i][1])$RS" } else { $es += "$cBarOff○ $($evreler[$i][1])$RS" } }
+        $es = @(); for ($i = 0; $i -lt 4; $i++) { if ($i -lt $ei) { $es += "$cFaint✓ $($evreler[$i][1])$RS" } elseif ($i -eq $ei) { $es += "$cAccent● $($evreler[$i][1])$RS" } else { $es += "$cBarOff○ $($evreler[$i][1])$RS" } }
         if (-not $st.start) { $cur = "$cFaint henüz başlamadı · sohbete ""baslat $Run"" yazılınca işçi açılır$RS" }
         $L.Add((HLine $w (Sec 'ŞU AN') '├' '┤'))
         $L.Add((Row "          $cur" $w))
@@ -651,12 +589,12 @@ function Render([int]$tick) {
 
     # ---- son hata (yalniz cozulmemisse) ----
     if ($unresolved) {
-        $L.Add((Row "$cErr▌ ✖$RS $cText$(ShortCmd $st.lastFail.cmd ([Math]::Min(60, $inner - 24)))$RS  $cFaint· rc $($st.lastFail.code) · $($st.lastFail.at.Substring(0,5))$RS" $w))
+        $L.Add((Row "$cErr▌ ✕$RS $cText$(ShortCmd $st.lastFail.cmd ([Math]::Min(60, $inner - 24)))$RS  $cFaint· rc $($st.lastFail.code) · $($st.lastFail.at.Substring(0,5))$RS" $w))
         $failRow = $null; for ($i = $rows.Count - 1; $i -ge 0; $i--) { if ($rows[$i].kind -eq 'cmd' -and -not $rows[$i].ok) { $failRow = $rows[$i]; break } }
         if ($failRow -and $failRow.out) { $ol = @(Wrap $failRow.out ([Math]::Min(100, $inner - 6)) | Where-Object { $_ -notmatch '^[\s~+]+$' }); if ($ol.Count) { $L.Add((Row "$cErr▌$RS   $cMuted$($ol[-1])$RS" $w)) } }
         $L.Add((Blank $w))
     } elseif (-not $done -and $st.lastErrLine -and $st.lastErrAt -and ((Get-Date) - $st.lastErrAt).TotalMinutes -lt 15) {
-        $L.Add((Row "$cErr▌ ✖$RS $cMuted stderr$RS  $cText$(CutWord $st.lastErrLine ([Math]::Min(100, $inner - 14)))$RS" $w)); $L.Add((Blank $w))
+        $L.Add((Row "$cErr▌ ✕$RS $cMuted stderr$RS  $cText$(CutWord $st.lastErrLine ([Math]::Min(100, $inner - 14)))$RS" $w)); $L.Add((Blank $w))
     }
 
     # ---- akis ----
@@ -703,11 +641,7 @@ function Render([int]$tick) {
     $kM = if ($script:showTok) { "$cAccent[m]$RS$cText maliyet: $(Fmt $st.inTok) giriş · $(Fmt $st.outTok) çıkış$RS" } else { "$cFaint[m]$RS$cMuted maliyet$RS" }
     $extra = "  $kM" + $(if ($st.start -and ((Get-Date) - $st.start).TotalSeconds -lt 60 -and $w -ge 120) { "$cFrame  ─  $RS$cFaint yalnız izler; sekmeyi kapatmak işçiyi durdurmaz$RS" } else { '' })
     $L.Add((HLine $w "$kT  $kE  $kP  $cFaint[q]$RS$cMuted çık$RS$extra" '╰' '╯'))
-    $sb = New-Object Text.StringBuilder
-    [void]$sb.Append("$ESC[H")
-    foreach ($ln in $L) { [void]$sb.Append($ln).Append("$RS$ESC[K`n") }
-    [void]$sb.Append("$ESC[J")
-    $kare = $sb.ToString(); if ($kare -ne $script:lastFrame) { $script:lastFrame = $kare; [Console]::Write($kare) }
+    KareYaz $L $w
 }
 
 
@@ -715,7 +649,7 @@ function Render([int]$tick) {
 # Tek ekranda butun kosu (design_reviewer spesifikasyonu 2026-10-13): rozet, asama hatti, isci tablosu,
 # BUTUNLESTIRME | DOGRULAMA, SIRADA (ne yapmali + neden). Yalniz okur; yukseklik icerige gore.
 function IsciDurumTr([string]$d) { switch ($d) { 'planned' { 'bekliyor' } 'queued' { 'sırada' } 'spawning' { 'açılıyor' } 'running' { 'çalışıyor' } 'finished' { 'bitti' } 'collected' { 'toplandı' } 'integrated' { 'birleşti' } 'failed' { 'başarısız' } 'timed_out' { 'zaman aşımı' } 'scope_violation' { 'kapsam ihlali' } 'rejected_content' { 'içerik reddi' } 'conflict' { 'çakışma' } 'aborted' { 'iptal' } 'paused_limit' { 'limit' } default { $d } } }
-function VerdictTr([string]$v) { switch ($v) { 'pass' { "$cOk✔ geçti$RS" } 'warn' { "$cWarn◐ uyarı$RS" } 'partial' { "$cWarn◐ kısmen$RS" } 'blocked' { "$cErr✖ engellendi$RS" } 'fail' { "$cErr✖ başarısız$RS" } '' { "$cFaint—$RS" } default { "$cErr✖ $v$RS" } } }
+function VerdictTr([string]$v) { switch ($v) { 'pass' { "$cOk✓ geçti$RS" } 'warn' { "$cWarn◐ uyarı$RS" } 'partial' { "$cWarn◐ kısmen$RS" } 'blocked' { "$cErr✕ engellendi$RS" } 'fail' { "$cErr✕ başarısız$RS" } '' { "$cFaint—$RS" } default { "$cErr✕ $v$RS" } } }
 function KosuAsamalar($rr) {
     # 1 plan (kayit var) 2 baslat (onay tuketildi) 3 topla (tum isciler terminal) 4 butunlestir (integration.ok) 5 dogrula (verdict) 6 ana dal (merge onayi tuketildi)
     $ws = @($rr.workers); $term = @('finished', 'failed', 'timed_out', 'scope_violation', 'aborted', 'collected', 'integrated', 'conflict', 'paused_limit')
@@ -862,13 +796,13 @@ function GozetmenDurmus($rr) {
     return -not $canli
 }
 function RenderRun([int]$tick) {
-    $w = $Host.UI.RawUI.WindowSize.Width; $h = $Host.UI.RawUI.WindowSize.Height
+    $pb = PencereBoyu; $w = $pb[0]; $h = $pb[1]
     if ($w -lt 80) { $w = 80 }
     $inner = $w - 4
     $kompakt = $w -lt 110
     $rr = $null; try { $rr = Read-Shared $runRec | ConvertFrom-Json } catch { }
     $L = New-Object System.Collections.Generic.List[string]
-    if (-not $rr) { $L.Add((HLine $w "$cTitle$BOLD$Run$RS" '╭' '╮')); $L.Add((Row "$cFaint koşu kaydı okunamadı$RS" $w)); $L.Add((HLine $w '' '╰' '╯')); [Console]::Write("$ESC[H" + ($L -join "$RS$ESC[K`n") + "$RS$ESC[K`n$ESC[J"); return }
+    if (-not $rr) { $L.Add((HLine $w "$cTitle$BOLD$Run$RS" '╭' '╮')); $L.Add((Row "$cFaint koşu kaydı okunamadı$RS" $w)); $L.Add((HLine $w '' '╰' '╯')); KareYaz $L $w; return }
     $ws = @($rr.workers | Where-Object { $null -ne $_ }); $st2 = [string]$rr.status
     $sorunluD = @('failed', 'timed_out', 'scope_violation', 'rejected_content', 'conflict', 'aborted')
     $calisan = @($ws | Where-Object { $_.status -in @('queued', 'spawning', 'running') }).Count
@@ -888,20 +822,20 @@ function RenderRun([int]$tick) {
     try { OlaylariBildir $rr $sahipsiz } catch { }
 
     # ---- rozet ----
-    if ($st2 -eq 'aborted') { $badge = "$bgBad$BOLD ✖ İPTAL $RS"; $glyph = '✖' }
-    elseif ($st2 -eq 'failed') { $badge = "$bgBad$BOLD ✖ BAŞARISIZ $RS"; $glyph = '✖' }
-    elseif ($st2 -eq 'merged') { $badge = "$bgRun$BOLD ✔ ANA DALDA $RS"; $glyph = '✔' }
-    elseif ($sahipsiz) { $badge = "$bgBad$BOLD ⚠ GÖZETMEN DURDU $RS"; $glyph = '⚠' }
+    if ($st2 -eq 'aborted') { $badge = "$bgBad$BOLD ✕ İPTAL $RS"; $glyph = '✕' }
+    elseif ($st2 -eq 'failed') { $badge = "$bgBad$BOLD ✕ BAŞARISIZ $RS"; $glyph = '✕' }
+    elseif ($st2 -eq 'merged') { $badge = "$bgRun$BOLD ✓ ANA DALDA $RS"; $glyph = '✓' }
+    elseif ($sahipsiz) { $badge = "$bgBad$BOLD ▲ GÖZETMEN DURDU $RS"; $glyph = '▲' }
     elseif ($calisan -gt 0) { $glyph = $spin[$tick % $spin.Count]; $badge = "$bgPart$BOLD $glyph ÇALIŞIYOR $RS" }
-    elseif ($cakisma) { $badge = "$bgBad$BOLD ✖ ÇAKIŞMA $RS"; $glyph = '✖' }
-    elseif ($kontrolDustu) { $badge = "$bgBad$BOLD ✖ KONTROL DÜŞTÜ $RS"; $glyph = '✖' }
-    elseif ($dogrulamaDustu) { $badge = "$bgBad$BOLD ✖ DOĞRULANAMADI $RS"; $glyph = '✖' }
+    elseif ($cakisma) { $badge = "$bgBad$BOLD ✕ ÇAKIŞMA $RS"; $glyph = '✕' }
+    elseif ($kontrolDustu) { $badge = "$bgBad$BOLD ✕ KONTROL DÜŞTÜ $RS"; $glyph = '✕' }
+    elseif ($dogrulamaDustu) { $badge = "$bgBad$BOLD ✕ DOĞRULANAMADI $RS"; $glyph = '✕' }
     elseif ($st2 -eq 'verified' -and $uyari) { $badge = "$bgPart$BOLD ◐ UYARIYLA DOĞRULANDI $RS"; $glyph = '◐' }
-    elseif ($st2 -eq 'verified') { $badge = "$bgRun$BOLD ✔ DOĞRULANDI $RS"; $glyph = '✔' }
+    elseif ($st2 -eq 'verified') { $badge = "$bgRun$BOLD ✓ DOĞRULANDI $RS"; $glyph = '✓' }
     elseif ($st2 -eq 'planned') { $badge = "$bgWait$BOLD ◐ ONAY BEKLİYOR $RS"; $glyph = '◐' }
     elseif ($st2 -eq 'paused') { $badge = "$bgIdle$BOLD ◐ KOTA SINIRI $RS"; $glyph = '◐' }
-    else { $badge = "$bgDone$BOLD ▶ ŞEF SIRASI $RS"; $glyph = '▶' }
-    try { $Host.UI.RawUI.WindowTitle = "$glyph koşu $Run" } catch { }
+    else { $badge = "$bgDone$BOLD ▸ ŞEF SIRASI $RS"; $glyph = '▸' }
+    if (-not $Tek) { try { $Host.UI.RawUI.WindowTitle = "$glyph koşu $Run" } catch { } }
 
     # ---- baslik: taban dal saat'i ezmesin diye gerekirse kirpilir ----
     $clockLab = "$cFrame─ $cFaint$((Get-Date).ToString('HH:mm'))$RS$cFrame ─╮$RS"
@@ -947,9 +881,9 @@ function RenderRun([int]$tick) {
     $segs = @()
     for ($i = 0; $i -lt 6; $i++) {
         $kirik = ($i -eq $as.Cur -and $kirikVar)
-        if ($as.Ok[$i]) { $segs += "$cOk✔$RS $cMuted$($adlar[$i])$RS" }
-        elseif ($kirik) { $segs += "$cErr$BOLD✖ $($adlar[$i])$RS" }
-        elseif ($i -eq $as.Cur) { $segs += "$cAccent$BOLD▶ $($adlar[$i])$RS" }
+        if ($as.Ok[$i]) { $segs += "$cOk✓$RS $cMuted$($adlar[$i])$RS" }
+        elseif ($kirik) { $segs += "$cErr$BOLD✕ $($adlar[$i])$RS" }
+        elseif ($i -eq $as.Cur) { $segs += "$cAccent$BOLD▸ $($adlar[$i])$RS" }
         else { $segs += "$cFaint○ $($adlar[$i])$RS" }
     }
     $bag = if ($kompakt) { 1 } else { 3 }
@@ -957,8 +891,8 @@ function RenderRun([int]$tick) {
     for ($i = 0; $i -lt 6; $i++) { $line += $segs[$i]; if ($i -lt 5) { $line += $(if ($as.Ok[$i]) { " $cOk$('━' * $bag)$RS " } else { " $cBarOff$('╌' * $bag)$RS " }) } }
     $L.Add((Row ("  " + $line) $w))
     # onaylar: kosu bu iki insan onayina takilir
-    $onB = if ($onayS) { "$cOk✔ başlat$RS $cFaint$($onayS.ToString('HH:mm'))$RS" } elseif ($st2 -eq 'planned') { "$cWarn◐ başlat bekliyor$RS" } else { "$cFaint○ başlat$RS" }
-    $onM = if ($onayM) { "$cOk✔ ana dala al$RS $cFaint$($onayM.ToString('HH:mm'))$RS" } elseif ($st2 -eq 'verified') { "$cWarn◐ ana dala al bekliyor$RS" } else { "$cFaint○ ana dala al$RS" }
+    $onB = if ($onayS) { "$cOk✓ başlat$RS $cFaint$($onayS.ToString('HH:mm'))$RS" } elseif ($st2 -eq 'planned') { "$cWarn◐ başlat bekliyor$RS" } else { "$cFaint○ başlat$RS" }
+    $onM = if ($onayM) { "$cOk✓ ana dala al$RS $cFaint$($onayM.ToString('HH:mm'))$RS" } elseif ($st2 -eq 'verified') { "$cWarn◐ ana dala al bekliyor$RS" } else { "$cFaint○ ana dala al$RS" }
     $L.Add((Row "  $cAccent onay$RS     $onB $cFrame·$RS $onM" $w))
     $olaylar = @($rr.history | Where-Object { $_.event -and $_.event -notin @('worker_collected') } | Select-Object -Last 8)
     if ($olaylar.Count) {
@@ -987,8 +921,8 @@ function RenderRun([int]$tick) {
     $vAt = if ($v -and $v.at) { ([DateTime]$v.at).ToLocalTime() } else { $null }
     $vYas = if ($vAt) { "$(KisaSure ((Get-Date) - $vAt).TotalSeconds) önce" } else { '' }
     $dogL = if ($v -and $v.verdict) { @((VerdictTr ([string]$v.verdict)), "$cMuted doğrulayıcı$(if ($vAt) { ' · ' + $vAt.ToString('HH:mm') + ' · ' + $vYas })$RS") + $(if ($v.failure) { @("$cErr$(CutWord ((Clean ([string]$v.failure)) -replace '\s+', ' ') 32)$RS") } else { @() }) }
-            elseif ($ig -and $ig.ok) { @("$cAccent▶ sırada$RS", "$cMuted bağımsız test_verifier$RS") } elseif ($ig) { @("$cFaint○ koşmadı$RS", "$cMuted önce bütünleştirme düzelmeli$RS") } else { @("$cFaint○ bekliyor$RS", "$cMuted bütünleştirmeden sonra$RS") }
-    $konL = if ($ig) { @($(if ($ig.ok) { "$cOk✔ $ckOk/$ckN geçti$RS" } else { "$cErr✖ $ckOk/$ckN geçti$RS" }), $(if ($cakisma) { "$cErr$(@($ig.conflicts).Count) çakışan dosya$RS" } else { "$cMuted$turler$RS" })) } else { @("$cFaint○ $(@($ckList).Count) kontrol planlı$RS", "$cMuted$turler$RS") }
+            elseif ($ig -and $ig.ok) { @("$cAccent▸ sırada$RS", "$cMuted bağımsız test_verifier$RS") } elseif ($ig) { @("$cFaint○ koşmadı$RS", "$cMuted önce bütünleştirme düzelmeli$RS") } else { @("$cFaint○ bekliyor$RS", "$cMuted bütünleştirmeden sonra$RS") }
+    $konL = if ($ig) { @($(if ($ig.ok) { "$cOk✓ $ckOk/$ckN geçti$RS" } else { "$cErr✕ $ckOk/$ckN geçti$RS" }), $(if ($cakisma) { "$cErr$(@($ig.conflicts).Count) çakışan dosya$RS" } else { "$cMuted$turler$RS" })) } else { @("$cFaint○ $(@($ckList).Count) kontrol planlı$RS", "$cMuted$turler$RS") }
     # bolunmus isci cubugu: yesil temiz, sari kismen, kirmizi sorunlu, soluk bitmemis
     $bw = 12; $nW = [Math]::Max(1, $ws.Count)
     $g1 = [int][Math]::Round($bw * $temiz / $nW); $y1 = [int][Math]::Round($bw * $kismen / $nW); $r1 = [int][Math]::Round($bw * $sorunlu / $nW); if ($g1 + $y1 + $r1 -gt $bw) { $g1 = $bw - $y1 - $r1 }
@@ -1025,7 +959,7 @@ function RenderRun([int]$tick) {
             $hucre = @(); foreach ($kc in @($kartlar[$s0..([Math]::Min($kartlar.Count, $s0 + 3) - 1)])) { $hucre += (Pad "$cAccent$BOLD$($kc.t)$RS $($kc.k)" $sw) }
             $L.Add((Row ("  " + ($hucre -join ' ')) $w))
         }
-    } else { foreach ($cl in @(Cards $kartlar $inner)) { $L.Add((Row $cl $w)) } }
+    } else { foreach ($cl in @(Cards $kartlar $inner 32)) { $L.Add((Row $cl $w)) } }
     $L.Add((Blank $w))
 
     # ---- isci tablosu ----
@@ -1038,7 +972,7 @@ function RenderRun([int]$tick) {
     foreach ($wk in $ws) {
         $d = [string]$wk.status; $o1 = $oz[[string]$wk.taskId]
         $dc = switch ($d) { 'running' { $cWarn } 'spawning' { $cWarn } 'queued' { $cFaint } 'failed' { $cErr } 'timed_out' { $cErr } 'scope_violation' { $cErr } 'conflict' { $cErr } 'rejected_content' { $cErr } 'aborted' { $cMuted } 'planned' { $cFaint } default { $cOk } }
-        $dm = switch ($d) { 'running' { "$($spin[$tick % $spin.Count]) " } 'spawning' { '▶ ' } 'finished' { '✔ ' } 'collected' { '✔ ' } 'integrated' { '✔ ' } 'failed' { '✖ ' } 'timed_out' { '✖ ' } 'scope_violation' { '✖ ' } 'rejected_content' { '✖ ' } 'conflict' { '✖ ' } 'aborted' { '✖ ' } default { '○ ' } }
+        $dm = switch ($d) { 'running' { "$($spin[$tick % $spin.Count]) " } 'spawning' { '▸ ' } 'finished' { '✓ ' } 'collected' { '✓ ' } 'integrated' { '✓ ' } 'failed' { '✕ ' } 'timed_out' { '✕ ' } 'scope_violation' { '✕ ' } 'rejected_content' { '✕ ' } 'conflict' { '✕ ' } 'aborted' { '✕ ' } default { '○ ' } }
         $ws0 = $(if ($wk.startedAt) { ([DateTime]$wk.startedAt).ToLocalTime() } else { $null })
         $wf = $(if ($wk.finishedAt) { ([DateTime]$wk.finishedAt).ToLocalTime() } else { $null })
         $wsure = if ($ws0) { SureK $ws0 $wf } else { '—' }
@@ -1064,13 +998,13 @@ function RenderRun([int]$tick) {
     # ---- butunlestirme (tek satir ozet; ayrinti [d]) ----
     $L.Add((HLine $w (Sec 'BÜTÜNLEŞTİRME') '├' '┤'))
     if ($ig) {
-        $L.Add((Row "  $(if ($ig.ok) { "$cOk✔ temiz$RS" } else { "$cErr✖ sorunlu$RS" }) $cFrame·$RS $cText$(@($ig.merged | Where-Object { $null -ne $_ }).Count)$RS $cMuted işçi dalı$RS $cFaint$($rr.integrationBranch)$RS $cFrame·$RS $(if ($cakisma) { "$cErr çakışma: $(@($ig.conflicts) -join ', ')$RS" } else { "$cMuted çakışma yok$RS" })" $w))
+        $L.Add((Row "  $(if ($ig.ok) { "$cOk✓ temiz$RS" } else { "$cErr✕ sorunlu$RS" }) $cFrame·$RS $cText$(@($ig.merged | Where-Object { $null -ne $_ }).Count)$RS $cMuted işçi dalı$RS $cFaint$($rr.integrationBranch)$RS $cFrame·$RS $(if ($cakisma) { "$cErr çakışma: $(@($ig.conflicts) -join ', ')$RS" } else { "$cMuted çakışma yok$RS" })" $w))
         $dusen = @($ig.checks | Where-Object { $_.status -ne 0 })
-        if (-not $dusen.Count -and -not $script:detay) { $L.Add((Row "  $cOk✔$RS $cText$ckOk/$ckN kontrol geçti$RS $cMuted· $turler$RS   $cFaint[d] ayrıntı$RS" $w)) }
+        if (-not $dusen.Count -and -not $script:detay) { $L.Add((Row "  $cOk✓$RS $cText$ckOk/$ckN kontrol geçti$RS $cMuted· $turler$RS   $cFaint[d] ayrıntı$RS" $w)) }
         else {
             foreach ($ck in @($ig.checks)) {
                 if ($ck.status -eq 0 -and -not $script:detay) { continue }
-                $m = if ($ck.status -eq 0) { "$cOk✔$RS" } else { "$cErr✖$RS" }; $ad = IsAdi ([string]$ck.command) 'test' (CheckKey ([string]$ck.command)) ''
+                $m = if ($ck.status -eq 0) { "$cOk✓$RS" } else { "$cErr✕$RS" }; $ad = IsAdi ([string]$ck.command) 'test' (CheckKey ([string]$ck.command)) ''
                 $L.Add((Row "    $m $(if ($ck.status -eq 0) { $cText } else { $cErr })$(Cut $ad ($inner - 16))$RS$(if ($ck.status -ne 0) { "  $cErr rc $($ck.status)$RS" } else { '' })" $w))
             }
             if ($dusen.Count -and -not $script:detay) { $L.Add((Row "    $cFaint$($ckOk) geçen kontrol gizli · [d] ayrıntı$RS" $w)) }
@@ -1104,28 +1038,27 @@ function RenderRun([int]$tick) {
     if ($neden) { $L.Add((Row "$cAccent▌$RS          $nedenCol$neden$RS" $w)) }
     $kD = if ($script:detay) { "$cAccent[d]$RS$cText ayrıntıyı gizle$RS" } else { "$cFaint[d]$RS$cMuted ayrıntı$RS" }
     $L.Add((HLine $w "$cFaint[q]$RS$cMuted çık$RS  $kD$cFrame  ─  $RS$cFaint[1-$([Math]::Min(4, [Math]::Max(1, $ws.Count)))]$RS$cMuted işçi paneli aç$RS$cFrame  ─  $RS$cFaint tüm sistem: beyin merkez$RS$(if ($script:panelMesaj) { "$cFrame  ─  $RS$cWarn$($script:panelMesaj)$RS" })" '╰' '╯'))
-    $sb = New-Object Text.StringBuilder
-    [void]$sb.Append("$ESC[H")
-    foreach ($ln in $L) { [void]$sb.Append($ln).Append("$RS$ESC[K`n") }
-    [void]$sb.Append("$ESC[J")
-    $kare = $sb.ToString(); if ($kare -ne $script:lastFrame) { $script:lastFrame = $kare; [Console]::Write($kare) }
+    KareYaz $L $w
 }
 
 # kendini yenileme: bu dosya degisirse (ve cozumlenebiliyorsa) ayni konsolda yeni surumu baslat, kendini kapat
 $selfPath = $PSCommandPath
-$selfStamp = $(try { (Get-Item -LiteralPath $selfPath).LastWriteTimeUtc } catch { $null })
+function SonDamga { $d = $null; foreach ($f in @($selfPath, $cizYol)) { try { $t = (Get-Item -LiteralPath $f).LastWriteTimeUtc; if (-not $d -or $t -gt $d) { $d = $t } } catch { } }; return $d }
+$selfStamp = SonDamga
 $selfAt = Get-Date
 function SelfReloadIfChanged {
     if (-not $selfPath -or -not $selfStamp) { return $false }
     if (((Get-Date) - $script:selfAt).TotalSeconds -lt 5) { return $false }
     $script:selfAt = Get-Date
     try {
-        $cur = (Get-Item -LiteralPath $selfPath).LastWriteTimeUtc
+        $cur = SonDamga
         if ($cur -le $selfStamp) { return $false }
-        if (((Get-Date).ToUniversalTime() - $cur).TotalSeconds -lt 2) { return $false }   # yazim bitmemis olabilir
-        $tok = $null; $errs = $null
-        [void][System.Management.Automation.Language.Parser]::ParseFile($selfPath, [ref]$tok, [ref]$errs)
-        if ($errs -and $errs.Count) { $script:selfStamp = $cur; return $false }
+        if (((Get-Date).ToUniversalTime() - $cur).TotalSeconds -lt 3) { return $false }   # yazim (yayin) bitmemis olabilir
+        foreach ($f in @($selfPath, $cizYol)) {
+            $tok = $null; $errs = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$tok, [ref]$errs)
+            if ($errs -and $errs.Count) { $script:selfStamp = $cur; return $false }
+        }
         return $true
     } catch { return $false }
 }
@@ -1139,19 +1072,25 @@ function CizimSonuc([scriptblock]$ciz) {
         try {
             $hh = $Host.UI.RawUI.WindowSize.Height; $ww = [Math]::Max(40, $Host.UI.RawUI.WindowSize.Width)
             $etiket = if ($script:cizimHata -ge 5) { 'BOZUK' } else { 'SORUNLU' }
-            $msg = "⚠ panel $etiket · $($script:cizimHata) kez çizilemedi · son başarılı çizim $(Ago $script:sonCizim) önce · $($script:cizimMesaj)"
+            $msg = "▲ panel $etiket · $($script:cizimHata) kez çizilemedi · son başarılı çizim $(Ago $script:sonCizim) önce · $($script:cizimMesaj)"
             [Console]::Write("$ESC[$hh;1H$cErr$(Cut $msg ($ww - 1))$RS$ESC[K")
         } catch { }
     }
 }
 
+if ($Tek) {
+    if (-not $Kart) { RenderRun 0 }
+    else { for ($i = 0; $i -lt 200 -and $script:replay; $i++) { ReadNew }; RefreshSide; Render 0 }
+    exit 0
+}
 Clear-Host
 $tick = 0; $quit = $false
 while ($true) {
     if (SelfReloadIfChanged) {
         try { [Console]::CursorVisible = $true } catch { }
         [Console]::Write("$ESC[H$ESC[J$cMuted izleyici yenileniyor (yeni sürüm)…$RS`n")
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $selfPath -Vault $Vault -Run $Run -Kart $Kart -Model $Model
+        $yArg = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $selfPath, '-Vault', $Vault, '-Run', $Run); if ($Kart) { $yArg += @('-Kart', $Kart) }; if ($Model) { $yArg += @('-Model', $Model) }   # PS 5.1 bos argumani dusurur
+        & powershell.exe @yArg
         exit $LASTEXITCODE
     }
     if (-not $Kart) { CizimSonuc { RenderRun $tick } }

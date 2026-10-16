@@ -21,6 +21,23 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.4.8 - Merkez: yetim kartlar, izin bekleyen oturumlar, sikisik kanatlar
+
+- **Yetim kart:** kosusu iptal/basarisiz/ana dalda olan acik pano karti artik "bekliyor" degil
+  `yetim` gorunur; TESHIS kapatma komutunu verir (`beyin pano transition ... --status cancelled
+  --reason ...`). Incelemedeki (`review`) kart yetim sayilmaz: o senin `onayla` satirini bekler.
+- **Uzun islem:** 2+ dk tek arac/dusunce kaydinda kalan lider `◷ uzun işlem` gorunur; 5+ dk ise
+  mavi bilgi satiri "izin onayi bekliyor olabilir" der. Bilgi satiri uyari sayilmaz, ilk adim olmaz.
+- **Kanatlar:** tek ajanli kanat tek satir (baslik + ajan), sira sabit (once dikkat isteyen, sonra
+  ad; eskiden nabza gore her karede yer degistiriyordu). Dar ekranda aktarim ve olaylar sigar.
+- **SIRADA:** ilk adim komutu kesilmez, sarilir (kesik komut kopyalanamiyordu).
+- **Pano satiri:** takim kartlari repo · kosu kimligi · rol · ilk dosya ile ayirt edilir.
+- **Balon** ekran genisligini doldurur (kaynakta 64 karakter kesimi 160'a cikti).
+- **Olay akisi:** zamanli gorev, copcu, bagla, maliyet, bekci, onay atlandi/yok olaylari Turkce;
+  bilinmeyen olayda betik adi tekrari ("zamanli · zamanli ok") yok.
+- Baslik "etkinlik … 0 kayit" yerine `motor … olay` (motor makbuzu sayar, ajan mesajini degil);
+  egilim grafigi 3 ornek birikmeden cizilmez; `5,3 milyar jeton`; alt bilgi `a boştakiler (+N)`.
+
 ## 1.4.7 - Merkez: daha akici cizim
 
 - Bir kare ~180 ms yerine ~100 ms: ajan metni temizligi (saf islev, ~10 regex) sonucu

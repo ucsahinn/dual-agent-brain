@@ -76,12 +76,12 @@ Describe 'Get-MerkezEtkinlik - Claude' {
         $r.Metin | Should Be '… düşünüyor'
         $r.Tur | Should Be 'dusunce'
     }
-    It 'asistan metni: tek satir, 64 karakter kesimi' {
+    It 'asistan metni: tek satir, 160 karakter kesimi' {
         Add-Satir $yol @((C-Yazi ("Ilk satir burada`nikinci satir " + ('uzun kelime ' * 20))))
         $r = Get-MerkezEtkinlik -Ajan claude -OturumId $id
         $r.Tur | Should Be 'yazi'
         $r.Metin | Should Match '^✎ Ilk satir burada ikinci satir'
-        $r.Metin.Length | Should Be 64
+        $r.Metin.Length | Should Be 160
         $r.Metin | Should Match '…$'
         $r.Metin | Should Not Match "[`r`n]"
     }
@@ -180,7 +180,7 @@ Describe 'Get-MerkezEtkinlik - Codex' {
         $r = Get-MerkezEtkinlik -Ajan codex -OturumId $id
         $r.Tur | Should Be 'yazi'
         $r.Metin | Should Match '^✎ Kontrol ediyorum a+…$'
-        $r.Metin.Length | Should Be 64
+        $r.Metin.Length | Should Be 160
     }
     It 'task_complete -> bekliyor, maskeli son mesaj' {
         Add-Satir $yol @((X-Rec 'event_msg' @{ type = 'task_complete'; last_agent_message = ('Tamam api_' + 'key=s' + 'k-abcdefghijklmnopqrstu yazildi') }))

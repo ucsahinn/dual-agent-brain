@@ -93,7 +93,7 @@ function KisaYas([double]$sn) {
     if ($sn -lt 0) { return '—' }; if ($sn -lt 60) { return "$([int]$sn) sn" }; if ($sn -lt 3600) { return "$([int][Math]::Floor($sn / 60)) dk" }
     if ($sn -lt 86400) { return "$([int][Math]::Floor($sn / 3600)) sa" }; return "$([int][Math]::Floor($sn / 86400)) gün"
 }
-function Fmt([double]$n) { if ($n -ge 1e9) { return ('{0:0.0}Mr' -f ($n / 1e9)) }; if ($n -ge 1e6) { return ('{0:0.0}M' -f ($n / 1e6)) }; if ($n -ge 1e3) { return ('{0:0.0}K' -f ($n / 1e3)) }; return "$([int64]$n)" }
+function Fmt([double]$n) { if ($n -ge 1e9) { return ('{0:0.0} milyar' -f ($n / 1e9)) }; if ($n -ge 1e6) { return ('{0:0.0}M' -f ($n / 1e6)) }; if ($n -ge 1e3) { return ('{0:0.0}K' -f ($n / 1e3)) }; return "$([int64]$n)" }
 function Bar([double]$oran, [int]$gen, [string]$renk) {
     $oran = [Math]::Max([double]0, [Math]::Min([double]1, $oran)); $dolu = [int][Math]::Round($oran * $gen)
     return "$renk" + ('█' * $dolu) + "$cIz" + ('█' * ($gen - $dolu)) + $RS
@@ -268,7 +268,8 @@ function AjanSatir($ag, [int]$gen, [bool]$secili, [bool]$idGoster, [int]$ekGen =
     }
     $tFaz = [Math]::Abs(([string]$ag.Ad).GetHashCode()) % 9; $ns = [double]$ag.NabizSn
     $tarS = $(if ($ns -ge 0 -and $ns -le 3) { Tarama 6 (2 * $script:tik + $tFaz) $rgbOk } elseif ($ns -le 60) { Tarama 6 ([int][Math]::Floor($script:tik / 2) + $tFaz) $rgbOk } else { Tarama 6 $tFaz $rgbIz })   # 60 sn+ sessiz: donuk
-    $durumYazi = $(if ($d -eq 'calisiyor') { "$renk$($durumAd[$d])$RS $tarS" } else { "$renk$($durumAd[$d])$RS" })
+    $durumYazi = $(if ($d -eq 'calisiyor' -and $ag.Kaynak -eq 'uzun-arac') { "$cWarn◷ uzun işlem$RS" }   # 2+ dk tek arac: uzun komut ya da izin istemi
+        elseif ($d -eq 'calisiyor') { "$renk$($durumAd[$d])$RS $tarS" } else { "$renk$($durumAd[$d])$RS" })
     $yasRenk = $(if ($ag.Bayat) { $cWarn } else { $cMuted })
     if (-not $ag.Bayat -and $d -eq 'calisiyor') { $yasRenk = $(if ($yasSn -ge 0 -and $yasSn -le 10) { $cOk } elseif ($yasSn -le 60) { $cText } else { $cMuted }) }   # taze nabiz yesil
     $yas = "$yasRenk$(Kisa $yasSn)$(if ($ag.Bayat) { ' !' })$RS"
@@ -294,8 +295,17 @@ function KanatSatirlari([string]$kanat, $ajanlar, [int]$ic) {
     $sakin = @($ajanlar | Where-Object { $_.Durum -in @('bosta', 'kapali', 'bitti') })
     $ozet = @(); if ($aktif.Count) { $ozet += "$cOk$($aktif.Count) aktif$RS" }; if ($sakin.Count) { $ozet += "$cFaint$($sakin.Count) boşta$RS" }
     $lid = @($ajanlar | Where-Object { $_.Tur -eq 'lider' }).Count; $isc = @($ajanlar | Where-Object { $_.Tur -eq 'isci' }).Count
+    $gosterilen = @($(if ($script:hepsi -or -not $aktif.Count) { @($aktif) + @($sakin) } else { $aktif }))
+    $tekSatir = ($gosterilen.Count -eq 1 -and -not $isc -and -not ($script:acik -and $script:acik -eq (AjanAnahtar $gosterilen[0])) -and -not (-not $script:hepsi -and $aktif.Count -and $sakin.Count))
+    if ($tekSatir) {
+        $kw = [Math]::Min(18, [Math]::Max(10, [int][Math]::Floor($ic / 7)))
+        $bas = "$cTitle$BOLD▣ $(Pad (Protect-MerkezSatir $kanat 40) ($kw - 2))$RS"
+        $ag = $gosterilen[0]; $script:secilebilir += , $ag
+        $ekGen1 = $(if ($ag.Jeton -or $ag.Dosya) { 19 } else { 0 })
+        $L.Add($bas + (AjanSatir $ag ($ic - $kw) ((AjanAnahtar $ag) -eq $script:secAnahtar) $false $ekGen1))
+        $L.Add('__TEK__'); return $L   # isaret: bu blogun ardina bos satir eklenmez
+    }
     $L.Add("$cTitle$BOLD▣ $(Protect-MerkezSatir $kanat 40)$RS$cFaint  ·  $RS$($ozet -join "$cFaint · $RS")$(if ($isc) { "$cFaint  ·  $RS$cTeal$isc işçi$RS" })")
-    $gosterilen = $(if ($script:hepsi -or -not $aktif.Count) { @($aktif) + @($sakin) } else { $aktif })
     $rolSay = @{}; foreach ($ag in $ajanlar) { if ($ag.Tur -eq 'lider') { $rolSay[$ag.Rol] = 1 + [int]$rolSay[$ag.Rol] } }
     # jeton/dosya sutunu yalniz o kanatta degeri olan bir ajan varsa yer kaplar; yoksa genislik balona kalir
     $ekGen = $(if (@($gosterilen | Where-Object { $_.Jeton -or $_.Dosya }).Count) { 19 } else { 0 })
@@ -359,7 +369,7 @@ function Ciz {
     $ic = $w - 4
     $a = $script:anlik; $L = New-Object System.Collections.Generic.List[string]
     $script:secilebilir = @(); $bolumBas = New-Object System.Collections.Generic.List[object]
-    $hata = @($a.Teshis | Where-Object { $_.Seviye -eq 'err' }).Count; $uyari = $a.Teshis.Count - $hata
+    $hata = @($a.Teshis | Where-Object { $_.Seviye -eq 'err' }).Count; $uyari = @($a.Teshis | Where-Object { $_.Seviye -eq 'warn' }).Count   # info sayilmaz
     $say = $a.Sayac; $n = { param($k) $(if ($say.ContainsKey($k)) { [int]$say[$k] } else { 0 }) }
 
     # ---- baslik (kosu panosu ile ayni cerceve) ----
@@ -372,7 +382,8 @@ function Ciz {
     $sayac = @()
     foreach ($d in @('calisiyor', 'inceleme', 'engelli', 'duraklatildi', 'bekliyor', 'bosta')) { $v = & $n $d; if ($v -gt 0) { $sayac += "$($durumRenk[$d])$BOLD$v$RS $cMuted$($durumAd[$d])$RS" } }
     if (-not $sayac.Count) { $sayac += "$cFaint etkin ajan yok$RS" }
-    $etk = [double[]]@($a.Etkinlik); $etkS = "${cFaint}etkinlik$RS $(Spark $etk 12 $rgbAcc $rgbTeal) ${cFaint}2 sa · $([int]($etk | Measure-Object -Sum).Sum) kayıt$RS"
+    $etk = [double[]]@($a.Etkinlik); $etkN = [int]($etk | Measure-Object -Sum).Sum   # motor makbuzlari (kanca/komut), ajan mesaji degil
+    $etkS = $(if ($etkN) { "${cFaint}motor$RS $(Spark $etk 12 $rgbAcc $rgbTeal) ${cFaint}2 sa · $etkN olay$RS" } else { "${cFaint}motor 2 sa sessiz$RS" })
     $solBas = "$rozet   $($sayac -join "$cFrame · $RS")"; $bosluk = ($w - 4) - (VisLen $solBas) - (VisLen $etkS)
     $L.Add((Row $(if ($bosluk -ge 3) { $solBas + (' ' * $bosluk) + $etkS } else { $solBas }) $w))
     $L.Add((Blank $w))
@@ -387,7 +398,7 @@ function Ciz {
     $kartlar = @(
         @{ t = '🤖 AJANLAR'; l = @("$(GradBar ($(if ($toplam) { $calisan / [double]$toplam } else { 0 })) 12 $rgbTeal $rgbOk)  $cText$BOLD$calisan$RS$cMuted/$toplam çalışıyor$RS",
             "$cPeach${BOLD}Claude$RS $cText$nClaude$RS$cFrame  ·  $RS$cTeal${BOLD}Codex$RS $cText$nCodex$RS",
-            "$(Spark ([double[]]$script:gecmis.Cal.ToArray()) 12 $rgbTeal $rgbOk) ${cFaint}eğilim$RS$cMuted · $lid lider$RS$(if ($isc) { "$cMuted · $RS$cTeal$isc işçi$RS" })") }
+            "$(if ($script:gecmis.Cal.Count -ge 3) { Spark ([double[]]$script:gecmis.Cal.ToArray()) 12 $rgbTeal $rgbOk } else { "${cFaint}············$RS" }) ${cFaint}eğilim$RS$cMuted · $lid lider$RS$(if ($isc) { "$cMuted · $RS$cTeal$isc işçi$RS" })") }
         @{ t = '🏃 KOŞULAR'; l = @("$cText$BOLD$($acikKosu.Count)$RS$cMuted açık$RS$(if ($a.Kosular.Count - $acikKosu.Count) { "$cFaint · $($a.Kosular.Count - $acikKosu.Count) biten$RS" })",
             $(if ($kIsci) { "$cOk$kIsci işçi çalışıyor$RS" } else { "${cFaint}çalışan işçi yok$RS" }),
             $(if ($sonBiten.Count) { "$cMuted$(Protect-MerkezSatir ([string]$sonBiten[0].RunId) 16)$RS $cFaint· $(KosuRozetMetin ([string]$sonBiten[0].Rozet))$RS" } else { "${cFaint}son 6 saatte biten yok$RS" })) }
@@ -399,7 +410,7 @@ function Ciz {
         $cy = [int]$a.Kaynak.CommitYuzde; $cr = $(if ($cy -ge 85) { $cErr } elseif ($cy -ge 70) { $cWarn } else { $cOk })
         $kartlar += @{ t = "💾 KAYNAK$(if ($cy -ge 70 -and $cy -lt 85) { ' ▲' })"; r = $(if ($cy -ge 85) { $cErr } else { '' }); tr = $(if ($cy -ge 70) { $cWarn } else { '' }); l = @("${cMuted}commit$RS $(IsiBar ($cy / 100.0) 10) $cr$BOLD%$cy$RS$(if ($a.Kaynak.CommitTavanGB) { "$cFaint · $([Math]::Round([double]$a.Kaynak.CommitGB))/$([Math]::Round([double]$a.Kaynak.CommitTavanGB)) GB$RS" })",
             "${cMuted}boş RAM$RS $cText$('{0:0.0}' -f [double]$a.Kaynak.BosRamGB) GB$RS$(if ($a.Kaynak.OnerilenAjan) { "$cFaint · öneri $($a.Kaynak.OnerilenAjan) ajan$RS" })",
-            "${cMuted}eğilim$RS $(Spark ([double[]]$script:gecmis.Commit.ToArray()) 10 $rgbOk $rgbErr 100)$cFaint · $(if ([int]$a.Kaynak.BostaOturum) { "$($a.Kaynak.BostaOturum) sessiz oturum" } else { 'sessiz oturum yok' })$RS") }
+            "${cMuted}eğilim$RS $(if ($script:gecmis.Commit.Count -ge 3) { Spark ([double[]]$script:gecmis.Commit.ToArray()) 10 $rgbOk $rgbErr 100 } else { "${cFaint}··········$RS" })$cFaint · $(if ([int]$a.Kaynak.BostaOturum) { "$($a.Kaynak.BostaOturum) sessiz" } else { 'sessiz oturum yok' })$RS") }
     }
     if ($a.Maliyet) {
         $mUsd = [double]$a.Maliyet.claudeUsd; $bUsd = [double]$a.Maliyet.buyukBaglamUsd
@@ -433,10 +444,14 @@ function Ciz {
         $L.Add((HLine $w (Sec '🧭 SIRADA' $vur) '├' '┤'))
         $L.Add((Row "$vur$BOLD▌$RS $srr$BOLD$(Protect-MerkezSatir ([string]$sr.Metin) ($ic - 4))$RS" $w))
         if ($sr.Neden) {
-            $nd = Protect-MerkezSatir ([string]$sr.Neden) ($ic - 4)
-            # kopyalanacak komut satirin en parlak ogesi
-            if ($nd -match '^ilk adım: (beyin [^·]+?)( · (.*))?$') { $ndS = "${cFaint}ilk adım$RS  $cAccent$BOLD$($Matches[1])$RS$(if ($Matches[3]) { "$cFaint  ·  $($Matches[3])$RS" })" } else { $ndS = "$cMuted$nd$RS" }
-            $L.Add((Row "$vur▌$RS $ndS" $w))
+            $nd = Protect-MerkezSatir ([string]$sr.Neden) 400
+            # kopyalanacak komut satirin en parlak ogesi; KESILMEZ, sigmazsa sarilir (kesik komut kopyalanamaz)
+            if ($nd -match '^ilk adım: (beyin [^·]+?)( · (.*))?$') {
+                $kmt = $Matches[1].Trim(); $kalan = [string]$Matches[3]
+                $on = "${cFaint}ilk adım$RS  "; $sar = Sar $kmt ($ic - 4 - (VisLen $on)) 4
+                for ($j = 0; $j -lt $sar.Count; $j++) { $L.Add((Row "$vur▌$RS $(if ($j -eq 0) { $on } else { ' ' * (VisLen $on) })$cAccent$BOLD$($sar[$j])$RS$(if ($j -eq $sar.Count - 1 -and $kalan -and (VisLen "$($sar[$j])  ·  $kalan") -le ($ic - 4 - (VisLen $on))) { "$cFaint  ·  $kalan$RS"; $kalan = '' })" $w)) }
+                if ($kalan) { $L.Add((Row "$vur▌$RS $cMuted$(Protect-MerkezSatir $kalan ($ic - 4))$RS" $w)) }
+            } else { $L.Add((Row "$vur▌$RS $cMuted$(Protect-MerkezSatir $nd ($ic - 4))$RS" $w)) }
         }
         $L.Add((Blank $w))
     }
@@ -453,18 +468,22 @@ function Ciz {
     # ---- TESHIS ----
     if ($a.Teshis.Count) {
         $bolumBas.Add(@{ Ad = 'TEŞHİS'; I = $L.Count })
-        $L.Add((HLine $w (Sec "🩺 TEŞHİS ($($a.Teshis.Count))" $(if ($hata) { $cErr } else { $cWarn })) '├' '┤'))
-        foreach ($t in @(@($a.Teshis | Where-Object { $_.Seviye -eq 'err' }) + @($a.Teshis | Where-Object { $_.Seviye -ne 'err' }) | Select-Object -First 5)) {
-            $icn = $(if ($t.Seviye -eq 'err') { '🔴' } else { '🟡' }); $ilk = $true
+        $L.Add((HLine $w (Sec "🩺 TEŞHİS ($($a.Teshis.Count))" $(if ($hata) { $cErr } elseif ($uyari) { $cWarn } else { $cAccent })) '├' '┤'))
+        foreach ($t in @(@($a.Teshis | Where-Object { $_.Seviye -eq 'err' }) + @($a.Teshis | Where-Object { $_.Seviye -eq 'warn' }) + @($a.Teshis | Where-Object { $_.Seviye -notin @('err', 'warn') }) | Select-Object -First 5)) {
+            $icn = $(if ($t.Seviye -eq 'err') { '🔴' } elseif ($t.Seviye -eq 'warn') { '🟡' } else { '🔵' }); $ilk = $true
             foreach ($parcaS in (Sar (Protect-MerkezSatir ([string]$t.Metin) 400) ($ic - 3) 2)) { $L.Add((Row $(if ($ilk) { "$icn $RS$cText$parcaS$RS" } else { "   $cText$parcaS$RS" }) $w)); $ilk = $false }
         }
-        if ($a.Teshis.Count -gt 5) { $L.Add((Row "$cFaint +$($a.Teshis.Count - 5) uyarı daha · beyin doktor$RS" $w)) }
+        if ($a.Teshis.Count -gt 5) { $L.Add((Row "$cFaint +$($a.Teshis.Count - 5) teşhis daha · beyin doktor$RS" $w)) }
         $L.Add((Blank $w))
     }
 
     # ---- KANATLAR ----
     $aktifMi = { param($g) @($g.Group | Where-Object { $_.Durum -notin @('bosta', 'kapali', 'bitti') }).Count -gt 0 }
-    $gruplar = @($a.Ajanlar | Group-Object -Property { $_.Kanat } | Sort-Object -Property @{ Expression = { @($_.Group | Where-Object { $_.Durum -notin @('bosta', 'kapali', 'bitti') }).Count }; Descending = $true }, @{ Expression = { ($_.Group | ForEach-Object { $_.NabizSn } | Measure-Object -Minimum).Minimum } })
+    # Sira SABIT: once dikkat isteyen (engelli/inceleme), sonra uzun islem, sonra calisan, sonra ad. Eskiden nabza gore
+    # siralaniyordu; nabiz her karede degistigi icin kanatlar secim altinda yer degistiriyordu.
+    $kanatSira = { param($g) $ds = @($g.Group | ForEach-Object { [string]$_.Durum })
+        if ($ds -contains 'engelli' -or $ds -contains 'inceleme') { 0 } elseif (@($g.Group | Where-Object { $_.Kaynak -eq 'uzun-arac' -and $_.Durum -eq 'calisiyor' }).Count) { 1 } elseif (@($ds | Where-Object { $_ -notin @('bosta', 'kapali', 'bitti') }).Count) { 2 } else { 3 } }
+    $gruplar = @($a.Ajanlar | Group-Object -Property { $_.Kanat } | Sort-Object -Property @{ Expression = { & $kanatSira $_ } }, @{ Expression = { ([string]$_.Name).ToLowerInvariant() } })
     $aktifGrup = @($gruplar | Where-Object { & $aktifMi $_ }); $sakinGrup = @($gruplar | Where-Object { -not (& $aktifMi $_) })
     # @(): tek kanatta $(...) diziyi tek GroupInfo'ya acar ve .Count kanattaki AJAN sayisini verir (iki sutun yanlis acilirdi)
     $gosterGrup = @($(if ($script:hepsi) { $gruplar } else { $aktifGrup }))
@@ -475,8 +494,14 @@ function Ciz {
     $bloklar = New-Object System.Collections.Generic.List[object]
     foreach ($g in $gosterGrup) {
         $sirali = @($g.Group | Sort-Object -Property @{ Expression = { $durumSira[[string]$_.Durum] } }, @{ Expression = { $_.Tur -ne 'lider' } }, @{ Expression = { $_.NabizSn } })
-        $bloklar.Add(@(@(KanatSatirlari ([string]$g.Name) $sirali $(if ($iki) { $solW - 1 } else { $solW })) + @('')))
+        $ks = @(KanatSatirlari ([string]$g.Name) $sirali $(if ($iki) { $solW - 1 } else { $solW }))
+        if ($ks.Count -and $ks[$ks.Count - 1] -eq '__TEK__') { $bloklar.Add(@($ks | Select-Object -First ($ks.Count - 1))) } else { $bloklar.Add(@($ks + @(''))) }
     }
+    # tek satirlik kanatlar ardisik durur; cok satirli bir kanattan once ayirici bos satir
+    $bl2 = New-Object System.Collections.Generic.List[object]
+    for ($i = 0; $i -lt $bloklar.Count; $i++) { $b = @($bloklar[$i]); if ($i -gt 0 -and $b.Count -gt 1 -and @($bloklar[$i - 1]).Count -eq 1) { $b = @('') + $b }; $bl2.Add($b) }
+    if ($bl2.Count -and @($bl2[$bl2.Count - 1]).Count -eq 1) { $bl2[$bl2.Count - 1] = @(@($bl2[$bl2.Count - 1]) + @('')) }   # bolum sonu bosluk
+    $bloklar = $bl2
     if ($iki) {
         $sol = New-Object System.Collections.Generic.List[string]; $sag = New-Object System.Collections.Generic.List[string]; $hs = 0; $hd = 0
         foreach ($b in $bloklar) { if ($hs -le $hd) { $sol.AddRange([string[]]$b); $hs += $b.Count } else { $sag.AddRange([string[]]$b); $hd += $b.Count } }
@@ -556,7 +581,14 @@ function Ciz {
     foreach ($kt in @($a.Kartlar | Select-Object -First 6)) {
         $st = [string]$kt.status; $r = switch ($st) { 'blocked' { $cErr } 'review' { $cWarn } 'in_progress' { $cOk } default { $cFaint } }
         $sahip = $(if ($kt.owner -and $kt.owner.agent) { Protect-MerkezSatir ([string]$kt.owner.agent) 10 } else { '' })
-        $pL.Add("$r● $(Pad $panoAd[$st] 10)$RS $cText$(Pad (Protect-MerkezSatir ([string]$kt.id) 12) 9)$RS $(if ($sahip) { "$($kimlikRenk[$sahip])$(Pad $sahip 6)$RS " })$cMuted$(Protect-MerkezSatir ([string]$kt.title) 90)$RS")
+        $bas = Protect-MerkezSatir ([string]$kt.title) 90
+        if ($bas -match '^Team run (R[\w-]+): (.+)$') {   # takim karti: basliklar ozdes, ayirt eden repo + ilk yazma yolu
+            $rid = $Matches[1]; $rol = $Matches[2]; $yol = $(if ($kt.writeScope -and @($kt.writeScope.paths).Count) { ([string]@($kt.writeScope.paths)[0]).TrimEnd('/', '\') -replace '^.*[\\/]', '' } else { '' })
+            # sira: repo · kosu kisa kimligi · rol · ilk dosya (dar sutunda kesilen sonda kalsin)
+            $bas = "$(if ($kt.writeScope -and $kt.writeScope.repo) { "$cText$(Protect-MerkezSatir ([string]$kt.writeScope.repo) 20)$RS$cFaint · " })$cFaint…$(if ($rid.Length -gt 4) { $rid.Substring($rid.Length - 4) } else { $rid }) · $RS$cMuted$(RolTr $rol)$(if ($yol) { "$cFaint · $(Protect-MerkezSatir $yol 40)" })"
+        }
+        $stAd = $panoAd[$st]; if ($a.Yetim -and $a.Yetim.ContainsKey([string]$kt.id)) { $r = $cWarn; $stAd = 'yetim' }   # kosusu kapanmis acik kart
+        $pL.Add("$r● $(Pad $stAd 10)$RS $cText$(Pad (Protect-MerkezSatir ([string]$kt.id) 12) 9)$RS $(if ($sahip) { "$($kimlikRenk[$sahip])$(Pad $sahip 6)$RS " })$cMuted$bas$RS")
     }
     if (-not $a.Kartlar.Count) { $pL.Add("$cOk✓$RS$cFaint açık kart yok$RS") } elseif ($a.Kartlar.Count -gt 6) { $pL.Add("$cFaint +$($a.Kartlar.Count - 6) kart · beyin pano list$RS") }
     foreach ($hd in @($a.Aktarimlar | Sort-Object -Property @{ Expression = { [string]$_.ts } } | Select-Object -First 6)) {   # en eski ustte: kapatilacak olan
@@ -607,7 +639,7 @@ function Ciz {
     $msj = $(if ($script:mesaj -and ((Get-Date) - $script:mesajZaman).TotalSeconds -lt 6) { "$cWarn$($script:mesaj)$RS$cFrame  ─  $RS" } else { '' })
     $durumS = $(if ($script:cizimHata) { "$cFrame  ─  $RS$cErr✕ çizim hatası $($script:cizimHata)$RS" } elseif ($veriYas -gt 5) { "$cFrame  ─  $RS$cWarn veri $([int]$veriYas) sn önce$RS" } else { '' })
     $gizliAjan = @($a.Ajanlar | Where-Object { $_.Durum -in @('bosta', 'kapali', 'bitti') }).Count
-    $aEtiket = $(if ($script:hepsi) { 'aktifler' } elseif ($gizliAjan) { "hepsi (+$gizliAjan boşta)" } else { 'hepsi' })
+    $aEtiket = $(if ($script:hepsi) { 'aktifler' } elseif ($gizliAjan) { "boştakiler (+$gizliAjan)" } else { 'hepsi' })
     $tk = { param($k, $e) "$cAccent$BOLD$k$RS $cFaint$e$RS" }; $ay = "$cFrame  ·  $RS"
     $tus = "$msj$(& $tk 'a' $aEtiket)$ay$(& $tk '↑↓' 'seç')$ay$(& $tk '⏎' 'odak')$ay$(& $tk 'p' 'koşu panosu')$ay$(& $tk 'r' 'tazele')$ay$(& $tk 'q' 'çık')$durumS"
     $alt = (HLine $w $tus '╰' '╯')

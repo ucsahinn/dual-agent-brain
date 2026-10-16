@@ -344,3 +344,42 @@ Describe 'merkez canli panel (1.4.5): olay akisi ve guvenli simgeler' {
         ($kaynak -replace '#[^\r\n]*', '') | Should Not Match '[\u26A0\u2714\u2716\u25B6\u23F8]'
     }
 }
+
+Describe 'merkez 1.4.8: yetim kart, bilgi teshisi, onay atlandi olayi' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+        $script:yv = Join-Path ([IO.Path]::GetTempPath()) ("merkez-yetim-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $script:yp = @{ Vault = $script:yv; Sessions = (Join-Path $script:yv 'sessions'); TeamRuns = (Join-Path $script:yv 'team-runs'); Board = (Join-Path $script:yv 'board.json'); ScrState = (Join-Path $script:yv 'scr'); Handoff = (Join-Path $script:yv 'handoff') }
+        foreach ($d in @($script:yp.Sessions, $script:yp.TeamRuns, $script:yp.ScrState, $script:yp.Handoff)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+        Set-Content -LiteralPath (Join-Path $script:yp.TeamRuns 'R-IPTAL.json') -Value (@{ runId = 'R-IPTAL'; repoName = 'demo'; status = 'aborted'; workers = @() } | ConvertTo-Json -Depth 6) -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $script:yp.TeamRuns 'R-BIRLESTI.json') -Value (@{ runId = 'R-BIRLESTI'; repoName = 'demo'; status = 'merged'; workers = @() } | ConvertTo-Json -Depth 6) -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $script:yp.TeamRuns 'R-CANLI.json') -Value (@{ runId = 'R-CANLI'; repoName = 'demo'; status = 'planned'; workers = @() } | ConvertTo-Json -Depth 6) -Encoding UTF8
+        $board = @{ schemaVersion = 4; tasks = @(
+            @{ id = 'TASK-1'; title = 'Team run R-IPTAL: qa_lead'; status = 'todo'; owner = @{ agent = 'codex'; session = 'team-R-IPTAL' } },
+            @{ id = 'TASK-2'; title = 'Team run R-CANLI: qa_lead'; status = 'todo'; owner = @{ agent = 'codex'; session = 'team-R-CANLI' } },
+            @{ id = 'TASK-4'; title = 'Team run R-BIRLESTI: qa_lead'; status = 'review'; owner = @{ agent = 'codex'; session = 'team-R-BIRLESTI' } },
+            @{ id = 'TASK-3'; title = 'el ile kart'; status = 'todo'; owner = @{ agent = 'claude'; session = 'oturum-x' } }) }
+        Set-Content -LiteralPath $script:yp.Board -Value ($board | ConvertTo-Json -Depth 6) -Encoding UTF8
+        $script:ya = Get-MerkezAnlik -Paths $script:yp
+    }
+    AfterAll { Remove-Item -LiteralPath $script:yv -Recurse -Force -ErrorAction SilentlyContinue }
+    It 'kapanmis kosuya bagli acik kart yetim; canli kosunun, el ile acilmis ve onay bekleyen (review) kart degil; teshis iptal komutu verir' {
+        @($script:ya.Yetim.Keys) -join ',' | Should Be 'TASK-1'
+        $t = @($script:ya.Teshis | Where-Object { $_.Anahtar -eq 'yetim' })
+        $t.Count | Should Be 1
+        $t[0].Metin | Should Match 'R-IPTAL · iptal'
+        $t[0].Metin | Should Match 'beyin pano transition --task TASK-1 --status cancelled --reason'
+    }
+    It 'info teshisi uyari sayilmaz ve ilk adim olmaz' {
+        $s = Get-MerkezSirada @{ Onaylar=@(); Teshis=@(@{Seviye='info';Metin='bak · beyin x'}); Kosular=@(); Ajanlar=@() }
+        $s.Metin | Should Be 'her şey yolunda'
+        $s2 = Get-MerkezSirada @{ Onaylar=@(); Teshis=@(@{Seviye='info';Metin='bak'}, @{Seviye='warn';Metin='eski · beyin aktar -Tamam 1'}); Kosular=@(); Ajanlar=@() }
+        $s2.Metin | Should Be 'hata yok · 1 uyarı bekliyor'
+        $s2.Neden | Should Match 'ilk adım: beyin aktar -Tamam 1'
+    }
+    It 'gecersiz kosu icin baslat satiri olay akisinda Turkce gorunur' {
+        $o = ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'takim'; outcome = 'ONAY_ATLANDI'; agent = 'claude'; note = 'baslat R-1 durum aborted' }
+        $o.Renk | Should Be 'warn'; $o.Metin | Should Match '^onay satırı işlenmedi · baslat R-1'
+    }
+}

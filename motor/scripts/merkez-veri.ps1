@@ -271,11 +271,12 @@ function Get-MerkezSirada($a) {
     if ($err.Count) { return @{ Metin = Protect-MerkezSatir ([string]$err[0].Metin); Neden = 'tanı gerektiriyor'; Renk = 'err' } }
     foreach ($k in $a.Kosular) { if ($k.Guncel -lt 6 -and $k.Durum -notin @('merged','aborted','failed')) { return @{ Metin = Protect-MerkezSatir ([string]$k.Sonraki.Metin); Neden = Protect-MerkezSatir ([string]$k.RunId); Renk = $(if ($k.Sonraki -and $k.Sonraki.Renk) { [string]$k.Sonraki.Renk } else { 'warn' }) } } }
     # Yolunda: yine de bir bakista durum (kac ajan calisiyor, uyari var mi) - bos satir bilgi tasimiyordu
-    $cal = @($a.Ajanlar | Where-Object { $_.Durum -eq 'calisiyor' }).Count; $uy = [int]$a.Teshis.Count
+    # 'info' teshisi (bakilacak yer, sorun degil) uyari sayilmaz ve ilk adim olmaz
+    $cal = @($a.Ajanlar | Where-Object { $_.Durum -eq 'calisiyor' }).Count; $uyL = @($a.Teshis | Where-Object { $_.Seviye -eq 'warn' }); $uy = $uyL.Count
     $calS = $(if ($cal) { "$cal ajan çalışıyor" } else { 'çalışan ajan yok' })
     if ($uy) {
         # Uyari varken "her şey yolunda" baslik rozetiyle celisiyordu: sorun yok ama uyari var; ilk adim ilk teshisin komutu.
-        $ilk = [string]$a.Teshis[0].Metin; $komut = ''; if ($ilk -match '·\s*(beyin [^·]+)$') { $komut = $Matches[1].Trim() }
+        $komut = ''; foreach ($t in $uyL) { if ([string]$t.Metin -match '·\s*(beyin [^·]+)$') { $komut = $Matches[1].Trim(); break } }
         return @{ Metin = "hata yok · $uy uyarı bekliyor"; Neden = (@($(if ($komut) { "ilk adım: $komut" }), $calS) | Where-Object { $_ }) -join ' · '; Renk = 'warn' }
     }
     return @{ Metin = 'her şey yolunda'; Neden = "$calS · bekleyen onay yok"; Renk = 'ok' }
@@ -305,6 +306,7 @@ function ConvertTo-MerkezOlay($Kayit) {
         'session-end/TAKIM_ISCI_BITTI'   { @('●', 'teal', 'takım işçisi bitirdi') }
         'retrieval/ENJEKSIYON'           { $kv = @($Kayit.concepts | Where-Object { $_ }); @('◆', 'accent', "$($kv.Count) kavram hatırlandı$(if ($kv.Count) { ': ' + (Protect-MerkezSatir (([string]$kv[0]) -replace '\.md$', '' -replace '-', ' ') 60) })") }
         'aktar/DEVIR_KAYDEDILDI'         { @('⇄', 'accent', 'aktarım gönderildi') }
+        'aktar/AKTAR_KAYDEDILDI'         { @('⇄', 'accent', 'aktarım gönderildi') }
         'aktar/BRIFING_KAYDEDILDI'       { @('⇄', 'accent', 'işçi brifingi kaydedildi') }
         'aktar/AKTAR_TAMAM'              { @('✓', 'ok', "aktarım kapatıldı$(if ($not) { ' · ' + $not })") }
         'aktar/AKTAR_YANITLANDI'         { @('⇄', 'ok', 'aktarım yanıtlandı') }
@@ -314,14 +316,25 @@ function ConvertTo-MerkezOlay($Kayit) {
         'pano/PANO_OK'                   { @('▤', 'muted', "pano$(if ($not) { ' · ' + $not })") }
         'takim/TAKIM_OK'                 { @('▤', 'accent', "takım$(if ($not) { ' · ' + $not })") }
         'takim/TAKIM_HATA'               { @('✕', 'err', "takım komutu düştü$(if ($not) { ' · ' + $not })") }
+        'takim/ONAY_ATLANDI'             { @('⊘', 'warn', "onay satırı işlenmedi$(if ($not) { ' · ' + $not })") }
         'takim/ONAY_KAYDEDILDI'          { @('◐', 'warn', "takım onayı kaydedildi$(if ($not) { ' · ' + $not })") }
         'yayinla/YAYIN_OK'               { @('↑', 'ok', 'motor yayınlandı') }
         'kill-guard/RED'                 { @('✕', 'err', "kill guard engelledi$(if ($not) { ' · ' + $not })") }
         'compile/COMPILE_OK'             { @('◆', 'ok', 'derleme: yeni kavram notları') }
         'gom/GOM_OK'                     { @('◆', 'muted', 'vektör gömme tazelendi') }
+        'compile/COMPILE_BOS'            { @('◆', 'muted', 'derleme: yeni kavram yok') }
+        'bagla/BAGLA_OK'                 { @('◆', 'muted', 'ilgili not bağlantıları tazelendi') }
+        'zamanli/ZAMANLI_OK'             { @('◷', 'muted', "zamanlı görev$(if ($not -match '^(\S+(?: \S+)?) kod=') { ': ' + $Matches[1] }) tamam") }
+        'copcu/COPCU_RAPOR'              { @('▤', 'muted', 'disk raporu hazır') }
+        'bekci/BEKCI_RAPOR'              { @('▤', 'muted', 'kaynak bekçisi raporu') }
+        'maliyet/MALIYET_KISMI'          { @('▤', 'muted', 'maliyet taraması (kısmi)') }
+        'maliyet/MALIYET_OK'             { @('▤', 'muted', 'maliyet taraması') }
+        'gecmis-toparla/TOPLA_OK'        { @('✎', 'muted', 'eski oturumlar toplandı') }
+        'takim/ONAY_YOK'                 { @('⊘', 'warn', "onay satırı bulunamadı$(if ($not) { ' · ' + $not })") }
         default {
             $sev = $(if ($oc -match 'HATA|RED|DUSTU|BOZUK') { 'err' } elseif ($oc -match '_OK$') { 'muted' } else { 'muted' })
-            @('·', $sev, "$sc · $(($oc -replace '_', ' ').ToLowerInvariant())")
+            $ocT = ($oc -replace '_', ' ').ToLowerInvariant(); if ($ocT.StartsWith("$sc ")) { $ocT = $ocT.Substring($sc.Length + 1) }   # "zamanli · zamanli ok" tekrari
+            @('·', $sev, "$sc · $ocT")
         }
     }
     $z = $null; try { $z = [datetime]$Kayit.ts } catch { return $null }
@@ -489,7 +502,31 @@ function Get-MerkezAnlik {
         }
     }
 
+    # Uzun sessizlik: lider 5+ dk ayni arac/dusunce kaydinda. Claude Code izin istemini transkripte yazmaz; uzun komut ile
+    # "pencerede onay bekleyen komut" disaridan ayirt edilemez. Durum degismez (calisiyor), yalniz bakilacak yer soylenir.
+    $uzun = @($a.Ajanlar | Where-Object { $_.Tur -eq 'lider' -and $_.Kaynak -eq 'uzun-arac' -and [double]$_.NabizSn -ge 300 })
+    if ($uzun.Count) {
+        $pr = @($uzun | ForEach-Object { Get-MerkezProje ([string]$_.Cwd) $Paths } | Where-Object { $_ } | Select-Object -Unique)
+        $a.Teshis.Add(@{ Seviye = 'info'; Anahtar = 'uzun'; Metin = "$($uzun.Count) oturum 5+ dk tek araçta$(if ($pr.Count) { ' (' + (($pr | Select-Object -First 3) -join ', ') + ')' }) · izin onayı bekliyor olabilir, pencereye bak" })
+    }
+
     # --- kartlar + onaylar ---
+    # Yetim kart: sahibi "team-<runId>" olan acik kart, ama o kosu kapanmis (iptal/basarisiz/ana dalda). Kart kendiliginden
+    # kapanmaz; panoda "bekliyor" gorunup sonsuza dek acik kalir. Teshis, kapatma komutunu verir (merkez yazmaz).
+    $a.Yetim = @{}
+    foreach ($k in $kartlar) {
+        if ([string]$k.status -eq 'review') { continue }   # incelemedeki kart 'onayla' bekler (birlesen kosuda normal akis), yetim degil
+        $ses = $(if ($k.owner) { [string]$k.owner.session } else { '' })
+        if ($ses -notmatch '^team-(R[\w-]+)$') { continue }
+        $rid = $Matches[1]; $rf = Join-Path $Paths.TeamRuns "$rid.json"
+        $rk = $null; try { if (Test-Path -LiteralPath $rf) { $rk = Read-MerkezJsonOnb $rf $Onbellek } } catch { }
+        if ($rk -and [string]$rk.status -in @('aborted', 'failed', 'merged')) { $a.Yetim[[string]$k.id] = @{ Run = $rid; Durum = [string]$rk.status } }
+    }
+    if ($a.Yetim.Count) {
+        $ids = @($a.Yetim.Keys | Sort-Object); $ilk = $a.Yetim[$ids[0]]
+        $dAd = @{ aborted = 'iptal'; failed = 'başarısız'; merged = 'ana dalda' }[$ilk.Durum]
+        $a.Teshis.Add(@{ Seviye = 'warn'; Anahtar = 'yetim'; Metin = "$($ids.Count) kart kapanmış koşuya bağlı ($($ilk.Run) · $dAd) · beyin pano transition --task $($ids[0]) --status cancelled --reason 'koşu kapandı'" })
+    }
     $a.Kartlar = @($kartlar | Sort-Object -Property @{ Expression = { switch ([string]$_.status) { 'blocked' { 0 } 'review' { 1 } 'in_progress' { 2 } default { 3 } } } }, @{ Expression = { [string]$_.id } })
     foreach ($k in $kartlar) { if ([string]$k.status -eq 'review') { $a.Onaylar.Add(@{ Satir = "onayla $($k.id)"; Neden = "kart incelemede · $(Protect-MerkezSatir ([string]$k.title) 60)" }) } }
 

@@ -23,7 +23,7 @@ $script:MerkezYol = @{}      # "ajan|id" -> transkript yolu
 $script:MerkezYok = @{}      # "ajan|id" -> son basarisiz arama zamani
 $script:MerkezSonuc = @{}    # "ajan|id" -> @{ Len; Mtime; Sonuc }
 $script:MerkezAyristirma = 0 # test/teshis: gercek ayristirma sayaci
-$script:MerkezMaxMetin = 64
+$script:MerkezMaxMetin = 160   # ekran Cut ile kendi genisligine keser; kaynakta 64 genis ekranda balonu bosuna kisaltiyordu
 
 function Clear-MerkezOnbellek {
     $script:MerkezYol = @{}; $script:MerkezYok = @{}; $script:MerkezSonuc = @{}; $script:MerkezAyristirma = 0
@@ -87,7 +87,7 @@ function Protect-MerkezMetin([string]$Metin) {
     return $m
 }
 
-# Tek satir + maske + 64 karakter kesimi.
+# Tek satir + maske + MerkezMaxMetin (160) karakter kesimi.
 function Format-MerkezMetin([string]$Metin) {
     if ($null -eq $Metin) { return '' }
     $t = [regex]::Replace($Metin, '[\x00-\x1F\x7F  ]+', ' ')

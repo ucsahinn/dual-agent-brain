@@ -203,6 +203,8 @@ function Get-BeyinAyarKayitlari {
         @{ Ad = 'BEYIN_AGENTCHEF_KOK';  Varsayilan = '';                       Secenekler = @(); Aciklama = 'AgentChef checkout yolu; bos ise otomatik bulunur (ev, Belgeler, Masaustu, source\repos, src, dev, code ...). Pano, takim ve bekci kullanir.' },
         @{ Ad = 'BEYIN_PANO_KOORDINATOR'; Varsayilan = 'leadership_coordinator'; Secenekler = @('backend_coordinator', 'devops_coordinator', 'leadership_coordinator', 'product_coordinator', 'qa_coordinator', 'ui_coordinator', 'marketing_coordinator'); Aciklama = 'beyin pano create icin varsayilan --owner-coordinator (AgentChef katalog koordinatoru); -Koordinator ile ezilir' },
         @{ Ad = 'BEYIN_BILDIRIM';       Varsayilan = 'acik';                 Secenekler = @('acik', 'kapali');           Aciklama = 'Kosu paneli Windows bildirimi: onay bekliyor, isci bitti, kota siniri, dogrulama/kontrol dustu, gozetmen durdu. Yalniz kosu genel gorunumu acikken.' },
+        @{ Ad = 'BEYIN_MERKEZ_SES';     Varsayilan = 'kapali';               Secenekler = @('kapali', 'ton', 'toast');   Aciklama = 'beyin merkez sesli bildirim (ISTEGE BAGLI): ton = hata/onay/kosu bitti icin uc ayri kisa ton, toast = Windows bildirimi sesiyle, kapali = sessiz. Ayni olay icin bir kez.' },
+        @{ Ad = 'BEYIN_MERKEZ_SESSIZ';  Varsayilan = 'yok';                  Secenekler = @();                           Aciklama = 'beyin merkez sessiz saatleri SS-SS (or. 23-08: gece 23 ile sabah 08 arasi ses yok); yok = her zaman.' },
         @{ Ad = 'BEYIN_MERKEZ_ZEMIN';   Varsayilan = 'osc';                  Secenekler = @('osc', 'boya', 'kapali');    Aciklama = 'beyin merkez zemini: osc = Windows Terminal sekme zeminini Aurora laciverti yapar (cikista geri alir), boya = her satiri zeminle boyar (diger terminaller), kapali = terminal zemini.' },
         @{ Ad = 'BEYIN_BRAIN_CLI';   Varsayilan = '';                       Secenekler = @();                          Aciklama = 'brain-cli.mjs yolu (istege bagli, beyin yedek)' },
         @{ Ad = 'BEYIN_DEPO';        Varsayilan = 'https://github.com/ucsahinn/dual-agent-brain'; Secenekler = @();    Aciklama = 'Motor guncelleme deposu (fork ettiysen kendi adresini yaz)' },
@@ -340,13 +342,18 @@ function Test-BeyinAyarDeger {
             $s.Ok = $false
             $s.Hata = "gecerli degerler: $($secenek -join ' | ')  (verilen: '$v')"
         } else { $s.Deger = $k }
-    } elseif ($Ad -eq 'BEYIN_BRIFING_KIME' -or $Ad -eq 'BEYIN_PANO_ONAY' -or $Ad -eq 'BEYIN_SONME' -or $Ad -eq 'BEYIN_KILL_GUARD' -or $Ad -eq 'BEYIN_BILDIRIM' -or $Ad -eq 'BEYIN_MERKEZ_ZEMIN') {
+    } elseif ($Ad -eq 'BEYIN_BRIFING_KIME' -or $Ad -eq 'BEYIN_PANO_ONAY' -or $Ad -eq 'BEYIN_SONME' -or $Ad -eq 'BEYIN_KILL_GUARD' -or $Ad -eq 'BEYIN_BILDIRIM' -or $Ad -eq 'BEYIN_MERKEZ_ZEMIN' -or $Ad -eq 'BEYIN_MERKEZ_SES') {
         $k = $v.Trim().ToLowerInvariant()
         $secenek = @((Get-BeyinAyarKayit -Ad $Ad).Secenekler)
         if ($secenek -notcontains $k) {
             $s.Ok = $false
             $s.Hata = "gecerli degerler: $($secenek -join ' | ')  (verilen: '$v')"
         } else { $s.Deger = $k }
+    } elseif ($Ad -eq 'BEYIN_MERKEZ_SESSIZ') {
+        $k = $v.Trim().ToLowerInvariant()
+        if ($k -eq 'yok') { $s.Deger = 'yok' }
+        elseif ($k -match '^(\d{1,2})-(\d{1,2})$' -and [int]$Matches[1] -le 23 -and [int]$Matches[2] -le 23 -and [int]$Matches[1] -ne [int]$Matches[2]) { $s.Deger = ('{0:00}-{1:00}' -f [int]$Matches[1], [int]$Matches[2]) }
+        else { $s.Ok = $false; $s.Hata = "SS-SS (or. 23-08) ya da yok olmali (verilen: '$v')" }
     } elseif ($Ad -eq 'BEYIN_CLAUDE_TAVAN') {
         if ($v -notmatch '^\d{4}$' -or [int]$v -lt 4000 -or [int]$v -gt 9800) {
             $s.Ok = $false
@@ -5561,9 +5568,13 @@ function Get-BeyinTakimKosular {
 # ve her isci icin motor/scripts/takim-izle.ps1 panelini Windows Terminal sekmesinde acar. Ayar BEYIN_TAKIM_PANEL:
 # on (varsayilan, premium panel) | motor (motorun kendi izleyicisi) | off (sekme acma). wt argv'sinde ';' olmaz
 # (wt ';' gorunce yeni sekme komutu sanir ve yardim penceresi acar).
+function Test-BeyinTakimKimlik([string]$Kimlik) { return [bool]($Kimlik -cmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z') }
 function Get-BeyinTakimPanelArgv {
     param([Parameter(Mandatory=$true)]$Paths, [Parameter(Mandatory=$true)][string]$RunId, [Parameter(Mandatory=$true)][string]$TaskId, [string]$Role = '')
     $izle = Join-Path $Paths.Scripts 'takim-izle.ps1'
+    # kimlikler kosu kaydindan (isci yazabilir) gelir: wt argumanina girmeden once katı bicim (tirnak/; ile alt komut enjeksiyonu yok)
+    if (-not (Test-BeyinTakimKimlik $RunId) -or -not (Test-BeyinTakimKimlik $TaskId)) { return $null }
+    $Role = $Role -replace '[^A-Za-z0-9_ -]', ''
     $baslik = ("$TaskId $Role $RunId".Trim() -replace '[;"]', ' ')
     return @('-w', '0', 'new-tab', '--title', $baslik, 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $izle, '-Vault', [string]$Paths.Vault, '-Run', $RunId, '-Kart', $TaskId)
 }
@@ -5571,6 +5582,7 @@ function Open-BeyinTakimPanel {
     param([Parameter(Mandatory=$true)]$Paths, [Parameter(Mandatory=$true)][string]$RunId, [string[]]$TaskIds = @())
     $mod = [string]$(if ($env:BEYIN_TAKIM_PANEL) { $env:BEYIN_TAKIM_PANEL } else { 'on' })
     if ($mod -ne 'on') { return @{ Ok = $true; Acilan = 0; Neden = "BEYIN_TAKIM_PANEL=$mod" } }
+    if (-not (Test-BeyinTakimKimlik $RunId)) { return @{ Ok = $false; Acilan = 0; Neden = 'gecersiz kosu kimligi' } }
     $wt = (Get-Command wt.exe -ErrorAction SilentlyContinue).Source
     if (-not $wt) { return @{ Ok = $false; Acilan = 0; Neden = 'wt.exe yok' } }
     $kayit = Join-Path $Paths.TeamRuns "$RunId.json"
@@ -5587,6 +5599,7 @@ function Open-BeyinTakimPanel {
         if (-not $w -or $sadecePano) { continue }
         if ($TaskIds.Count -and ($TaskIds -notcontains [string]$w.taskId)) { continue }
         $argv = Get-BeyinTakimPanelArgv -Paths $Paths -RunId $RunId -TaskId ([string]$w.taskId) -Role ([string]$w.role)
+        if (-not $argv) { continue }   # gecersiz isci kimligi: panel acilmaz
         try { Start-Process -FilePath $wt -ArgumentList (@($argv | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' ') | Out-Null; $n++ } catch { }
     }
     return @{ Ok = $true; Acilan = $n; Neden = '' }

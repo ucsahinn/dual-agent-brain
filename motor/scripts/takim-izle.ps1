@@ -12,6 +12,8 @@
 # Kaynak: <state>\team-runs\<runId>.json (kosu kaydi), <state>\team-runs\<runId>\<TASK>\events.jsonl, stderr.log,
 # <state>\team-runs\<runId>\reports\<TASK>-<rol>.md (handoff). Acilis: beyin takim start (otomatik) ya da beyin takim izle <runId> [TASK].
 if (-not $Vault) { $Vault = $(if ($env:BEYIN_VAULT) { $env:BEYIN_VAULT } else { Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }) }
+# -Run/-Kart dosya yoluna ve ekrana girer: kati bicim (yol gezinme, kacis dizisi yok)
+if ($Run -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z' -or ($Kart -and $Kart -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z')) { Write-Host 'takim-izle: gecersiz kosu/kart kimligi'; exit 2 }
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
 $p = Get-BeyinPaths -Vault $Vault
 $Board = $p.Board
@@ -39,7 +41,9 @@ try { [Console]::CursorVisible = $false } catch { }
 # ---------- palet: ortak cizim katmani (beyin-ciz.ps1; Aurora rolleri, genislik olcusu, kartlar, kare yazici) ----------
 $cizYol = Join-Path $PSScriptRoot 'beyin-ciz.ps1'
 if (-not (Test-Path -LiteralPath $cizYol)) { Write-Host 'takim-izle: beyin-ciz.ps1 bulunamadi (motor eksik kurulmus) · beyin guncelle'; exit 2 }
+$CizGerekli = 3   # sessiz saat ve son hat koruyucu bu surumde; eski beyin-ciz ile yarim yayin sessizce bozulmasin
 . $cizYol
+if (-not $BeyinCizSurum -or $BeyinCizSurum -lt $CizGerekli) { Write-Host 'takim-izle: beyin-ciz.ps1 eski; yayin yarim kalmis olabilir · birkac saniye sonra yeniden ac'; exit 2 }
 $ITAL = "$ESC[3m"
 $cCmd = $cText; $cMsg = $cText; $cFile = $cText; $cThink = $cFaint; $cGutCmd = $cFrame2
 $pOku = $cAccent; $pDuz = $cMauve; $pTest = $cWarn; $pGit = $cOk; $pTakim = $cPeach
@@ -91,7 +95,12 @@ $rxCtl1 = [regex]::new("$ESC\[[0-9;?]*[ -/]*[@-~]")
 $rxCtl2 = [regex]::new("$ESC\][^$([char]7)]*$([char]7)|[\x00-\x08\x0B-\x1F\x7F]")
 
 # ---------- yardimcilar ----------
-function Clean([string]$s) { if ($null -eq $s) { return '' }; $s = $rxCtl1.Replace($s, ''); $s = $rxCtl2.Replace($s, ''); return (Get-CizGuvenliMetin $s.Replace("`t", '  ')) }   # BMP emoji satiri tasirmasin
+function Clean([string]$s) {
+    if ($null -eq $s) { return '' }; $s = $rxCtl1.Replace($s, ''); $s = $rxCtl2.Replace($s, '')
+    $s = Get-CizGuvenliMetin ($s.Replace("`t", '  ') -replace '[\r\n]+', ' ')   # BMP emoji, C1, yon kontrol; satir sonu cerceveyi bozmasin
+    if (Get-Command Protect-MerkezMetin -ErrorAction SilentlyContinue) { $s = Protect-MerkezMetin $s }   # sir maskesi (merkez-balon yukluyse)
+    return $s
+}   # BMP emoji satiri tasirmasin
 function Fmt([long]$n) { if ($n -ge 1000000) { return ('{0:N1}M' -f ($n / 1000000.0)) }; if ($n -ge 1000) { return ('{0:N1}K' -f ($n / 1000.0)) }; return "$n" }
 function Ago($t) { if (-not $t) { return '—' }; $s = [int]((Get-Date) - $t).TotalSeconds; if ($s -lt 0) { $s = 0 }; if ($s -lt 60) { return "$s sn" }; if ($s -lt 3600) { return "$([int][Math]::Floor($s/60)) dk $($s%60) sn" }; return "$([int][Math]::Floor($s/3600)) sa $([int][Math]::Floor(($s%3600)/60)) dk" }
 function Span($a, $b) { if (-not $a) { return '—' }; if (-not $b) { $b = Get-Date }; $d = $b - $a; if ($d.TotalDays -ge 1) { return ('{0}g {1:hh\:mm\:ss}' -f [int]$d.TotalDays, $d) }; return ('{0:hh\:mm\:ss}' -f $d) }
@@ -279,7 +288,7 @@ function RefreshSide {
             if ($wk.verdict) { $st.verdict = [string]$wk.verdict }
             if ($wk.failure -and -not $st.failureTxt) { $st.failureTxt = Clean ([string]$wk.failure) }
             if ($wk.pid -and -not $st.proc) { $st.recPid = [int]$wk.pid }
-            if ($wk.reportId) { $script:finalMd = Join-Path (Join-Path (Join-Path $p.TeamRuns $Run) 'reports') ([string]$wk.reportId) }
+            if ($wk.reportId -and [string]$wk.reportId -cmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z') { $script:finalMd = Join-Path (Join-Path (Join-Path $p.TeamRuns $Run) 'reports') ([string]$wk.reportId) }
         }
     } catch { }
     if (Test-Path -LiteralPath $errLog) {
@@ -742,13 +751,17 @@ function Paketle([string[]]$parcalar, [int]$gen, [int]$maxSatir) {
 # Ilk cizimde var olan durumlar bildirilmez (yalniz SONRADAN olusan olaylar). BEYIN_BILDIRIM=kapali susturur.
 $script:bildirimAcik = $(try { [string](Get-BeyinAyar 'BEYIN_BILDIRIM' (Get-BeyinAyarVars 'BEYIN_BILDIRIM')) -ne 'kapali' } catch { $true })
 $script:olayGoruldu = $null; $script:sonBildirim = [datetime]::MinValue
+# Ses merkez ile ayni ayarlara uyar: toast sesi yalniz BEYIN_MERKEZ_SES=toast ve sessiz saat disinda; aksi halde sessiz toast.
+$script:sesKip = $(try { [string](Get-BeyinAyar 'BEYIN_MERKEZ_SES' 'kapali') } catch { 'kapali' })
+$script:sessizSaat = $(try { [string](Get-BeyinAyar 'BEYIN_MERKEZ_SESSIZ' 'yok') } catch { 'yok' })
 function Bildir([string]$baslik, [string]$metin) {
-    if (-not $script:bildirimAcik) { return }
+    if (-not $script:bildirimAcik -or $Tek) { return }
+    $baslik = Cut (Clean $baslik) 80; $metin = Cut (Clean $metin) 220   # kosu kaydi alanlari ham gelir: maske + kontrol karakteri yok (LoadXml dusmesin)
     try {
         [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
         [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
         $x = New-Object Windows.Data.Xml.Dom.XmlDocument
-        $x.LoadXml("<toast><visual><binding template='ToastGeneric'><text>$([Security.SecurityElement]::Escape($baslik))</text><text>$([Security.SecurityElement]::Escape($metin))</text></binding></visual></toast>")
+        $x.LoadXml("<toast><visual><binding template='ToastGeneric'><text>$([Security.SecurityElement]::Escape($baslik))</text><text>$([Security.SecurityElement]::Escape($metin))</text></binding></visual>$(if ($script:sesKip -eq 'toast' -and -not (Test-CizSessizSaat $script:sessizSaat (Get-Date))) { "<audio src='ms-winsoundevent:Notification.Default'/>" } else { "<audio silent='true'/>" })</toast>")
         $app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show([Windows.UI.Notifications.ToastNotification]::new($x))
     } catch { }
@@ -842,6 +855,7 @@ function RenderRun([int]$tick) {
     $sabit = "$cTitle$BOLD$Run$RS$cFrame · $cMuted koşu panosu$RS$cFrame · $cMuted taban dal $RS" + $(if ($rr.repoName) { "$cFrame · $cMuted repo $cText$(Cut (Clean ([string]$rr.repoName)) 30)$RS" } else { '' })
     $tabanGen = [Math]::Max(8, ($w - 9 - 6) - (VisLen $sabit))
     $titleLab = "$cTitle$BOLD$Run$RS$cFrame · $cMuted koşu panosu$RS$cFrame · $cMuted taban dal $cText$(Cut (Clean ([string]$rr.baseBranch)) $tabanGen)$RS" + $(if ($rr.repoName) { "$cFrame · $cMuted repo $cText$(Cut (Clean ([string]$rr.repoName)) 30)$RS" } else { '' })
+    if ((VisLen $titleLab) -gt ($w - 15)) { $titleLab = Cut $titleLab ($w - 15) }   # uzun repo adi dar pencerede saati ve kenari itmesin
     $L.Add((HLine ($w - 9) $titleLab '╭' '') + $clockLab)
 
     # ---- zamanlar ----
@@ -898,8 +912,8 @@ function RenderRun([int]$tick) {
     if ($olaylar.Count) {
         $parca = @()
         foreach ($ol in $olaylar) {
-            $ad = if ($olayAd.ContainsKey([string]$ol.event)) { $olayAd[[string]$ol.event] } else { ([string]$ol.event) -replace '_', ' ' }
-            if ($ol.taskId) { $ad += " $(([string]$ol.taskId) -replace '^TASK-', '#')" }
+            $ad = if ($olayAd.ContainsKey([string]$ol.event)) { $olayAd[[string]$ol.event] } else { Cut (Clean (([string]$ol.event) -replace '_', ' ')) 32 }
+            if ($ol.taskId) { $ad += " $(Cut (Clean (([string]$ol.taskId) -replace '^TASK-', '#')) 16)" }
             $saat = try { ([DateTime]$ol.at).ToLocalTime().ToString('HH:mm') } catch { '' }
             $renk = if ($ol.event -in @('supervisor_tick_failed', 'planning_failed', 'worker_content_rejected', 'worker_rejected_content', 'worker_failed', 'scope_violation', 'aborted', 'start_rolled_back')) { $cErr } elseif ($ol.event -in @('conductor_repair', 'usage_limit', 'paused')) { $cWarn } else { $cMuted }
             $parca += "$cFaint$saat$RS $renk$ad$RS"

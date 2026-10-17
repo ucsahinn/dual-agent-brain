@@ -308,7 +308,7 @@ Asagidaki liste `kurulum\beyin.ps1` icindeki `Yaz-Yardim` fonksiyonunun tamamidi
 | `kullanim [gun]` | Enjekte edilen kavram notlari sonradan Read/Grep ile ACILDI mi, yoksa yalniz cevapta mi anildi? Retrieval makbuzlarini ayni oturumun Claude transkriptiyle eslestirir; Codex oturumlari 'transkript yok' sayilir. Varsayilan 7 gun; `-Json`. Rapor `.state/kullanim-son.json`. | Hayir (makbuz haric) |
 | `geri-getirme-olc` | Geri getirme regresyon kapisi: kavram notlarindan uretilen sorgularla vektor (bge-m3) ve kelime yolunun rank-1 / ilk-2 / bos donus oranlari. `-Dondur` fixture'i (`motor/scripts/fixtures/geri-getirme-holdout.json`, SHA-256'li) yeniden uretir - bilerek yapilir; `-Esik 0.8` altinda cikis 5. Doktor tam taramada son sonucu gosterir. | Yalniz `.state` ve -Dondur ile fixture |
 | `canli [dk]` | Su an ne oluyor: aktif oturumlar, kuyruk, calisan is, butce, niyet. Varsayilan pencere 30 dakika. | Hayir |
-| `merkez [-Sekme]` | **Tum sistemin canli izleme ekrani** (1.4.0; 1.5.0 sekmeli): liderler (Claude/Codex oturumlari), takim kosulari ve iscileri, onay bekleyen satirlar, pano, aktarimlar, kaynak, maliyet, bugun/dun ve teshis. Dort sekme (Genel, Ajanlar, Kosular, Olaylar), ajan ayrintisi, `c` ile secili satirin komutunu panoya kopyalama. `-Sekme` yeni Windows Terminal sekmesinde acar. Ayrinti: 13.4. | Hayir |
+| `merkez [-Sekme]` | **Tum sistemin canli izleme ekrani** (1.4.0; 1.5.0 sekmeli): liderler (Claude/Codex oturumlari), takim kosulari ve iscileri, onay bekleyen satirlar, pano, aktarimlar, kaynak, maliyet, bugun/dun ve teshis. Dort sekme (Genel, Ajanlar, Kosular, Olaylar), ajan ayrintisi, `c` ile secili satirin komutunu panoya kopyalama; 1.6.0: `?` yardim, `f` filtre, `g` ilk soruna atla, istege bagli ses (`BEYIN_MERKEZ_SES`, `BEYIN_MERKEZ_SESSIZ`). `-Sekme` yeni Windows Terminal sekmesinde acar. Ayrinti: 13.4. | Hayir |
 
 ```powershell
 beyin durum
@@ -497,6 +497,9 @@ soyler - "ayari degistirdim ama bir sey degismedi" durumunun tanisi budur
 | `BEYIN_KILL_GUARD` | **Surec oldurme korumasi** (2026-10-06): kayitliysa PreToolUse kancasi ajanlari AD ile toptan olduren komutlari (`taskkill /IM node.exe`, `Stop-Process -Name claude`, `Get-Process node | Stop-Process`, `pkill node`...) ve KORUNAN bir PID'i (ajan oturumlari, onlarin ata surecleri, `.state\korunan-pid.json`) hedefleyen komutlari reddeder; insan onayi kayitlarina (`.state\approvals`) dokunan komutlari da. Belirli, korunmayan PID'e izin verir. Kayit opt-in: once `kur.ps1 -KillGuard -KuruCalisma` ile onizle, sonra `kur.ps1 -KillGuard` (Claude); Codex icin `-CodexZorla` eklenir ve ardindan Codex TUI'de `/hooks` ile onay SARTTIR. Kayitli komut node on filtresidir (`~\.beyin\kill-guard-on.mjs`): zararsiz komutta PowerShell acilmaz, her Bash cagrisina ~220-310 ms ekler (olculdu 2026-10-06); oldurme deseni gorulurse asil koruma (`pre-tool-use.ps1`) calisir (~0,9 sn). Sinir: desen komut METNINE bakar, tirnak icindeki veri de yakalanir (ornek: `echo "taskkill /IM node.exe"` reddedilir). Hata olursa acik gecer (fail-open). | `acik` |
 | `BEYIN_SONME` | **Kullanim sonmesi** (2026-10-06): `beyin kullanim 14` (Pazar 05:10) son 14 gunde 5+ olculebilir enjeksiyonda hic acilmayan/anilmayan kavram notlarini `.state\kullanim-sonme.dat`'a yazar; geri getirme bu notlarin skorunu x0.6 yapar (esigi degil siralamayi etkiler; 14 gunden taze not muaf). `acik` ya da `kapali`. Holdout olcumu: sonme acikken rank-1 0,969 (gerileme yok). | `acik` |
 | `BEYIN_BILDIRIM` | **Kosu paneli bildirimi** (2026-10-14): kosu genel gorunumu acikken onay bekleyen durum, biten isci, kota siniri, dusen dogrulama/butunlestirme ve duran gozetmen icin Windows bildirimi. Panel acilirken var olan durumlar bildirilmez. `acik` ya da `kapali`. | `acik` |
+| `BEYIN_MERKEZ_SES` | Merkez sesli bildirimi (1.6.0): `kapali`, `ton` (kisa konsol tonlari) ya da `toast` (Windows bildirim sesi). Ayrinti: 13.4. | `kapali` |
+| `BEYIN_MERKEZ_SESSIZ` | Merkez ve kosu panosu icin sessiz saat `SS-SS` (`23-08` gece yarisini asar) ya da `yok`. Ayrinti: 13.4. | `yok` |
+| `BEYIN_MERKEZ_ZEMIN` | Merkez zemini: `osc`, `boya` ya da `kapali`. Ayrinti: 13.4. | `osc` |
 | `BEYIN_PANO_ONAY` | Pano karti `done` icin insan onayi: `zorunlu` ya da `kapali` (eski davranis). | `zorunlu` |
 | `BEYIN_BRIFING_KIME` | Sahipsiz pano kartinin brifingi kime gider (`claude` ya da `codex`). Sahipli kartta karsi ajan secilir. | `claude` |
 | `BEYIN_CLAUDE_TAVAN` | Claude Code acilis baglami toplam tavani, karakter (4000-9800). Claude Code 10.000 karakteri asan kanca ciktisini dosyaya atip modele yalniz ~2 KB onizleme verir ve dosyayi okumasini istemez (resmi belge; 2026-10-05'te 58 KB'lik acilis boyle kayboldu). Codex tavani sabit 7000. | `9500` |
@@ -1212,7 +1215,7 @@ yalniz dogrulanmis kosu icin kaydedilir; erken yazilirsa ajan neden kaydedilmedi
   kancasi yalniz bu panonun kosularini tanir.
 
 
-### 13.4 Beyin merkez: tum sistemin izleme ekrani (1.5.0)
+### 13.4 Beyin merkez: tum sistemin izleme ekrani (1.6.0)
 
 ```powershell
 beyin merkez          # bu terminalde
@@ -1255,7 +1258,9 @@ cizilen belirsiz simgeler kullanilmaz.
   isci cubugu, sonraki adim, kosunun iscileri ve bagli pano kartlari gorunur.
   `Enter` kosu panosunu acar.
 - **4 Olaylar:** motor makbuzlarindan olay akisi, en cok 60 kayit; `PgUp`/`PgDn` ile
-  kayar. Sagda BUGUN tablosu:
+  kayar. Makbuz adlari Turkce olay metnine cevrilir; gurultu olan Laya golge
+  atlandi/abstain olaylari gizlenir, tanimsiz betik adi Turkce ad ya da
+  temizlenmis metinle gelir. Sagda BUGUN tablosu:
   - bugun ve dun (ayni saate kadar) oturum, ozet, commit, yayin, derleme, hata;
   - Claude maliyeti, saatlik etkinlik ve depo bazinda commit.
 
@@ -1264,8 +1269,11 @@ cizilen belirsiz simgeler kullanilmaz.
 **BUGUN.** Oturum, ozet, yayin ve derleme sayilari makbuzlardan, commit sayisi
 calisilan depolarin `.git\logs\HEAD` kaydindan gelir; git calistirilmaz. Maliyet
 `beyin maliyet` / gece taramasinin gunluk dosyasindan gelir. Yaninda tarandigi saat
-yazar; panel taramayi kendisi baslatmaz. "dun N", dunun ayni saatine kadarki degerdir.
-Maliyette bu tam gundur.
+yazar; panel taramayi kendisi baslatmaz (bugun icin tarama yoksa "maliyet bugun
+taranmadi" yazar). "dun N", dunun ayni saatine kadarki degerdir. Maliyette bu
+tam gundur. Seridin sagindaki grafik **kayan son 24 saattir** (dunun kalan
+saatleri + bugun); etiket gercek hucre sayisini yazar: 170 sutun ve ustunde
+`son 24 sa`, daha darda `son 12 sa`.
 
 **Bolumler:**
 - **SIRADA:** en onemli karar ya da kosunun sonraki adimi; ilk adim komutu
@@ -1273,7 +1281,9 @@ Maliyette bu tam gundur.
 - **TESHIS:** hata (✕), uyari (▲) ve bilgi (●). Bilgi uyari sayilmaz. Ornekler:
   - 5+ dk tek aracta kalan oturum, izin istemi olabilir;
   - kosusu kapanmis yetim pano karti;
-  - 3 gunden eski aktarim.
+  - 3 gunden eski aktarim ("oku, sonra satirda `c` ile kapat");
+  - bellek commit %85 ve ustu: ayrilmis bellege gore en buyuk 3 surec adlariyla
+    listelenir ("en cok: codex 2,2 GB, ..."), komut ipucu `beyin bekci`.
 - **Etkinlik seridi:** calisan ajanin satirindaki 6 hucre son 2 dakikanin etkinligidir (20 sn'lik kovalar); yeni olayda
   son hucre atar, 60 sn sessiz ajanda donar.
 - **KANATLAR:** tek ajanli kanat tek satirdir. Siralama sabittir: once dikkat
@@ -1296,7 +1306,10 @@ Bostaki hicbir sey kipirdamaz.
 | `Tab` / `Shift+Tab`, `1`-`4` | sekme |
 | `yukari/asagi`, `j`/`k` | sec (Olaylar'da kaydir) |
 | `Enter` | ayrinti / isci paneli / kosu panosu / aktarimin tam metni |
-| `Esc` | ayrintiyi kapat |
+| `Esc` | ayrintiyi ve yardimi kapat |
+| `?` | yardim katmani: tuslar, renk ve simgeler, ses durumu; `?` ya da `Esc` kapatir. Alt cubukta `? yardim` her zaman durur |
+| `f` | ajan filtresi (Genel ve Ajanlar sekmesi): hepsi -> sorunlu -> Claude -> Codex -> hepsi. "Sorunlu": engelli, incelemede, duraklatilmis, bayat ya da uzun aracta takili ajan. Alt cubuk etkin filtreyi yazar |
+| `g` | ilk soruna atla: ilk teshis satiri ya da engelli/incelemedeki ajan (Genel/Ajanlar disindaki sekmeden Genel'e gecer); sorun yoksa "sorun yok" der. Alt cubukta yalniz teshis varken gorunur |
 | `c` | secili satirin guvenli komutunu panoya kopyala (calistirmaz, satir sonu eklemez; onay satiri sohbete yapistirilir) |
 | `p` | kosu panosu |
 | `a` | bostakiler / biten kosular |
@@ -1304,15 +1317,60 @@ Bostaki hicbir sey kipirdamaz.
 | `r` | tazele |
 | `q` | cik |
 
-Kopyalanan komutlar beyaz listeden gecer (`beyin ...`, `onayla`, `baslat`,
-`birlestir`, `claude --resume`, `codex resume`). Kabuk islecleri ya da kontrol
-dizisi iceren satir kopyalanmaz.
+Kopyalanan komutlar **tur basina tam eslesen** bir beyaz listeden gecer; serbest
+ek ya da kuyruk kabul edilmez, kimlikler yalniz ASCII'dir:
+- `beyin aktar -Tamam <id>`;
+- `beyin takim <izle|durum|status|collect|integrate|verify|resume|cleanup> [--run] R<kimlik> [TASK-n | --wait | --recheck]`;
+- `beyin pano show --task TASK-n` ve yetim karti iptal komutu;
+- `onayla TASK-n`, `baslat R<kimlik>`, `birlestir R<kimlik>`;
+- `claude --resume <id>`, `codex resume <id>`;
+- `beyin bekci`, `beyin maliyet`, `beyin doktor`, `beyin aktar`.
 
-Onay ve hata olaylari Windows bildirimi olarak da gelebilir (`BEYIN_BILDIRIM`).
+Kabuk islecleri, tirnak, kontrol dizisi ya da Unicode rakam iceren satir
+kopyalanmaz. Ekrana yazilan her satir son bir korumadan da gecer: yalniz renk
+kodlari kalir; pencere basligi, imlec/ekran silme ve bidi karakterleri silinir.
+Sirlar (JSON parola/cerez alanlari, `Cookie:`, `sig`/`session` parametreleri,
+anahtar benzeri diziler) maskelenir.
+
+**Ses ve bildirim (istege bagli, varsayilan kapali).** Iki ayar, `beyin ayar` ile:
+
+| Ayar | Degerler | Varsayilan | Ne yapar |
+| --- | --- | --- | --- |
+| `BEYIN_MERKEZ_SES` | `kapali` \| `ton` \| `toast` | `kapali` | `ton`: konsol bipi (bildirimler sessiz gelir). `toast`: Windows bildirimi kendi sesiyle gelir. `kapali`: hic ses yok, bildirimler sessiz gelir |
+| `BEYIN_MERKEZ_SESSIZ` | `SS-SS` \| `yok` | `yok` | sessiz saat araligi; `23-08` gece yarisini asar. Bu aralikta ne ton ne toast sesi olur |
+
+`ton` kipinde sesler (hepsi kisa, olay basina bir kez):
+- hata: inen iki nota (880 / 587 Hz);
+- onay bekliyor: cikan iki nota (659 / 988 Hz);
+- kosu bitti: uclu arpej;
+- uyariyla biten kosu (kota dahil): tek yumusak nota;
+- iptal edilen ya da sahipsiz kosu: sessiz.
+
+Ayni anda birkac olay gelirse en agir olanin tonu calar (hata, onay, uyari,
+kosu bitti sirasiyla). Panel acilirken var olan durumlar calmaz; yalniz sonradan
+olusanlar. Esikte gidip gelen alarm (ornegin bellek commit %84/%85) 30 dk
+yeniden calmaz. `-Tek` ve `-Olcum` modunda ses yoktur.
+
+Ornek (gece 23 ile sabah 08 arasi susar):
+
+```powershell
+beyin ayar BEYIN_MERKEZ_SES ton
+beyin ayar BEYIN_MERKEZ_SESSIZ 23-08
+```
+
+`23-8` yazarsan `23-08` olarak saklanir. Gecersiz bir deger `beyin ayar`
+tarafindan reddedilir; ortam degiskeninden elle gelen gecersiz deger yok
+sayilir ve `?` yardiminda "gecersiz" diye gorunur. Ayarlar panel acilirken
+okunur: **degistirince paneli kapatip (`q`) `beyin merkez`i yeniden ac.**
+Kosu panosunun (`takim-izle`) bildirimleri de ayni iki ayara uyar; kosu panosu
+yalniz toast sesi verir, konsol bipi vermez.
+
+Onay ve hata olaylari Windows bildirimi olarak da gelebilir (`BEYIN_BILDIRIM`;
+`BEYIN_MERKEZ_SES` yalniz bildirimin sesini belirler, bildirimi acip kapatmaz).
 Motor dosyalari guncellenince panel, hepsi birkac saniye oturduktan sonra acik
 sekmesiyle kendini yeniden yukler; kucuk bir baslatici dongusu bunu yaptigi icin eski panel sureci bellekte
 birikmez. Hareket yokken panel saniyede bir cizilir (islemci sakin), tuslar yine aninda islenir.
 
 Test ve ekran goruntusu icin su parametreler var:
-- `beyin merkez` betigi: `-Tek -Sekme Genel|Ajanlar|Kosular|Olaylar|Hepsi -Genislik N -Yukseklik N -Ayrinti -Zemin boya`, cizim suresi icin `-Olcum N`;
+- `beyin merkez` betigi: `-Tek -Sekme Genel|Ajanlar|Kosular|Olaylar|Hepsi -Genislik N -Yukseklik N -Ayrinti -Yardim -Zemin boya`, cizim suresi icin `-Olcum N` (`-Yardim`: `?` katmani acik cizilir; `-Tek`/`-Olcum` ses calmaz);
 - kosu panosu: `takim-izle.ps1 -Run <id> [-Kart TASK-x] -Tek -Genislik N`.

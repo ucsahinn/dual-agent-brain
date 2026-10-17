@@ -21,6 +21,68 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.6.0 - Merkez: istege bagli ses, yardim katmani, filtre, sertlestirilmis guvenlik
+
+Merkez ekrani hala **salt okunurdur**: `onayla` / `baslat` / `birlestir` satirlarini sohbete yine sen yazarsin;
+`c` yalniz beyaz listedeki bir komutu panoya koyar, satir sonu eklemez.
+
+- **Istege bagli ses (varsayilan kapali):** iki yeni ayar, `beyin ayar` ile degisir.
+  - `BEYIN_MERKEZ_SES`: `kapali` (varsayilan) | `ton` | `toast`. `ton`: konsol bipi; hata inen (880/587 Hz), onay
+    bekliyor cikan (659/988 Hz), kosu bitti uclu arpej, uyariyla biten kosu tek yumusak nota; iptal edilen ya da
+    sahipsiz kosu sessiz. `toast`: Windows bildirimi kendi sesiyle gelir; ayar `toast` degilken bildirimler sessizdir
+    (eskiden Windows'un varsayilan sesi her bildirimde caliyordu).
+  - `BEYIN_MERKEZ_SESSIZ`: `SS-SS` ya da `yok` (varsayilan). `23-08` gece yarisini asar; ortam degiskeninden elle
+    gelen `8-17` de kabul edilir. Gecersiz deger yok sayilir ve `?` yardiminda "gecersiz" diye gosterilir.
+  - Ayni olay bir kez calar (hata > onay > uyari > kosu bitti, en agir olanin tonu). Esikte gidip gelen alarm
+    (ornegin bellek commit %84/%85) 30 dk susar. Ilk cizimde var olan durumlar calmaz; yalniz sonradan olusanlar.
+  - Ayarlar panel acilirken okunur: degistirince paneli kapatip yeniden ac. Kosu panosunun (`takim-izle`) toast'lari
+    ayni iki ayara uyar (kosu panosu yalniz toast sesi verir, konsol bipi vermez).
+- **`?` yardim katmani:** tuslar, renk ve simgeler, ses durumu (etkin kip ve sessiz saat) tek ekranda; `Esc` ya da
+  `?` kapatir. Alt cubukta `? yardim` her zaman durur, dar pencerede de.
+- **`f` filtre:** Genel ve Ajanlar sekmesinde hepsi -> sorunlu -> Claude -> Codex. "Sorunlu": engelli, incelemede,
+  duraklatilmis, bayat ya da uzun aracta takili ajan. Alt cubuk etkin filtreyi yazar.
+- **`g` ilk soruna atla:** ilk teshis satirina ya da engelli/incelemedeki ajana gider (gerekirse Genel sekmesine
+  gecer); sorun yoksa "sorun yok" der.
+- **BUGUN seridi:** saatlik seri artik kayan son 24 saat (dunun kalan saatleri + bugun); etiket gercek hucre sayisini
+  yazar (170+ sutunda 24, daha darda 12). Gece yarisi gecince dunun saatleri seriden dusmez. Bugun icin maliyet
+  taramasi yoksa serit "maliyet bugun taranmadi · dun $X" yazar (dunun tutari kaybolmaz); panel taramayi kendisi
+  baslatmaz (`beyin maliyet`).
+- **Sakin panel gercekten sakin:** baslikta canli noktasi artik nabiz atmaz (veri tazeyse yesil, bayatsa sari); hareket yokken
+  saat dakika hassasiyetinde, veri 5/15 sn arayla tazelenir (`r` hemen tazeler), KANATLAR bolumu onbellekte. Olculen (bos
+  fixture, 16 cekirdek, 208 sn): ortalama %4,7, yerlesik durumda %1,8-3,5 tek cekirdek. Calisan ajan varken (doner simge,
+  120 ms kare) ~%20. Kare suresi (-Olcum 40, 120/210 sutun): ortalama 38-41 ms, p95 58-60 ms. Kaynak olcumu yuk altinda
+  bos donerse son iyi olcum 10 dk kalir; bellek alarmi gidip gelip nabzi bastan baslatmaz. Cizim onbellekleri 2000 satirla sinirli
+  (eskiden 8000). Bosta saatlerce acik kalan panelde ozel bellek ~5,5 MB/sa dogrusal buyuyordu; sanal saatli 3 saatlik
+  testte panelin kendi durumu sinirli kaldi, buyume CLR yigininin geri verilmemesindendi: hareket yokken 10 dk'da bir tam
+  toplama (buyuk nesne yigini sikistirmasiyla). Canli izde ozel bellek 68+ dk boyunca 129-131 MB duz. Olmayan kosu/oturum
+  klasorunde Get-ChildItem artik her tazelemede hata kaydi birakmaz.
+- **Calisan ama henuz adimi olmayan oturum:** transkripti bulunan yeni oturumda balon artik yanlislikla "transkript
+  bu makinede yok" demez; "henuz arac adimi yok · ilk yanit bekleniyor" yazar.
+- **Kosu panosu basligi:** uzun depo adi dar pencerede saati ve sag kenari itmez; baslik genislige gore kesilir.
+- **Olaylar Turkce:** gercek makbuz adlari eslendi (vektor gomme / Ollama yok, `COMPILE_HATA_<neden>`,
+  `FLUSH_HATA_<neden>`, flush mesgul/ertelendi, `ayar/*`, denetle, bahcivan, niyet, guncelle). Gurultu olan Laya golge
+  atlandi/abstain olaylari gizlenir. Tanimsiz bir betik adi ham yazilmaz; Turkce ad ya da temizlenmis metinle gelir.
+- **Bellek alarmi:** commit %85 ve ustunde TESHIS satiri ayrilmis bellege gore en buyuk 3 sureci adlariyla listeler
+  ("bellek (commit) %91 · en cok: codex 2,2 GB, ...") ve `beyin bekci` ipucunu verir. Eski aktarim teshisi artik
+  "oku; kapatma komutunu satirda c ile kopyala" der (c kopyalar, kapatmaz).
+- **Tasarim incelemesi:** KAYNAK karti hatada basliginda da ✕ tasir (yalniz renge dayanmaz); dar ekranda BUGUN
+  maliyet parcasi kisalir; sekme sayaci "Ajanlar 3"; son kosu durumu Turkce ("iptal edildi"); `f filtre`; eski
+  aktarimda yalniz yas hucresi amber; maliyet kartinda "%77'si 200K+ baglamda".
+- **Guvenlik:**
+  - Ekrana yazilan her satir son bir korumadan gecer: yalniz SGR renk kodlari (`ESC[...m`) kalir; OSC (pencere
+    basligi), imlec/ekran silme, C1 kontrol ve cift yonlu (bidi) karakterler silinir.
+  - `c` panoya kopyalama tur basina tam eslesen beyaz liste kullanir: yalniz `beyin aktar -Tamam <id>`,
+    `beyin takim <izle|durum|status|collect|integrate|verify|resume|cleanup> [--run] R... [TASK-n|--wait|--recheck]`,
+    `beyin pano show --task TASK-n`, yetim karti iptal komutu, `onayla TASK-n`, `baslat R...`, `birlestir R...`,
+    `claude --resume <id>`, `codex resume <id>` ve `beyin bekci|maliyet|doktor|aktar` kopyalanir. Eski "beyin
+    <her sey>" kalibi kalkti; ajan metninden gelen kuyruk ("· beyin guncelle -Uygula" gibi), Unicode rakam ve
+    kabuk islecleri reddedilir.
+  - Maskeleme guclendi: JSON `password/token/secret/cookie` alanlari, `Cookie:` basliklari, `sig`, `signature`,
+    `session_id`, `sid`, `access_token` parametreleri; ev dizini `~` olur.
+  - Kosu panosu, tirnak ya da `;` iceren ya da bicimi bozuk kosu/kart kimligini reddeder (`gecersiz kosu/kart
+    kimligi`); bicimi `[A-Za-z0-9._-]{1,64}` disinda kalan (kontrol karakterli dahil) isci gorev kimligi hicbir dosya
+    yolunda kullanilmaz. Balon metni ust siniri 400 karakter (ekran kendi genisligine keser).
+
 ## 1.5.1 - Merkez: canli etkinlik, sakin islemci, ic ice surec yok, QA duzeltmeleri
 
 Uc uzman ajanin (QA lideri, performans denetcisi, tasarim incelemecisi) bulgulari:

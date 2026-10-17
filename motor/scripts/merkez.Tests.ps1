@@ -315,7 +315,7 @@ Describe 'merkez canli panel (1.4.5): olay akisi ve guvenli simgeler' {
         ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'retrieval'; outcome = 'ESIK_ALTI' } | Should Be $null
         $o = ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'kill-guard'; outcome = 'RED'; agent = 'codex'; note = 'Stop-Process -Name x' }
         $o.Renk | Should Be 'warn'; $o.Metin | Should Match 'kill guard engelledi'   # engel: koruma calisti, hata degil
-        (ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'retrieval'; outcome = 'ENJEKSIYON'; concepts = @('ornek-kavram.md') }).Metin | Should Match '1 kavram hatırlandı: ornek kavram'
+        (ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = 'retrieval'; outcome = 'ENJEKSIYON'; concepts = @('ornek-kavram.md') }).Metin | Should Match '1 not bağlama eklendi: ornek kavram'
     }
     It 'ayni oturumun ardisik ayni olaylari tek satirda birlesir; makbuz yoksa bos liste' {
         $d = Join-Path ([IO.Path]::GetTempPath()) ('merkez-mk-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $d | Out-Null
@@ -489,7 +489,7 @@ Describe 'merkez 1.5.0: sekmeler, ayrinti, bugun verisi, satir komutu' {
         (Get-MerkezSatirKomut @{ Tur = 'kart'; Yetim = $true; Nesne = @{ id = 'TASK-1' } }).Komut | Should Match "^beyin pano transition --task TASK-1 --status cancelled --reason 'koşu kapandı'$"
         (Get-MerkezSatirKomut @{ Tur = 'kart'; Nesne = @{ id = 'TASK-2'; status = 'review' } }).Komut | Should Be 'onayla TASK-2'
         (Get-MerkezSatirKomut @{ Tur = 'onay'; Nesne = @{ Satir = 'birlestir R20261015-4368' } }).Ipucu | Should Match 'sohbete'
-        (Get-MerkezSatirKomut @{ Tur = 'lider'; Nesne = @{ Ajan = 'codex'; Ad = '01a0-ab' } }).Komut | Should Be 'codex resume 01a0-ab'
+        (Get-MerkezSatirKomut @{ Tur = 'lider'; Nesne = @{ Ajan = 'codex'; Ad = '01a146bc-161e-7182' } }).Komut | Should Be 'codex resume 01a146bc-161e-7182'
         Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = @{ Metin = 'x · beyin aktar -Tamam 1; Remove-Item C:\' } } | Should Be $null
         Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = @{ Metin = ('x · beyin bekci' + [char]27 + '[2J') } } | Should Be $null
         Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = @{ Metin = 'yalniz bilgi' } } | Should Be $null
@@ -514,7 +514,7 @@ Describe 'takim-izle 1.5.0: tek kare, ortak katman, simge' {
             . (Join-Path $hooks 'lib.ps1'); $pp = Get-BeyinPaths -Vault $root
             $tr = $pp.TeamRuns; New-Item -ItemType Directory -Force -Path (Join-Path $tr 'R-T\TASK-1') | Out-Null
             $bas = (Get-Date).ToUniversalTime().AddMinutes(-3).ToString('o')
-            $kos = @{ runId = 'R-T'; repoName = 'demo'; status = 'running'; baseBranch = 'main'; startedAt = $bas; approvals = @{ start = @{ at = $bas } }
+            $kos = @{ runId = 'R-T'; repoName = 'cok-uzun-bir-depo-adi-ornek-proje-2026-xyz'; status = 'running'; baseBranch = 'feature/uzun-dal-adi-ornek'; startedAt = $bas; approvals = @{ start = @{ at = $bas } }
                       supervisor = @{ pid = $PID; heartbeatAt = (Get-Date).ToUniversalTime().ToString('o') }
                       workers = @(@{ taskId = 'TASK-1'; role = 'qa_lead'; status = 'running'; startedAt = $bas; pid = $PID }, @{ taskId = 'TASK-2'; role = 'docs_author'; status = 'finished'; startedAt = $bas; finishedAt = $bas; verdict = 'pass' }) }
             Set-Content -LiteralPath (Join-Path $tr 'R-T.json') -Value ($kos | ConvertTo-Json -Depth 6) -Encoding UTF8
@@ -617,5 +617,142 @@ Describe 'merkez 1.5.1: QA kenar durumlari' {
             $o | Should Match 'maliyet dosyası okunamadı'
             $o | Should Match 'SIRADA'
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'merkez 1.6.0: ses, sessiz saat, yardim, filtre, 24 saat, olay adlari' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'beyin-ciz.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+        # merkez.ps1'deki saf islevler AST ile cikarilir (betik calistirilmaz, ses calinmaz)
+        $tok = $null; $err = $null; $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'merkez.ps1'), [ref]$tok, [ref]$err)
+        foreach ($ad in @('SessizMi', 'KosuSonucTon', 'OlayTonu', 'OlaylariBildir', 'KosuRozetMetin', 'TeshisAnahtar')) { $f = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $ad }, $true); . ([scriptblock]::Create($f.Extent.Text)) }
+    }
+    It 'ayar dogrulayici: ses kipleri ve sessiz saat bicimi' {
+        (Test-BeyinAyarDeger -Ad 'BEYIN_MERKEZ_SES' -Deger 'ton').Ok | Should Be $true
+        (Test-BeyinAyarDeger -Ad 'BEYIN_MERKEZ_SES' -Deger 'yuksek').Ok | Should Be $false
+        (Test-BeyinAyarDeger -Ad 'BEYIN_MERKEZ_SESSIZ' -Deger '23-8').Deger | Should Be '23-08'
+        (Test-BeyinAyarDeger -Ad 'BEYIN_MERKEZ_SESSIZ' -Deger 'yok').Ok | Should Be $true
+        (Test-BeyinAyarDeger -Ad 'BEYIN_MERKEZ_SESSIZ' -Deger '25-08').Ok | Should Be $false
+        (Test-BeyinAyarDeger -Ad 'BEYIN_MERKEZ_SESSIZ' -Deger '08-08').Ok | Should Be $false; (Test-BeyinAyarDeger -Ad 'BEYIN_MERKEZ_SESSIZ' -Deger '8-08').Ok | Should Be $false; (Test-BeyinAyarDeger -Ad 'BEYIN_MERKEZ_SESSIZ' -Deger '08-8').Ok | Should Be $false
+    }
+    It 'sessiz saat: gece yarisini asan ve gun ici araliklar' {
+        $script:sessizSaat = '23-08'
+        SessizMi (Get-Date '2026-10-17 23:30') | Should Be $true
+        SessizMi (Get-Date '2026-10-17 03:00') | Should Be $true
+        SessizMi (Get-Date '2026-10-17 08:00') | Should Be $false
+        SessizMi (Get-Date '2026-10-17 14:00') | Should Be $false
+        $script:sessizSaat = '09-17'
+        SessizMi (Get-Date '2026-10-17 09:00') | Should Be $true
+        SessizMi (Get-Date '2026-10-17 17:00') | Should Be $false
+        $script:sessizSaat = 'yok'
+        SessizMi (Get-Date '2026-10-17 03:00') | Should Be $false
+    }
+    It 'olaylar makbuzdaki GERCEK adlarla eslenir (gom/GOM_OLLAMA_YOK, COMPILE_HATA_<neden>, FLUSH_HATA_<neden>)' {
+        $ol = { param($sc, $oc) ConvertTo-MerkezOlay @{ ts = (Get-Date).ToString('o'); script = $sc; outcome = $oc; agent = 'codex' } }
+        $g = & $ol 'gom' 'GOM_OLLAMA_YOK'; $g.Metin | Should Be 'vektör gömme atlandı · Ollama kapalı'; $g.Renk | Should Be 'warn'; $g.Ajan | Should Be 'motor'
+        $c = & $ol 'compile' 'COMPILE_HATA_cikis-kodu'; $c.Metin | Should Be 'derleme düştü · cikis kodu'; $c.Renk | Should Be 'err'
+        (& $ol 'compile' 'COMPILE_HATA_REDAKSIYON').Metin | Should Be 'derleme düştü · redaksiyon'
+        $f = & $ol 'flush' 'FLUSH_HATA_cikis-kodu'; $f.Metin | Should Be 'oturum özeti yazılamadı · cikis kodu'; $f.Renk | Should Be 'err'
+        (& $ol 'flush' 'FLUSH_OK').Metin | Should Be 'oturum özeti günlüğe yazıldı'
+        (& $ol 'flush' 'FLUSH_MESGUL').Renk | Should Be 'muted'
+        (& $ol 'ayar' 'AYAR_GECERSIZ').Renk | Should Be 'warn'
+        & $ol 'laya-shadow' 'LAYA_GOLGE_ATLANDI' | Should Be $null
+        (& $ol 'compile' 'KUYRUK_BOS').Metin | Should Be 'derleme · kuyruk bos'
+        (& $ol 'skill-aday' 'SKILL_ADAY_OK').Metin | Should Match '^skill adayı · '
+    }
+    It 'sessiz saat elle girilmis bicimleri kabul eder, gecersizi yok sayar' {
+        Test-CizSessizSaat '8-17' (Get-Date '2026-10-17 09:00') | Should Be $true
+        Test-CizSessizSaat ' 23 - 8 ' (Get-Date '2026-10-17 02:00') | Should Be $true
+        Test-CizSessizSaat '08-08' (Get-Date '2026-10-17 08:00') | Should Be $false
+        Test-CizSessizSaat '25-08' (Get-Date '2026-10-17 03:00') | Should Be $false
+        Test-CizSessizGecerli '25-08' | Should Be $false
+        Test-CizSessizGecerli 'yok' | Should Be $true
+        Test-CizSessizGecerli '9-17' | Should Be $true
+    }
+    It 'esikte gidip gelen bellek alarmi 30 dk icinde bir kez calar; iptal edilen kosu ses vermez' {
+        $script:calan = New-Object System.Collections.Generic.List[string]
+        function SesCal([string]$tur) { $script:calan.Add($tur) }
+        function Bildir([string]$b, [string]$m, [string]$t = '') { }
+        $script:olayGoruldu = $null; $script:olaySon = @{}
+        $hata = @{ Onaylar = @(); Kosular = @(); Teshis = @(@{ Seviye = 'err'; Anahtar = 'commit'; Metin = 'bellek %85' }) }
+        $sakin = @{ Onaylar = @(); Kosular = @(); Teshis = @() }
+        OlaylariBildir $sakin                       # ilk okuma tohumlar
+        OlaylariBildir $hata; OlaylariBildir $sakin; OlaylariBildir $hata; OlaylariBildir $sakin; OlaylariBildir $hata
+        @($script:calan) -join ',' | Should Be 'hata'
+        OlaylariBildir @{ Onaylar = @(); Teshis = @(); Kosular = @(@{ Bitmis = $true; RunId = 'R9'; Rozet = 'iptal' }) }
+        @($script:calan) -join ',' | Should Be 'hata'
+        OlaylariBildir @{ Onaylar = @(); Teshis = @(); Kosular = @(@{ Bitmis = $true; RunId = 'R8'; Rozet = 'basarisiz' }) }
+        @($script:calan) -join ',' | Should Be 'hata,hata'
+    }
+    It 'kosu sonucu tonu: basarisiz hata, uyariyla yumusak, iptal sessiz, hata her seyi bastirir' {
+        KosuSonucTon 'basarisiz' | Should Be 'hata'
+        KosuSonucTon 'dogrulandi' | Should Be 'kosu'
+        KosuSonucTon 'uyarili' | Should Be 'uyari'
+        KosuSonucTon 'iptal' | Should Be ''
+        OlayTonu @('kosu:R1') @{ 'kosu:R1' = '' } | Should Be ''
+        OlayTonu @('kosu:R1') @{ 'kosu:R1' = 'hata' } | Should Be 'hata'
+        OlayTonu @('kosu:R1', 'onay:baslat R2') @{ 'kosu:R1' = 'kosu' } | Should Be 'onay'
+        OlayTonu @('hata:commit', 'onay:x') @{} | Should Be 'hata'
+    }
+    It 'tek kare: yardim katmani ve 24 saatlik serit her genislikte tam cerceve' {
+        $vault = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        foreach ($w in @(90, 170)) {
+            $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+            try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'merkez.ps1') -Vault $vault -Tek -Yardim -Genislik $w -Yukseklik 40 2>&1 | Out-String } finally { [Console]::OutputEncoding = $eskiKod }
+            $plain = [regex]::Replace($out, ([string][char]27 + '\[[0-9;?]*[A-Za-z]'), '')
+            $plain | Should Match 'YARDIM'
+            $plain | Should Match 'ilk soruna atla'
+            foreach ($l in @($plain -split "`r?`n" | Where-Object { $_ })) { "$w`:$($l.Length)" | Should Be "$w`:$w" }
+        }
+        $b = Get-MerkezBugun (Get-BeyinPaths -Vault $vault) @{} @() (Get-Date)
+        @($b.Son24).Count | Should Be 24
+    }
+}
+
+Describe 'merkez 1.6.0: guvenlik (son hat koruyucu, beyaz liste, maskeleme, panel kimligi)' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'beyin-ciz.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+        $script:E = [string][char]27; $script:B = [string][char]7
+    }
+    It 'son hat koruyucu yalniz SGR renk kodunu gecirir; OSC, imlec, ekran silme, C1 ve yon kontrol silinir' {
+        $g = Get-CizGuvenliSatir ("a$($E)[31mX$($E)]0;PWN$($B)Y$($E)[2JZ$($E)]52;c;QUJD$($E)\W" + [char]0x9B + 'K' + [char]0x202E + 'Q')
+        $g | Should Be "a$($E)[31mXYZWKQ"
+    }
+    It 'beyaz liste: tur basina tam eslesme; saldirgan kuyrugu ve Unicode rakam reddedilir' {
+        Test-MerkezGuvenliKomut 'beyin aktar -Tamam 20261011T125258-13ee' | Should Be $true
+        Test-MerkezGuvenliKomut 'beyin takim resume --run R20261015-4368 --wait' | Should Be $true
+        Test-MerkezGuvenliKomut 'beyin guncelle -Uygula' | Should Be $false
+        Test-MerkezGuvenliKomut 'beyin kirp -Uygula' | Should Be $false
+        Test-MerkezGuvenliKomut ('onayla TASK-' + [char]0xFF10 + '46') | Should Be $false
+        Test-MerkezGuvenliKomut 'onayla TASK-46 ve baska bir sey' | Should Be $false
+        Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = @{ Metin = 'eski aktarim x · beyin guncelle -Uygula' } } | Should Be $null
+        (Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = @{ Metin = 'eski · oku, sonra satirda c ile kapat · beyin aktar' } }).Komut | Should Be 'beyin aktar'
+    }
+    It 'son hat koruyucu izin listesi: ozel/ara bayt CSI de silinir, yalniz SGR kalir' {
+        foreach ($d in @("$($E)[>0c", "$($E)[=c", "$($E)[!p", "$($E)[ q", "$($E)[>4;2m", "$($E)[?1`$p", "$($E)[5``", "$($E)7", "$($E)")) {
+            (Get-CizGuvenliSatir ("a" + $d + "b")).IndexOf([char]27) | Should Be -1
+        }
+        Get-CizGuvenliSatir "$($E)[1mok$($E)[38;2;1;2;3m!$($E)[0m" | Should Be "$($E)[1mok$($E)[38;2;1;2;3m!$($E)[0m"
+    }
+    It 'kimlik: sondaki satir sonu ve yol gezinme reddedilir; maskeyi sifir genislik atlatamaz' {
+        Test-BeyinTakimKimlik "R1`n" | Should Be $false
+        Test-BeyinTakimKimlik '..' | Should Be $false
+        Test-BeyinTakimKimlik 'R20261015-4368' | Should Be $true
+        Protect-MerkezSatir ('anahtar sk-' + [char]0x200B + 'abcdefghijklmnopqrstuv') 120 | Should Not Match 'abcdefghijkl'
+    }
+    It 'maskeleme: JSON tirnakli parola, cerez ve oturum parametresi' {
+        Protect-MerkezSatir 'curl -d {"password":"hunter2"} x' 120 | Should Not Match 'hunter2'
+        Protect-MerkezSatir 'Cookie: sid=abc123def' 120 | Should Not Match 'abc123def'
+        Protect-MerkezSatir 'https://x/y?sig=SECRETSIG&a=1' 120 | Should Not Match 'SECRETSIG'
+    }
+    It 'panel argumani: tirnak/; iceren gorev ya da kosu kimligiyle wt argumani uretilmez' {
+        $p = @{ Scripts = 'C:\x'; Vault = 'C:\v' }
+        Get-BeyinTakimPanelArgv -Paths $p -RunId 'R20261015-4368' -TaskId 'x" ; new-tab calc "' | Should Be $null
+        Get-BeyinTakimPanelArgv -Paths $p -RunId 'R1;calc' -TaskId 'TASK-1' | Should Be $null
+        @(Get-BeyinTakimPanelArgv -Paths $p -RunId 'R20261015-4368' -TaskId 'TASK-069').Count | Should BeGreaterThan 5
     }
 }

@@ -3,11 +3,11 @@
 # ($cText, $cOk, $bgSel...) bu rollerin takma adidir. Genislik olcusu, kesme, cerceve, kartlar, cubuklar, animasyon,
 # parlama/yumusak gecis ve simge politikasi buradadir; panel dosyalari yalniz kendi bolumlerini cizer.
 # Surum el sikismasi: arayan $BeyinCizSurum'u kendi bekledigiyle karsilastirir (yayin dosyalari sirayla yazar).
-$BeyinCizSurum = 1
+$BeyinCizSurum = 3
 $ESC = [char]27
 
 # ---------- palet: Aurora (anlam rolleri) ----------
-# Zemin ustunde olculmus kontrast (WCAG): Metin 15.4, Soluk 6.1, Sonuk 4.3, Vurgu 9.8, Ok 12.1, Uyari 11.0, Hata 6.8, Bilgi 7.2.
+# Zemin ustunde olculmus kontrast (WCAG): Metin 15.4, Soluk 6.1, Sonuk 4.9, Vurgu 9.8, Ok 12.1, Uyari 11.0, Hata 6.8, Bilgi 7.2.
 # Cerceve ~2.4:1: ince ama secilir (52,63,88 ~1.7:1 ile dikey cizgi gercek Windows Terminal ekraninda kayboluyordu).
 $CizRgb = @{
     Zemin = @(15, 20, 32); Cerceve = @(70, 84, 115); Metin = @(230, 235, 245); Soluk = @(138, 149, 171)
@@ -18,7 +18,7 @@ function CizKarisRgb([int[]]$x, [int[]]$y, [double]$t) {
     $t = [Math]::Max([double]0, [Math]::Min([double]1, $t))
     return @([int]($x[0] + ($y[0] - $x[0]) * $t), [int]($x[1] + ($y[1] - $x[1]) * $t), [int]($x[2] + ($y[2] - $x[2]) * $t))
 }
-$CizRgb.Sonuk = CizKarisRgb $CizRgb.Soluk $CizRgb.Zemin 0.20
+$CizRgb.Sonuk = CizKarisRgb $CizRgb.Soluk $CizRgb.Zemin 0.12   # metin icin >= 4.6:1 (0.20 ile 4.3 idi)
 $CizRgb.Cerceve2 = CizKarisRgb $CizRgb.Cerceve $CizRgb.Soluk 0.30
 $CizRgb.Iz = CizKarisRgb $CizRgb.Cerceve $CizRgb.Zemin 0.45      # bos cubuk hucresi: zeminde secilir, dolu kisimla karismaz
 $CizRgb.Ak = @(245, 248, 255)                                       # tarama basinin parlakligi
@@ -75,7 +75,20 @@ $rxGenisVeyaVekil = [regex]'[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAF
 # Ajan/veri metni icin: BMP emoji (Windows Terminal 2 hucre cizer, olcu 1 sayar) guvenli simgeye, sifir genislikli
 # karakterler (\uFE0F secici, ZWJ, ZW bosluklar, birlesik isaretler) silinir; boylece balon ve adim satirlari tasmaz.
 $rxCizEmojiBmp = [regex]'[\u231A\u231B\u23E9-\u23FA\u2600-\u270D\u270F-\u2712\u2717-\u27BF\u2B00-\u2BFF]'
-$rxCizSifir = [regex]'[\u200B-\u200F\uFE0E\uFE0F\u0300-\u036F\u20D0-\u20FF]'
+$rxCizSifir = [regex]'[\u200B-\u200F\uFE0E\uFE0F\u0300-\u036F\u20D0-\u20FF\u0080-\u009F\u202A-\u202E\u2066-\u2069]'   # + C1 (8 bit CSI/OSC) ve yon kontrol
+function Test-CizSessizSaat([string]$Aralik, [datetime]$Zaman) {
+    # BEYIN_MERKEZ_SESSIZ 'SS-SS' (gece yarisini asabilir: 23-08). Ortam degiskeninden elle gelen '8-17', ' 23 - 8 ' de kabul;
+    # gecersiz ya da 'yok' -> sessiz degil. Merkez ve kosu panosu ayni kurali kullanir.
+    if ([string]$Aralik -notmatch '^\s*(\d{1,2})\s*-\s*(\d{1,2})\s*$') { return $false }
+    $b = [int]$Matches[1]; $s = [int]$Matches[2]; if ($b -gt 23 -or $s -gt 23 -or $b -eq $s) { return $false }
+    $h = $Zaman.Hour
+    if ($b -lt $s) { return ($h -ge $b -and $h -lt $s) }; return ($h -ge $b -or $h -lt $s)
+}
+function Test-CizSessizGecerli([string]$Aralik) {
+    if ([string]$Aralik -match '^\s*yok\s*$') { return $true }
+    if ([string]$Aralik -notmatch '^\s*(\d{1,2})\s*-\s*(\d{1,2})\s*$') { return $false }
+    return ([int]$Matches[1] -le 23 -and [int]$Matches[2] -le 23 -and [int]$Matches[1] -ne [int]$Matches[2])
+}
 function Get-CizGuvenliMetin([string]$s) {
     if (-not $s) { return $s }
     $s = $rxCizSifir.Replace($s, '')
@@ -88,7 +101,7 @@ $script:CizVisOnb = New-Object 'System.Collections.Generic.Dictionary[string,int
 function VisLen([string]$s) {
     $v = 0; if ($script:CizVisOnb.TryGetValue($s, [ref]$v)) { return $v }
     $t = $rxAnsi.Replace($s, ''); $v = $t.Length + $rxGenis.Matches($t).Count
-    if ($script:CizVisOnb.Count -gt 8000) { $script:CizVisOnb.Clear() }
+    if ($script:CizVisOnb.Count -gt 2000) { $script:CizVisOnb.Clear() }   # tavan 2000 (~40 kare): bosta her dakika yeni saat satiri geldiginden 8000 tavan saatlerce bellek buyutuyordu
     $script:CizVisOnb[$s] = $v; return $v
 }
 # Saf islev onbellekleri (Cut/Pad/Row): degismeyen satir her karede ayni ciktiyi uretir. $RS zemin kipiyle degisir: anahtarda.
@@ -98,7 +111,7 @@ function Cut([string]$s, [int]$w) {
     if ($w -le 0) { return '' }
     if ((VisLen $s) -le $w) { return $s }
     $ok = "c$w|$RS|$s"; $v = $null; if ($script:CizCutOnb.TryGetValue($ok, [ref]$v)) { return $v }
-    if ($script:CizCutOnb.Count -gt 8000) { $script:CizCutOnb.Clear() }
+    if ($script:CizCutOnb.Count -gt 2000) { $script:CizCutOnb.Clear() }
     $v = CutHam $s $w; $script:CizCutOnb[$ok] = $v; return $v
 }
 function CutHam([string]$s, [int]$w) {
@@ -267,7 +280,7 @@ function HLine([int]$w, [string]$label, [string]$left, [string]$right) {
 }
 function Row([string]$c, [int]$w) {
     $ok = "r$w|$RS|$c"; $v = $null; if ($script:CizCutOnb.TryGetValue($ok, [ref]$v)) { return $v }
-    if ($script:CizCutOnb.Count -gt 8000) { $script:CizCutOnb.Clear() }
+    if ($script:CizCutOnb.Count -gt 2000) { $script:CizCutOnb.Clear() }
     $v = "$cFrame│$RS " + (Pad $c ($w - 4)) + " $cFrame│$RS"; $script:CizCutOnb[$ok] = $v; return $v
 }
 function Blank([int]$w) { return (Row '' $w) }
@@ -298,11 +311,15 @@ function Cards([object[]]$cards, [int]$inner, [int]$minGen = 36) {
     }
     return $out
 }
+# Son hat koruyucu: cizici yalniz SGR (ESC[...m) uretir. Ajan/veri metninden sizan her diger kacis (OSC baslik/pano, imlec, ekran
+# silme, C1, yon kontrol) cikmadan once silinir - temizleyiciyi atlayan bir yol unutulsa bile terminale ulasamaz.
+$rxCizYabanci = [regex]"$ESC(?!\[[0-9;:]*m)(?:\[[\x20-\x3F]*[\x40-\x7E]?|\][^$ESC\a]*(?:$ESC\\|\a)?|[\s\S])?|[\u0000-\u001A\u001C-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]"
+function Get-CizGuvenliSatir([string]$s) { if ($s.IndexOf([char]27) -lt 0 -and -not $rxCizYabanci.IsMatch($s)) { return $s }; return $rxCizYabanci.Replace($s, '') }
 function Write-CizKare([System.Collections.Generic.List[string]]$L, [int]$w, [string]$Onceki) {
     # Tek kare yazici: imleci basa al, satirlari yaz; ESC[K YALNIZ satir pencereden kisaysa (tam genislikte imlec "kaydirma
     # bekliyor" durumundadir, ESC[K son sutunu = sag kenari siler); ESC[J kalan ekrani temizler. Degismediyse yazmaz.
     $sb = New-Object Text.StringBuilder; [void]$sb.Append("$ESC[H")
-    foreach ($ln in $L) { [void]$sb.Append($ln).Append($RS); if ((VisLen $ln) -lt $w) { [void]$sb.Append("$ESC[K") }; [void]$sb.Append("`n") }
+    foreach ($ln0 in $L) { $ln = Get-CizGuvenliSatir $ln0; [void]$sb.Append($ln).Append($RS); if ((VisLen $ln) -lt $w) { [void]$sb.Append("$ESC[K") }; [void]$sb.Append("`n") }
     [void]$sb.Append("$ESC[J")
     $kare = $sb.ToString(); if ($kare -ne $Onceki) { [Console]::Write($kare) }
     return $kare

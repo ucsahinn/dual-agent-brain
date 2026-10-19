@@ -977,7 +977,7 @@ $script:MerkezKomutBicim = @(
     '^beyin aktar -Tamam [A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
     "^beyin pano transition --task TASK-[0-9]{1,6} --status cancelled --reason 'koşu kapandı'$"
     '^beyin pano show --task TASK-[0-9]{1,6}$'
-    '^onayla TASK-[0-9]{1,6}$', '^baslat R[0-9A-Za-z-]{1,40}$', '^birlestir R[0-9A-Za-z-]{1,40}$'
+    '^onayla TASK-[A-Z0-9](?:[A-Z0-9-]{0,46}[A-Z0-9])?$', '^baslat R[0-9A-Za-z-]{1,40}$', '^birlestir R[0-9A-Za-z-]{1,40}$'
     '^claude --resume [0-9A-Fa-f-]{8,64}$', '^codex resume [0-9A-Fa-f-]{8,64}$'
     '^beyin takim (izle|durum|status|collect|integrate|verify|resume|cleanup) (--run )?R[0-9A-Za-z-]{1,40}( TASK-[0-9]{1,6}| --wait| --recheck)?$'
     '^beyin (bekci|maliyet|doktor|aktar)$'

@@ -662,3 +662,44 @@ Describe 'Invoke-BeyinNodeUtf8 (2026-10-19): Turkce node ciktisi OEM konsolda bo
         $tk | Should Not Match '& \$nodeExe \$engine'
     }
 }
+
+Describe 'onay satiri ayristirici (2026-10-19): harfli kart kimligi, sondaki noktalama/bosluk/tirnak hosgorusu' {
+    BeforeAll { . (Join-Path $PSScriptRoot 'lib.ps1') }
+    It 'olumlu: onayla TASK-x. / "  onayla TASK-x  " / tirnakli / harfli kimlik / virgullu coklu; baslat R-x.' {
+        $o = { param($m) @((Get-BeyinOnayKomutlari $m).ToArray() | ForEach-Object { "$($_.Tur) $($_.Id)" }) -join '|' }
+        & $o 'onayla TASK-VP-TR2.' | Should Be 'onayla TASK-VP-TR2'
+        & $o '  onayla TASK-12  ' | Should Be 'onayla TASK-12'
+        & $o '"onayla TASK-12!"' | Should Be 'onayla TASK-12'
+        & $o 'onayla task-vp-tr2' | Should Be 'onayla TASK-VP-TR2'
+        & $o 'onayla TASK-1, TASK-2.' | Should Be 'onayla TASK-1|onayla TASK-2'
+        & $o 'baslat R20261019-4384.' | Should Be 'baslat R20261019-4384'
+        & $o "  birlestir R-abc1  `r`n" | Should Be 'birlestir R-abc1'
+    }
+    It 'olumsuz: fiil ve kimlik tam esler; cumle ici ya da kuyruklu satir onay degildir' {
+        (Get-BeyinOnayKomutlari 'onaylamam TASK-12').Count | Should Be 0
+        (Get-BeyinOnayKomutlari 'onayla TASK-12 ve digerini de').Count | Should Be 0
+        (Get-BeyinOnayKomutlari 'bence onayla TASK-12').Count | Should Be 0
+        (Get-BeyinOnayKomutlari 'onayla TASK-').Count | Should Be 0
+        (Get-BeyinOnayKomutlari 'baslatma R20261019-4384').Count | Should Be 0
+        (Get-BeyinOnayKomutlari 'onayla TASK-12 TASK-13 x').Count | Should Be 0
+    }
+    It 'kimlik dogrulayici harfli kart kimligini kabul eder, bicimsizi reddeder' {
+        Test-BeyinOnayKimligi -Id 'TASK-VP-TR2' | Should Be $true
+        Test-BeyinOnayKimligi -Id 'TASK-46' | Should Be $true
+        Test-BeyinOnayKimligi -Id 'TASK-VP-' | Should Be $false
+        Test-BeyinOnayKimligi -Id 'TASK-a;b' | Should Be $false
+        Test-BeyinOnayKimligi -Id '..\TASK-1' | Should Be $false
+    }
+    It 'uctan uca: prompt-counter kancasi "onayla TASK-VP-T9." satirindan onay kaydi yazar' {
+        $fx = Join-Path ([IO.Path]::GetTempPath()) ('onay-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path (Join-Path $fx 'motor\hooks') | Out-Null
+        try {
+            Copy-Item (Join-Path $PSScriptRoot '*.ps1') (Join-Path $fx 'motor\hooks')
+            # vault DISI proje oturumu (cwd baska klasor): vault kancanin kendi yolundan bulunur
+            $girdi = (@{ session_id = 'onay-test-1'; prompt = 'onayla TASK-VP-T9.'; cwd = [IO.Path]::GetTempPath(); hook_event_name = 'UserPromptSubmit' } | ConvertTo-Json -Compress)
+            $out = $girdi | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fx 'motor\hooks\prompt-counter.ps1') 2>&1 | Out-String
+            $out | Should Match 'Insan onayi kaydedildi: TASK-VP-T9'
+            Test-Path (Join-Path $fx 'motor\scripts\.state\approvals\TASK-VP-T9.json') | Should Be $true
+        } finally { Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}

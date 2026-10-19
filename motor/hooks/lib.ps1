@@ -5222,9 +5222,28 @@ function Sync-BeyinPanoBrifing {
 # bayt-bayt eski bicim; AgentChef K12 ayni dosyayi okur). -Tur baslat|birlestir takim
 # kosusu onayi (<runId>.<tur>.json, v=2, 'tur' alani; AgentChef team-run.mjs okur,
 # ASLA uretmez). runId: ^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$ - dosya adi bundan turer.
+# ONAY SATIRLARI (2026-10-19): kullanici mesajindaki tek satirlik onay komutlari. Tek kaynak (prompt-counter bunu cagirir).
+# Kimlik: kart TASK-<harf/rakam/tire> (eskiden yalniz TASK-<sayi>: 'onayla TASK-VP-TR2' sessizce DUSUYORDU), kosu R...
+# Satir yalniz komuttan olusur; bastaki/sondaki bosluk, sondaki . ! ve satiri saran tirnak hosgorulur. Fiil ve kimlik
+# TAM eslesir ('onaylamam TASK-1' ya da 'onayla TASK-1 ve digeri' onay DEGILDIR). Kimlik harf/rakamla BITER: sondaki
+# nokta kimlige yapismaz. Cagiran yalniz kullanicinin KENDI mesajini verir (sentetik turlar disarida kalir).
+$script:BeyinOnayKartRx = 'TASK-[A-Za-z0-9](?:[A-Za-z0-9-]{0,46}[A-Za-z0-9])?'
+function Get-BeyinOnayKomutlari([string]$Metin) {
+    $L = New-Object System.Collections.Generic.List[object]
+    if (-not $Metin) { return ,$L }
+    $q1 = '["''\u201C\u2018]?'; $q2 = '["''\u201D\u2019]?'
+    $kart = $script:BeyinOnayKartRx
+    $rxOnay = "(?im)^[ \t]*$q1[ \t]*onayla[ \t]+($kart(?:[ \t]*,?[ \t]*$kart)*)[ \t]*[.!]?[ \t]*$q2[ \t]*[.!]?[ \t]*\r?$"
+    foreach ($m in [regex]::Matches($Metin, $rxOnay)) {
+        foreach ($t in [regex]::Matches($m.Groups[1].Value, "(?i)$kart")) { $L.Add(@{ Tur = 'onayla'; Id = $t.Value.ToUpperInvariant() }) }
+    }
+    $rxTakim = "(?im)^[ \t]*$q1[ \t]*(?:takim[ \t]+)?(baslat|birlestir)[ \t]+([A-Za-z0-9](?:[A-Za-z0-9._-]{1,62}[A-Za-z0-9])?)[ \t]*[.!]?[ \t]*$q2[ \t]*[.!]?[ \t]*\r?$"
+    foreach ($m in [regex]::Matches($Metin, $rxTakim)) { $L.Add(@{ Tur = $m.Groups[1].Value.ToLowerInvariant(); Id = $m.Groups[2].Value }) }
+    return ,$L
+}
 function Test-BeyinOnayKimligi {
     param([string]$Id, [string]$Tur = '')
-    if (-not $Tur) { return [bool]($Id -cmatch '^TASK-\d+$') }
+    if (-not $Tur) { return [bool]($Id -cmatch ('^' + ($script:BeyinOnayKartRx -creplace 'a-z', '') + '$')) }   # buyuk harfli kart kimligi (TASK-12, TASK-VP-TR2)
     if ($Tur -ne 'baslat' -and $Tur -ne 'birlestir') { return $false }
     return [bool]($Id -cmatch '^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$')
 }

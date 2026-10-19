@@ -21,6 +21,14 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.6.3 - 2026-10-19 - Insan onayi: harfli kart kimligi
+
+- `onayla TASK-x` sohbet satiri yalniz TASK-<sayi> taniyordu: `onayla TASK-VP-TR2` hicbir sey yazmadan DUSUYORDU
+  (terminaldeki `beyin pano onayla` da reddediyordu). Kart kimligi artik TASK-<harf/rakam/tire>. Tek ayristirici
+  (Get-BeyinOnayKomutlari) onayla/baslat/birlestir satirlarini okur: bas/son bosluk, sondaki . ! ve satiri saran tirnak
+  hosgorulur; fiil ve kimlik TAM eslesir ("onaylamam TASK-1", "onayla TASK-1 ve ..." onay degildir); onay yine
+  yalniz kullanicinin kendi mesajindan. Merkez kopyalama beyaz listesi ayni kimligi kabul eder.
+
 ## 1.6.2 - 2026-10-19 - Merkez: takim kosusu kapasitesi; Turkce takim ciktisi
 
 - 3. sekmede kosu satirinin altinda kapasite satiri (AgentChef 1.8.2+ kaydi): "önerilen 0 · sahip onayı 1" (sahip

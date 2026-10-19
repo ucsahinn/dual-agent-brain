@@ -252,10 +252,11 @@ try {
         # ara dal kullanicinin daline girsin. Yalniz VAR OLAN bir kosu icin yazilir: siradan bir
         # "baslat ..." cumlesi (kosu yoksa) onay uretmez, makbuza ONAY_ATLANDI duser.
         # runId alnum ile BITER: 'baslat R-1.' satirindaki nokta kimlige yapismasin (olculdu: 'R-T1.' -> kosu yok).
-        $takimM = [regex]::Matches($prompt, '(?im)^[ \t]*(?:takim[ \t]+)?(baslat|birlestir)[ \t]+([A-Za-z0-9](?:[A-Za-z0-9._-]{1,62}[A-Za-z0-9])?)[ \t]*[.!]?[ \t]*\r?$')
+        $onayKomut = Get-BeyinOnayKomutlari $prompt   # tek ayristirici (lib): bosluk/nokta/tirnak hosgorulur, fiil+kimlik tam
+        $takimM = @($onayKomut | Where-Object { $_.Tur -ne 'onayla' })
         $takimOnay = New-Object System.Collections.Generic.List[string]
         foreach ($tmc in $takimM) {
-            $tkTur = $tmc.Groups[1].Value.ToLowerInvariant(); $tkRun = $tmc.Groups[2].Value
+            $tkTur = [string]$tmc.Tur; $tkRun = [string]$tmc.Id
             if ($takimOnay -contains "$tkTur $tkRun") { continue }
             $tkDosya = Join-Path $p.TeamRuns "$tkRun.json"
             if (-not (Test-Path -LiteralPath $tkDosya)) {
@@ -296,11 +297,11 @@ try {
             $tkSonraki = @($takimOnay | ForEach-Object { $tkp = $_ -split ' '; "beyin takim $(if ($tkp[0] -eq 'baslat') { 'start' } else { 'merge' }) --run $($tkp[1])" }) -join '; '
             $parcalar.Add("[Hafiza] Insan onayi kaydedildi: $($takimOnay -join ', ') (7 gun gecerli, tek kullanimlik). Simdi: $tkSonraki")
         }
-        $onayM = [regex]::Matches($prompt, '(?im)^[ \t]*onayla[ \t]+(TASK-\d+(?:[ \t]*,?[ \t]*TASK-\d+)*)[ \t]*[.!]?[ \t]*\r?$')
+        $onayM = @($onayKomut | Where-Object { $_.Tur -eq 'onayla' })
         $onaylanan = New-Object System.Collections.Generic.List[string]
         foreach ($om in $onayM) {
-            foreach ($tm in [regex]::Matches($om.Groups[1].Value, '(?i)TASK-\d+')) {
-                $tid = $tm.Value.ToUpperInvariant()
+            foreach ($tm in @($om)) {
+                $tid = [string]$tm.Id
                 if ($onaylanan -contains $tid) { continue }
                 $onKayit = Add-BeyinOnay -Paths $p -TaskId $tid -Kanal 'sohbet' -Ajan (Get-BeyinAgent) -Session (Get-BeyinSessionKey -SessionId $hook.session_id)
                 if ($onKayit.Ok) {

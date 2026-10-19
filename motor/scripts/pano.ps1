@@ -64,7 +64,7 @@ if ($args2.Count -eq 0) {
 # ekrandaki kodun yazilmasini ister. Sohbet kanali: kullanici tek satir 'onayla TASK-x'.
 if ([string]$args2[0] -eq 'onayla') {
     $onayTid = $(if ($args2.Count -ge 2) { ([string]$args2[1]).ToUpperInvariant() } else { '' })
-    if ($onayTid -cnotmatch '^TASK-\d+$') { Write-Output 'Kullanim: beyin pano onayla TASK-012   (sohbetten: tek satir "onayla TASK-012")'; exit 2 }
+    if (-not (Test-BeyinOnayKimligi -Id $onayTid)) { Write-Output 'Kullanim: beyin pano onayla TASK-012   (sohbetten: tek satir "onayla TASK-012")'; exit 2 }
     if ([Console]::IsInputRedirected) {
         Write-Output "HATA: onay yalniz etkilesimli terminalde verilir (bu kabuk etkilesimsiz). Sohbete tek satir yaz: onayla $onayTid"
         Write-BeyinMakbuz -Paths $p -Script 'pano' -Outcome 'ONAY_REDDEDILDI' -Note "$onayTid etkilesimsiz stdin"

@@ -21,6 +21,13 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.6.2 - 2026-10-19 - Merkez: takim kosusu kapasitesi; Turkce takim ciktisi
+
+- 3. sekmede kosu satirinin altinda kapasite satiri (AgentChef 1.8.2+ kaydi): "önerilen 0 · sahip onayı 1" (sahip
+  asimi, sari) ve "başlangıçta 2→1 (neden)" (baslangicta dusurme). Eski kayitta satir cikmaz.
+- `beyin takim`: AgentChef ciktisi UTF-8 yakalanir; Turkce Windows konsolunda (OEM 857) 'çğüş' artik '├ğ─ş' olmaz
+  (yalniz ekran; kayit dosyalari zaten UTF-8). AgentChef 1.8.2 ile birlikte calisir.
+
 ## 1.6.1 - 2026-10-19 - Merkez: Claude isleri gorunur, canli kapasite, canli korelasyon
 
 - **Claude Code Workflow / Agent iscileri merkezde (3. sekme):** takim kosusu kaydi birakmayan Workflow kosulari ve

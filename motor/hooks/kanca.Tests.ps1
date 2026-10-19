@@ -644,3 +644,21 @@ Describe 'flush bicim kapisi (2026-10-12): ret metni ozet sayilmaz' {
         "$ok1|$ok2|$r1|$r2|$r3" | Should Be 'True|True|False|False|False'
     }
 }
+
+Describe 'Invoke-BeyinNodeUtf8 (2026-10-19): Turkce node ciktisi OEM konsolda bozulmaz' {
+    BeforeAll { . (Join-Path $PSScriptRoot 'lib.ps1') }
+    It '857 kod sayfali konsolda yakalanan metin birebir; konsol kodlamasi geri yuklenir; takim.ps1 yardimciyi kullanir' {
+        $node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+        if (-not $node) { Set-TestInconclusive 'node yok'; return }
+        $e = [Console]::OutputEncoding
+        try {
+            [Console]::OutputEncoding = [Text.Encoding]::GetEncoding(857)
+            $c = Invoke-BeyinNodeUtf8 -Node $node -Arglar @('-e', "console.log('çğüşİı ölçüm')")
+            [Console]::OutputEncoding.CodePage | Should Be 857
+        } finally { [Console]::OutputEncoding = $e }
+        ([string]$c) | Should Be 'çğüşİı ölçüm'
+        $tk = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\takim.ps1') -Raw
+        $tk | Should Match 'Invoke-BeyinNodeUtf8 -Node \$nodeExe -Arglar \(@\(\$engine\)'
+        $tk | Should Not Match '& \$nodeExe \$engine'
+    }
+}

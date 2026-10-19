@@ -515,6 +515,23 @@ function Get-MerkezClaudeIsler {
     }
     return ,$L
 }
+function Get-MerkezKosuKapasite($Kosu) {
+    # AgentChef 1.8.2+ kosu kaydi (2026-10-19): capacity {recommended, requested, ownerOverride, reason, atStart} ve
+    # gecmiste capacity_lowered {from, to, reason}. Ekran icin tek satir: "önerilen 0 · sahip onayı 1 · başlangıçta 2→1 (neden)".
+    # Alan yoksa (eski kayit) bos doner; deger guvenilmez veridir, temizlenip kisaltilir.
+    $c = $Kosu.capacity; if (-not $c) { return @{ Metin = ''; Uyari = $false } }
+    $p = @(); $uyari = $false
+    if ($null -ne $c.recommended) { $p += "önerilen $([int]$c.recommended)" }
+    if ($c.ownerOverride) { $uyari = $true; $p += "sahip onayı $(if ($null -ne $c.requested) { [int]$c.requested } else { [int]$Kosu.maxWorkers })" }
+    $dus = @(@($Kosu.history) | Where-Object { $_ -and [string]$_.event -eq 'capacity_lowered' } | Select-Object -Last 1)
+    if ($dus.Count) {
+        $uyari = $true
+        $p += "başlangıçta $([int]$dus[0].from)→$([int]$dus[0].to)$(if ($dus[0].reason) { ' (' + (Protect-MerkezSatir ([string]$dus[0].reason) 60) + ')' })"
+    } elseif ($c.atStart -and $null -ne $c.atStart.recommended -and $null -ne $c.recommended -and [int]$c.atStart.recommended -ne [int]$c.recommended) {
+        $p += "başlangıçta önerilen $([int]$c.atStart.recommended)"
+    }
+    return @{ Metin = ($p -join ' · '); Uyari = $uyari }
+}
 function Get-MerkezAnlik {
     param([hashtable]$Paths, [int]$SonKosuSaat = 6, [switch]$Hizli, [hashtable]$Onbellek, [string]$AyrintiAnahtar = '', [string]$ClaudeKok = '')
     # -AyrintiAnahtar 'Tur:Kosu:Ad': yalniz o ajanin ayrintisi (son adimlar, jeton, bekleme) hesaplanir; hizli turda da (onbellekli).
@@ -553,7 +570,7 @@ function Get-MerkezAnlik {
         $ws = @($k.workers | Where-Object { $null -ne $_ })
         $jeton = 0L; foreach ($w in $ws) { if ($w.usage) { try { $jeton += [int64]$w.usage.input_tokens + [int64]$w.usage.output_tokens } catch { } } }
         $ozet = Get-MerkezKosuOzet $k $sahipsiz $simdi
-        $kosuOge = @{ RunId = [string]$k.runId; Repo = [string]$k.repoName; Durum = [string]$k.status; Asama = (Get-MerkezKosuAsama $k); Sonraki = $sonraki; Ozet = $ozet
+        $kosuOge = @{ Kapasite = (Get-MerkezKosuKapasite $k); RunId = [string]$k.runId; Repo = [string]$k.repoName; Durum = [string]$k.status; Asama = (Get-MerkezKosuAsama $k); Sonraki = $sonraki; Ozet = $ozet
             Isci = $ws.Count; Biten = @($ws | Where-Object { $_.status -in @('finished', 'collected', 'integrated') }).Count
             Sorunlu = @($ws | Where-Object { $_.status -in @('failed', 'timed_out', 'scope_violation', 'rejected_content', 'conflict') }).Count
             Jeton = $jeton; Sahipsiz = $sahipsiz; KayitGuncel = $f.LastWriteTime; Bitmis = $bitmis

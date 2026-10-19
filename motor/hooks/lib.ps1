@@ -5314,6 +5314,15 @@ function Get-BeyinOnayBekleyen {
 # isletim satiri ("Pano: N acik, M bu projede"), sahiplik uyarisi (acik kartin
 # yazma kapsami bu repoya dusuyorsa) ve turetilmis pano.md. Node BASLATILMAZ.
 # ============================================================================
+function Invoke-BeyinNodeUtf8 {
+    # node ciktisini KAYIPSIZ yakalar (2026-10-19): `$x = & node ...` ciktiyi [Console]::OutputEncoding ile cozer;
+    # Turkce Windows konsolunda (OEM 857) 'çğüş' -> '├ğ─ş' oluyordu (olculdu). Yakalama suresince UTF-8, sonra geri.
+    # Dosyalar etkilenmiyordu (node UTF-8 yazar); yalniz sarmalayicinin ekrana bastigi metin bozuktu.
+    param([Parameter(Mandatory = $true)][string]$Node, [object[]]$Arglar = @())
+    $eski = $null; try { $eski = [Console]::OutputEncoding; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
+    try { return (& $Node @Arglar 2>&1) }
+    finally { if ($eski) { try { [Console]::OutputEncoding = $eski } catch { } } }
+}
 function Get-BeyinAgentChefKok {
     param([switch]$Hizli)
     # AGENTCHEF YOLU. Sira: (1) ayar BEYIN_AGENTCHEF_KOK, (2) ortam AGENTCHEF_ROOT, (3) onbellek

@@ -166,7 +166,7 @@ if (-not $stateVar) {
     # yeni kullanicinin ilk 'beyin takim plan'i motorda "Board state file does not exist" ile dusuyordu.
     if (-not (Test-Path -LiteralPath $p.Board)) {
         $panoMotor = Join-Path $kok 'scripts\coordination-board.mjs'
-        $initCik = & $nodeExe $panoMotor init --state $p.Board --json 2>&1
+        $initCik = Invoke-BeyinNodeUtf8 -Node $nodeExe -Arglar @($panoMotor, 'init', '--state', $p.Board, '--json')
         if ($LASTEXITCODE -ne 0) { Write-Output "HATA: pano baslatilamadi (init): $(($initCik | ForEach-Object { "$_" }) -join ' ')"; exit 1 }
         Write-Host "[takim] pano yoktu, olusturuldu: $($p.Board)" -ForegroundColor DarkGray
     }
@@ -204,7 +204,7 @@ $ErrorActionPreference = 'Continue'
 $motorSurum = ''; try { $motorSurum = [string]((Get-Content -LiteralPath (Join-Path $kok 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version) } catch { }
 $eskiMotor = $true; try { if ($motorSurum -and ([version](($motorSurum -split '[-+]')[0]) -ge [version]'1.6.0')) { $eskiMotor = $false } } catch { }
 if ($eskiMotor -and -not $env:AGENTCHEF_TEAM_MODE) { $env:AGENTCHEF_TEAM_MODE = 'experimental' }   # 1.6.0+ motorda bayrak gereksiz: ortam oldugu gibi gecer
-$cikti = & $nodeExe $engine @gecilen 2>&1
+$cikti = Invoke-BeyinNodeUtf8 -Node $nodeExe -Arglar (@($engine) + @($gecilen))   # Turkce cikti konsol kod sayfasinda bozulmasin
 $kod = $LASTEXITCODE
 $ErrorActionPreference = $eapEski
 $sw.Stop()

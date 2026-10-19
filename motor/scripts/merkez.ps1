@@ -672,6 +672,7 @@ function KosuSatirlari($L, $k, [bool]$isciler, $a) {
     $sureS = $(if ($k.Sure) { "$cMuted süre$RS $cText$(Kisa ([double]$k.Sure))$RS" } else { '' }) + $(if ($k.Baslangic) { "$cMuted   başladı$RS $cText$(([datetime]$k.Baslangic).ToLocalTime().ToString('HH:mm'))$RS" } else { '' })
     $an = "kosu:$($k.RunId)"; $sc = SecKayit 'kosu' $an $k
     $L.Add((Row (Vurgu "$rz  $cText$BOLD$(Protect-MerkezSatir ([string]$k.RunId) 30)$RS$cFrame · $RS$cMuted$(Protect-MerkezSatir $k.Repo 30)$RS   $sureS" $ic $sc $an) $w))
+    if ($k.Kapasite -and $k.Kapasite.Metin) { $L.Add((Row (Vurgu "  ${cMuted}kapasite$RS $(if ($k.Kapasite.Uyari) { $cWarn } else { $cText })$($k.Kapasite.Metin)$RS" $ic $sc $an) $w)) }   # AgentChef 1.8.2+: sahip asimi / baslangicta dusurme gorunur
     # adim cizgisi: tamam ✓ ━, kirik ✕, guncel ▸, bekleyen ○ ╌
     $ok = @($k.Adimlar); $cur = $(if ($null -ne $k.Guncel) { [int]$k.Guncel } else { -1 })
     if ($ok.Count -eq 6) {

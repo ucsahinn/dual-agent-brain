@@ -882,3 +882,46 @@ Describe 'merkez 1.6.1: canli korelasyon - onerilen komut, yenile, taze kaynak (
         [regex]::Replace($yar, ([string][char]27 + '\[[0-9;?]*[A-Za-z]'), '') | Should Match 'kaynağı yeniden ölçer'
     }
 }
+
+Describe 'merkez 1.6.2: takim kosusu kapasitesi gorunur (AgentChef 1.8.2 capacity alanlari, 2026-10-19)' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'beyin-ciz.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+    }
+    It 'sahip asimi: onerilen 0 · sahip onayi 1 (uyari renginde)' {
+        $k = Get-MerkezKosuKapasite ([pscustomobject]@{ maxWorkers = 1; capacity = [pscustomobject]@{ recommended = 0; requested = 1; ownerOverride = $true; reason = 'commit %88 >= 85' }; history = @() })
+        $k.Metin | Should Be 'önerilen 0 · sahip onayı 1'
+        $k.Uyari | Should Be $true
+    }
+    It 'baslangicta dusurme: capacity_lowered olayi "başlangıçta 2→1 (neden)" olarak' {
+        $k = Get-MerkezKosuKapasite ([pscustomobject]@{ maxWorkers = 1; capacity = [pscustomobject]@{ recommended = 2; ownerOverride = $false; atStart = [pscustomobject]@{ recommended = 1 } }
+                                     history = @([pscustomobject]@{ event = 'planned' }, [pscustomobject]@{ event = 'capacity_lowered'; from = 2; to = 1; reason = 'commit %86 >= 85 (bellek dolu)' }) })
+        $k.Metin | Should Be 'önerilen 2 · başlangıçta 2→1 (commit %86 >= 85 (bellek dolu))'
+        $k.Uyari | Should Be $true
+    }
+    It 'baslangicta olcum degistiyse ama dusurme yoksa bilgi; kapasite alani olmayan eski kayitta bos' {
+        (Get-MerkezKosuKapasite ([pscustomobject]@{ capacity = [pscustomobject]@{ recommended = 1; atStart = [pscustomobject]@{ recommended = 3 } }; history = @() })).Metin | Should Be 'önerilen 1 · başlangıçta önerilen 3'
+        (Get-MerkezKosuKapasite ([pscustomobject]@{ runId = 'R1'; history = @() })).Metin | Should Be ''
+    }
+    It 'tek kare: 3. sekmede kosu satirinin altinda kapasite satiri' {
+        $fx = Join-Path ([IO.Path]::GetTempPath()) ('kap-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path (Join-Path $fx 'motor\hooks') | Out-Null
+        try {
+            Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') (Join-Path $fx 'motor\hooks')
+            . (Join-Path $fx 'motor\hooks\lib.ps1'); $pp = Get-BeyinPaths -Vault $fx
+            New-Item -ItemType Directory -Force -Path $pp.TeamRuns | Out-Null
+            $bas = (Get-Date).ToUniversalTime().AddMinutes(-2).ToString('o')
+            $kos = @{ runId = 'R20261019-kap1'; repoName = 'demo'; status = 'running'; baseBranch = 'main'; startedAt = $bas; maxWorkers = 1
+                      capacity = @{ recommended = 0; requested = 1; ownerOverride = $true; reason = 'commit %88 >= 85' }
+                      supervisor = @{ pid = $PID; heartbeatAt = (Get-Date).ToUniversalTime().ToString('o') }
+                      workers = @(@{ taskId = 'TASK-1'; role = 'qa_lead'; status = 'running'; startedAt = $bas; pid = $PID }); history = @(@{ at = $bas; event = 'started' }) }
+            Set-Content -LiteralPath (Join-Path $pp.TeamRuns 'R20261019-kap1.json') -Value ($kos | ConvertTo-Json -Depth 6) -Encoding UTF8
+            $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+            try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'merkez.ps1') -Vault $fx -Tek -Sekme Kosular -Genislik 150 -Yukseklik 40 2>&1 | Out-String } finally { [Console]::OutputEncoding = $eskiKod }
+            $plain = [regex]::Replace($out, ([string][char]27 + '\[[0-9;?]*[A-Za-z]'), '')
+            $plain | Should Match 'kapasite önerilen 0 · sahip onayı 1'
+            foreach ($l in @($plain -split "`r?`n" | Where-Object { $_ })) { "150:$($l.Length)" | Should Be '150:150' }
+        } finally { Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}

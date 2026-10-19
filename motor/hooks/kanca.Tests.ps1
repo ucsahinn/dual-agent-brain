@@ -261,14 +261,30 @@ Describe 'Faz A (2026-10-06): pano gorunumu, cakisma, kaynak onerisi, maske, sen
         @($ciftler | Where-Object { $_ -like '*T5*' }).Count | Should Be 0
         (@($c | Where-Object { $_.A -eq 'T1' -and $_.B -eq 'T2' })[0].Izole) | Should Be $true
     }
-    It 'Get-BeyinKaynakOzeti: onerilen es zamanli ajan 2-6 araliginda ve bos RAM olculur' {
+    It 'Get-BeyinKaynakOzeti: bos RAM olculur, oneri tek formulden gelir ve kapasite.json (v1) yazilir' {
         $tv = Join-Path $env:TEMP ("beyin-kay-" + [guid]::NewGuid().ToString('N'))
         $tp = Get-BeyinPaths -Vault $tv
         New-Item -ItemType Directory -Force -Path $tp.ScrState | Out-Null
-        $k = Get-BeyinKaynakOzeti -Paths $tp -OnbellekDk 0
-        Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue
-        ($k.BosRamGB -ge 0) | Should Be $true
-        ($k.OnerilenAjan -ge 2 -and $k.OnerilenAjan -le 6) | Should Be $true
+        try {
+            $k = Get-BeyinKaynakOzeti -Paths $tp -OnbellekDk 0
+            ($k.BosRamGB -ge 0) | Should Be $true
+            $beklenen = Get-BeyinKapasiteOneri -CommitYuzde $k.CommitYuzde -BosRamGB $k.BosRamGB
+            $k.OnerilenAjan | Should Be $beklenen.Onerilen
+            $j = Get-Content -LiteralPath (Join-Path $tp.ScrState 'kapasite.json') -Raw | ConvertFrom-Json
+            $j.v | Should Be 1; $j.onerilen | Should Be $k.OnerilenAjan; $j.tavan | Should Be 8
+            [string]$j.neden | Should Not BeNullOrEmpty
+            (@($j.PSObject.Properties.Name) -join ',') | Should Be 'v,ts,onerilen,tavan,bosRamGB,commitYuzde,neden'
+        } finally { Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'kapasite onerisi (2026-10-19 regresyon): commit esigi asildiysa 0-1; bos RAM ile olcekli; tavan 8' {
+        # eski formul (bos RAM GB, 2-6) commit %88 + 6 GB bos RAM'de 6 oneriyordu
+        (Get-BeyinKapasiteOneri -CommitYuzde 88 -BosRamGB 6).Onerilen | Should Be 1
+        (Get-BeyinKapasiteOneri -CommitYuzde 90 -BosRamGB 6).Onerilen | Should Be 0
+        (Get-BeyinKapasiteOneri -CommitYuzde 88 -BosRamGB 6).Neden | Should Match 'commit %88 >= 85'
+        (Get-BeyinKapasiteOneri -CommitYuzde 60 -BosRamGB 8).Onerilen | Should Be 4
+        (Get-BeyinKapasiteOneri -CommitYuzde 40 -BosRamGB 40).Onerilen | Should Be 8
+        (Get-BeyinKapasiteOneri -CommitYuzde 60 -BosRamGB 2.5).Onerilen | Should Be 0
+        (Get-BeyinKapasiteOneri -CommitYuzde -1 -BosRamGB -1).Onerilen | Should Be 0
     }
     It 'Protect-BeyinBlok: sir maskelenir ve sayac artar; bos metin aynen doner' {
         $once = $script:BeyinMaskeSayac

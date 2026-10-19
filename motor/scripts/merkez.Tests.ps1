@@ -756,3 +756,129 @@ Describe 'merkez 1.6.0: guvenlik (son hat koruyucu, beyaz liste, maskeleme, pane
         @(Get-BeyinTakimPanelArgv -Paths $p -RunId 'R20261015-4368' -TaskId 'TASK-069').Count | Should BeGreaterThan 5
     }
 }
+
+Describe 'merkez 1.6.1: Claude Code Workflow/Agent iscileri gorunur (B1, 2026-10-19)' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'beyin-ciz.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+        $script:kok = Join-Path ([IO.Path]::GetTempPath()) ('claude-kok-' + [guid]::NewGuid().ToString('N'))
+        $ses = Join-Path $script:kok 'C--Users-ali-Desktop-ornek-proje\s-111\subagents'
+        $wfA = Join-Path $ses 'workflows\wf_canli-01'; $wfB = Join-Path $ses 'workflows\wf_eski-02'
+        New-Item -ItemType Directory -Force -Path $wfA, $wfB | Out-Null
+        $j = @('{"type":"launched"}',
+               '{"type":"started","key":"k1","agentId":"a1","label":"verify:ui","phase":"Verify"}',
+               '{"type":"started","key":"k2","agentId":"a2","label":"verify:turkish","phase":"Verify"}',
+               '{"type":"started","key":"k3","agentId":"a3","label":"review:code","phase":"Review"}',
+               '{"type":"result","key":"k1","agentId":"a1","result":{"summary":"ok"}}',
+               '{"type":"failed","key":"k2","agentId":"a2"}')
+        [IO.File]::WriteAllLines((Join-Path $wfA 'journal.jsonl'), [string[]]$j)
+        [IO.File]::WriteAllLines((Join-Path $wfB 'journal.jsonl'), [string[]]@('{"type":"started","key":"x","label":"eski:is","phase":"P"}'))
+        (Get-Item (Join-Path $wfB 'journal.jsonl')).LastWriteTime = (Get-Date).AddHours(-5)
+        [IO.File]::WriteAllText((Join-Path $ses 'agent-b1.jsonl'), '{}')
+        [IO.File]::WriteAllText((Join-Path $ses 'agent-b1.meta.json'), '{"agentType":"agentchef:qa-lead","description":"kenar durum testi"}')
+        [IO.File]::WriteAllText((Join-Path $ses 'agent-b2.jsonl'), '{}')
+        (Get-Item (Join-Path $ses 'agent-b2.jsonl')).LastWriteTime = (Get-Date).AddMinutes(-30)
+    }
+    AfterAll { Remove-Item -LiteralPath $script:kok -Recurse -Force -ErrorAction SilentlyContinue }
+    It 'Workflow journal sayilir: 3 basladi, 1 bitti, 1 hata -> 1 acik, calisiyor; 2 sa disindaki workflow listelenmez' {
+        $ci = (Get-MerkezClaudeIsler -Kok $script:kok).ToArray()
+        $wf = @($ci | Where-Object { $_.Tur -eq 'workflow' })
+        $wf.Count | Should Be 1
+        $wf[0].Kimlik | Should Be 'wf_canli-01'
+        $wf[0].Proje | Should Be 'ornek-proje'
+        $wf[0].Toplam | Should Be 3; $wf[0].Biten | Should Be 1; $wf[0].Hata | Should Be 1; $wf[0].Calisan | Should Be 1
+        $wf[0].Durum | Should Be 'calisiyor'
+        $wf[0].Faz | Should Be 'Review'
+        $wf[0].Ad | Should Be 'verify, review'
+    }
+    It 'Agent araciyla acilan alt ajanlar oturum basina tek satir: 2 ajan, 1 acik, meta aciklamasi' {
+        $ag = @((Get-MerkezClaudeIsler -Kok $script:kok).ToArray() | Where-Object { $_.Tur -eq 'ajan' })
+        $ag.Count | Should Be 1
+        $ag[0].Toplam | Should Be 2; $ag[0].Calisan | Should Be 1; $ag[0].Durum | Should Be 'calisiyor'
+        $ag[0].Ad | Should Be 'kenar durum testi'
+    }
+    It 'canli pencere disinda kalan acik workflow "sessiz" olur, calisiyor sayilmaz' {
+        $wf = @((Get-MerkezClaudeIsler -Kok $script:kok -Simdi (Get-Date).AddMinutes(10)).ToArray() | Where-Object { $_.Tur -eq 'workflow' })
+        $wf[0].Durum | Should Be 'sessiz'; $wf[0].Calisan | Should Be 0
+    }
+    It 'proje adi cozumu ve olmayan kok' {
+        Get-MerkezProjeAd 'C--Users-ali-Documents-Beyin' | Should Be 'Beyin'
+        Get-MerkezProjeAd 'C--Users-ali' | Should Be 'ev'
+        Get-MerkezProjeAd 'C--' | Should Be 'kök'
+        (Get-MerkezClaudeIsler -Kok (Join-Path $script:kok 'yok')).Count | Should Be 0
+    }
+    It 'Get-MerkezAnlik ClaudeIsler alanini doldurur (tam turda)' {
+        $vault = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $a = Get-MerkezAnlik -Paths (Get-BeyinPaths -Vault $vault) -Onbellek @{} -ClaudeKok $script:kok
+        @($a.ClaudeIsler | Where-Object { $_.Durum -eq 'calisiyor' }).Count | Should Be 2
+    }
+    It 'tek kare: 3. sekmede CLAUDE ISCILERI bolumu; Genel kartinda "Claude isi calisiyor"; her genislikte tam cerceve' {
+        $vault = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $eskiKok = $env:BEYIN_CLAUDE_PROJE_KOK; $env:BEYIN_CLAUDE_PROJE_KOK = $script:kok
+        try {
+            foreach ($w in @(90, 170)) {
+                foreach ($sek in @('Kosular', 'Genel')) {
+                    $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+                    try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'merkez.ps1') -Vault $vault -Tek -Sekme $sek -Genislik $w -Yukseklik $(if ($sek -eq 'Genel') { 120 } else { 50 }) 2>&1 | Out-String } finally { [Console]::OutputEncoding = $eskiKod }   # Genel: canli vault uzunlugundan bagimsiz olsun diye yuksek pencere
+                    $plain = [regex]::Replace($out, ([string][char]27 + '\[[0-9;?]*[A-Za-z]'), '')
+                    if ($sek -eq 'Kosular') { $plain | Should Match 'CLAUDE İŞÇİLERİ \(2 çalışıyor'; $plain | Should Match 'ornek-proje' }
+                    else { $plain | Should Match 'CLAUDE İŞÇİLERİ \(2 çalışıyor' }
+                    if ($sek -eq 'Genel' -and $w -ge 120) { $plain | Should Match 'Claude işi çalışıyor' }
+                    if ($sek -eq 'Genel') { $plain | Should Not Match 'çalışan koşu yok' }
+                    foreach ($l in @($plain -split "`r?`n" | Where-Object { $_ })) { "$sek/$w`:$($l.Length)" | Should Be "$sek/$w`:$w" }
+                }
+            }
+        } finally { $env:BEYIN_CLAUDE_PROJE_KOK = $eskiKok }
+    }
+}
+
+Describe 'merkez 1.6.1: canli korelasyon - onerilen komut, yenile, taze kaynak (2026-10-19)' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'beyin-ciz.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+    }
+    It 'makbuz sayaci onerilen komutun son calismasini tutar; aktar yalniz kapatinca (listeleme kanit degil)' {
+        $d = Join-Path ([IO.Path]::GetTempPath()) ('mkb-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Force -Path $d | Out-Null
+        try {
+            $g = Get-Date '2026-10-19 12:00'
+            $sat = @('{"ts":"2026-10-19T12:15:00+03:00","script":"bekci","outcome":"BEKCI_RAPOR","agent":"cli"}',
+                     '{"ts":"2026-10-19T12:16:00+03:00","script":"aktar","outcome":"GOSTERILDI","agent":"cli"}',
+                     '{"ts":"2026-10-19T12:20:00+03:00","script":"maliyet","outcome":"MALIYET_OK","agent":"cli"}',
+                     '{"ts":"2026-10-19T12:10:00+03:00","script":"aktar","outcome":"AKTAR_TAMAM","agent":"cli"}')
+            [IO.File]::WriteAllLines((Join-Path $d '2026-10-19.jsonl'), [string[]]$sat)
+            $s = Get-MerkezGunSayac $d $g @{}
+            ([datetime]$s.Son['bekci']).ToString('HH:mm') | Should Be (([datetime]'2026-10-19T12:15:00+03:00').ToString('HH:mm'))
+            ([datetime]$s.Son['maliyet']).ToString('HH:mm') | Should Be (([datetime]'2026-10-19T12:20:00+03:00').ToString('HH:mm'))
+            ([datetime]$s.Son['aktar']).ToString('HH:mm') | Should Be (([datetime]'2026-10-19T12:10:00+03:00').ToString('HH:mm'))
+        } finally { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'eski aktarim teshisi: c dogrudan beyaz listeli kapatma komutunu kopyalar (eskiden yalniz listeleme komutu)' {
+        $t = Get-MerkezEskiAktarim @(@{ id = '20261011T125258-13ee'; ts = (Get-Date).AddDays(-8).ToString('o'); toProject = 'ornek.proje' }) (Get-Date)
+        $t.Metin | Should Match 'beyin aktar -Tamam 20261011T125258-13ee$'
+        (Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = $t }).Komut | Should Be 'beyin aktar -Tamam 20261011T125258-13ee'
+    }
+    It 'panel kaynagi en cok 1 dk eski olcumle ister; r (KaynakTaze) yeniden olcturur' {
+        $script:istenenDk = 'yok'
+        function Get-BeyinKaynakOzeti { param($Paths, [int]$CommitEsik = 85, [int]$BostaDk = 120, [string]$SessionKey = '', $OnbellekDk = 'verilmedi') $script:istenenDk = $OnbellekDk; return @{ Ok = $true; CommitYuzde = 50; BosRamGB = 10.0; BostaOturum = 0; OnerilenAjan = 5 } }
+        $vault = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent; $pp = Get-BeyinPaths -Vault $vault
+        [void](Get-MerkezAnlik -Paths $pp -Onbellek @{} -ClaudeKok 'C:\yok-klasor')
+        $script:istenenDk | Should Be 1
+        $o = @{ KaynakTaze = $true }
+        [void](Get-MerkezAnlik -Paths $pp -Onbellek $o -ClaudeKok 'C:\yok-klasor')
+        $script:istenenDk | Should Be 0
+        $o.KaynakTaze | Should Be $false
+    }
+    It 'alt cubukta r yenile her zaman gorunur ve yardim r tusunu anlatir' {
+        $vault = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $eskiKod = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::UTF8
+        try {
+            $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'merkez.ps1') -Vault $vault -Tek -Sekme Kosular -Genislik 170 -Yukseklik 40 2>&1 | Out-String
+            $yar = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'merkez.ps1') -Vault $vault -Tek -Yardim -Genislik 170 -Yukseklik 60 2>&1 | Out-String
+        } finally { [Console]::OutputEncoding = $eskiKod }
+        $plain = [regex]::Replace($out, ([string][char]27 + '\[[0-9;?]*[A-Za-z]'), '')
+        @($plain -split "`r?`n" | Where-Object { $_ -match '^╰' })[0] | Should Match 'r yenile'
+        [regex]::Replace($yar, ([string][char]27 + '\[[0-9;?]*[A-Za-z]'), '') | Should Match 'kaynağı yeniden ölçer'
+    }
+}

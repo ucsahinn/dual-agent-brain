@@ -21,6 +21,25 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.6.1 - 2026-10-19 - Merkez: Claude isleri gorunur, canli kapasite, canli korelasyon
+
+- **Claude Code Workflow / Agent iscileri merkezde (3. sekme):** takim kosusu kaydi birakmayan Workflow kosulari ve
+  Agent araciyla acilan alt ajanlar `~/.claude/projects/<proje>/<oturum>/subagents` altindan salt okunur izlenir
+  (journal olaylari + meta; transkript icerigi okunmaz). Satirda proje, tur, durum, biten/toplam, hata, acik ajan,
+  faz, yas. Genel sekmesinde calisan Claude isi varken artik "calisan kosu yok" yazmaz; sekme cipi ikisini sayar.
+- **`beyin kapasite [-Json]`:** canli es zamanli ajan onerisi tek formulden (commit esigi asildiysa 0-1; aksi halde
+  (bos RAM - 2 GB) / 1,5 GB, tavan 8). Eski formul commit %88'de bile 4 oneriyordu. Her kaynak olcumu
+  `.state\kapasite.json` (v1) yazar; AgentChef takim kosusu isci sayisini oradan alir.
+- **Canli korelasyon:** teshis satiri onerilen komutun bugunku son calismasini gosterir ("son calistirma 2 dk once",
+  makbuzdan); eski aktarim teshisinde `c` dogrudan `beyin aktar -Tamam <id>` kopyalar. Kaynak olcumu en cok 1 dk eski
+  (eskiden 10 dk'lik dosya onbellegi: bekci %96 olcerken panel eski degeri gosterebiliyordu).
+- **`beyin aktar dinle -Kime claude [-Proje x]`:** canli uyandirma. Claude Code Monitor araciyla baslatilir; yeni aktarim
+  gelince tek satir basar (tam metin yok) ve bosta oturum uyanir (olculdu: aktarim yazildiktan hemen sonra olay).
+  Eskiden `beyin aktar dinle` "dinle" metinli bir aktarim GONDERIRDI; dagitici artik dinleyiciye yonlendirir.
+- **`r yenile`:** alt cubukta her zaman; kaynagi yeniden olcer, maliyet/bugun/aktarim/Claude isci onbelleklerini atar.
+- KILAVUZ: takim kosusu isci sayisi sabit 1-4 degil; `aktar` kalici kayittir ve anlik degildir, bosta Claude oturumunu
+  uyandiran kanal Claude Code oturumlar arasi mesajidir (SendMessage).
+
 ## 1.6.0 - Merkez: istege bagli ses, yardim katmani, filtre, sertlestirilmis guvenlik
 
 Merkez ekrani hala **salt okunurdur**: `onayla` / `baslat` / `birlestir` satirlarini sohbete yine sen yazarsin;

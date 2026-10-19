@@ -110,7 +110,10 @@ Her anlamli oturum iz birakir: ya bir not, ya bir karar, ya guncellenmis bir dos
   baglami), degilse bir sonraki kullanici mesajinda ya da acilista gorur; gonderen
   `-Hedef <proje>` ile sinirlamadikca HER proje klasorunde. Yanit: `aktar "..." -Yanit <id>`;
   kendi turunda yanit beklemek: `aktar -Bekle <id>` ya da gonder-bekle `-VeBekle`;
-  `-Tamam <id>` kapatir. Tamamen bosta duran ajani uyandiran kanal yoktur. `bekci` kaynak
+  `-Tamam <id>` kapatir. `aktar` KALICI kayittir, anlik degildir; bosta duran Claude oturumunu
+  uyandiran canli kanal Claude Code'un oturumlar arasi mesajidir (ListAgents + SendMessage), bosta
+  Codex oturumunu uyandiran kanal yoktur. `kapasite` canli es zamanli ajan onerisi (takim kosusu isci
+  sayisi; `.state\kapasite.json`). `bekci` kaynak
   bekcisi (commit/RAM, bosta oturumlar, yetim doktor, Codex MCP birikimi; YALNIZ
   gosterir, kapatma komutlarini panoya kopyalar), `pano <komut>` ortak gorev panosu
   (AgentChef coordination-board sema v3/v4 sarmalayicisi; tek state `.state/board.json`;

@@ -5829,9 +5829,12 @@ function Get-BeyinKaynakOzeti {
         }
         # Kapi: commit esigi ASILDIYSA ya da 5+ oturum sessizse. Tek sessiz
         # oturum siradan; bes tanesi gercek bir sizinti sinyali.
-        # ONERILEN ES ZAMANLI AJAN: bos RAM GB basina bir ajan, 2-6 araligi (kaba tahmin;
-        # AgentChef routing'e bilgi, kapi degil). Olculemediyse 0.
-        if ($r.BosRamGB -ge 0) { $r.OnerilenAjan = [int][math]::Min(6, [math]::Max(2, [math]::Floor($r.BosRamGB))) }
+        # ONERILEN ES ZAMANLI AJAN (2026-10-19): tek formul Get-BeyinKapasiteOneri - merkez "N ajana yer var",
+        # bekci ve AgentChef takim kosusu (kapasite.json) AYNI sayiyi okur. Eski formul (bos RAM GB, 2-6) commit
+        # %88'de bile 4 oneriyordu; artik commit esigi asildiysa 0-1.
+        $ko = Get-BeyinKapasiteOneri -CommitYuzde $r.CommitYuzde -BosRamGB $r.BosRamGB -CommitEsik $CommitEsik
+        $r.OnerilenAjan = $ko.Onerilen; $r.OneriNeden = $ko.Neden; $r.KapasiteTavan = $ko.Tavan
+        if ($r.Ok -and $Paths -and $Paths.ScrState) { try { Write-BeyinKapasite -Paths $Paths -Kaynak $r } catch { } }
         $r.Esik = (($r.CommitYuzde -ge $CommitEsik) -or ($r.BostaOturum -ge 5))
         if ($r.Esik) {
             $saat = [math]::Round($BostaDk / 60.0, 1)
@@ -5843,6 +5846,39 @@ function Get-BeyinKaynakOzeti {
     } catch { }
     $r.Ms = [int]$sw.ElapsedMilliseconds
     return $r
+}
+
+# ============================================================================
+# KAPASITE (2026-10-19): canli es zamanli ajan onerisi tek kaynaktan.
+# ----------------------------------------------------------------------------
+# Get-BeyinKaynakOzeti her olcumde motor\scripts\.state\kapasite.json yazar (v1). AgentChef team-run (C3)
+# bu dosyayi okur: maxWorkers = min(8, tavan, override ?? onerilen). Dosya 10 dk'dan eskiyse okuyan kendi
+# tahminine duser. Sozlesme: {"v":1,"ts","onerilen","tavan","bosRamGB","commitYuzde","neden"}.
+$script:BeyinKapasiteTavan = 8
+function Get-BeyinKapasiteOneri {
+    param([int]$CommitYuzde = -1, [double]$BosRamGB = -1, [int]$CommitEsik = 85)
+    $t = $script:BeyinKapasiteTavan
+    if ($BosRamGB -lt 0) { return @{ Onerilen = 0; Tavan = $t; Neden = 'kaynak ölçülemedi' } }
+    if ($CommitYuzde -ge $CommitEsik) {
+        $n = $(if ($CommitYuzde -ge $CommitEsik + 5) { 0 } else { 1 })
+        return @{ Onerilen = $n; Tavan = $t; Neden = "commit %$CommitYuzde >= $CommitEsik (bellek dolu)" }
+    }
+    $n = [int][math]::Floor(([double]$BosRamGB - 2.0) / 1.5)
+    $n = [math]::Max(0, [math]::Min($t, $n))
+    return @{ Onerilen = [int]$n; Tavan = $t; Neden = ("boş RAM {0} GB · 2 GB yedek, işçi başına 1,5 GB" -f ([string]$BosRamGB).Replace('.', ',')) }
+}
+function Get-BeyinKapasiteKayit {
+    param([hashtable]$Kaynak)
+    $ts = (Get-Date).AddMinutes(-[double]$Kaynak.OlcumYasiDk)
+    return [ordered]@{ v = 1; ts = $ts.ToString('o', [Globalization.CultureInfo]::InvariantCulture); onerilen = [int]$Kaynak.OnerilenAjan
+        tavan = [int]$(if ($Kaynak.KapasiteTavan) { $Kaynak.KapasiteTavan } else { $script:BeyinKapasiteTavan }); bosRamGB = [double]$Kaynak.BosRamGB
+        commitYuzde = [int]$Kaynak.CommitYuzde; neden = [string]$Kaynak.OneriNeden }
+}
+function Write-BeyinKapasite {
+    param([hashtable]$Paths, [hashtable]$Kaynak)
+    $f = Join-Path $Paths.ScrState 'kapasite.json'
+    if (-not (Test-Path -LiteralPath $Paths.ScrState)) { return }
+    Write-BeyinText -Path $f -Text ((Get-BeyinKapasiteKayit $Kaynak) | ConvertTo-Json -Compress)
 }
 
 # ============================================================================

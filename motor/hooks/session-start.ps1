@@ -614,6 +614,9 @@ try {
     $akAjan = Get-BeyinAgent
     $akProje = $(if ($inVault) { '' } else { Get-BeyinProjectLeaf -Path $cwd -Paths $p })
     # -Isci (v3, 2026-10-12): isci yalniz kendi kartina adresli mesaji alir; sef toWorker'li mesaji almaz.
+    # CANLI UYANDIRMA onerisi (2026-10-19): Claude oturumu Monitor araciyla dinleyiciyi baslatirsa yeni aktarim
+    # geldigi anda uyanir (aktar tek basina yalniz bir sonraki arac/mesajda teslim edilir).
+    if ($akAjan -eq 'claude' -and -not $isciMod) { $parts.Add("[Hafiza] Canli aktarim: Monitor araciyla ``beyin aktar dinle -Kime claude$(if ($akProje) { " -Proje $akProje" })`` baslat (timeout_ms 1800000; suresi dolunca yeniden kur); yeni aktarim gelince bosta oturum uyanir (tek satir onizleme; tam metin: beyin aktar).") }
     $akAcik = @(Get-BeyinHandoffAcik -Paths $p -Kime $akAjan -Proje $akProje -KonumProje (Get-BeyinProjectLeaf -Path $cwd -Paths $p) -Isci $ssTakimKart -OturumKey $st.key)
     $akGorulen = @(@($st.seenHandoff) + @(Get-BeyinTeslimEdilen -Paths $p -SessionKey $st.key))
     $akYeni = @($akAcik | Where-Object { $akGorulen -notcontains [string]$_.id })

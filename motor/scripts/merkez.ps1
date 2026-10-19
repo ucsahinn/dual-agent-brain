@@ -392,7 +392,7 @@ function SekmeCipleri($a) {
     $parca = @()
     for ($i = 0; $i -lt $sekmeler.Count; $i++) {
         $s = $sekmeler[$i]
-        $sayi = switch ($s) { 'Ajanlar' { [int]$a.Sayac['calisiyor'] } 'Kosular' { @($a.Kosular | Where-Object { -not $_.Bitmis }).Count } 'Olaylar' { [Math]::Min(99, $script:yeniOlay) } default { 0 } }
+        $sayi = switch ($s) { 'Ajanlar' { [int]$a.Sayac['calisiyor'] } 'Kosular' { @($a.Kosular | Where-Object { -not $_.Bitmis }).Count + @($a.ClaudeIsler | Where-Object { $_ -and $_.Durum -eq 'calisiyor' }).Count } 'Olaylar' { [Math]::Min(99, $script:yeniOlay) } default { 0 } }
         $sayiS = $(if ($sayi -gt 0) { "$(if ($s -eq 'Olaylar') { $cInfo } else { $cFaint }) $sayi$RS" } else { '' })   # "Ajanlar 4": sayi soluk, tus numarasi parlak oldugu icin karismaz
         $parca += $(if ($s -eq $script:sekmeAktif) { "$bgSel$cAccent$BOLD $($i + 1) $($sekmeAd[$s])$RS$bgSel$sayiS$bgSel $RS" } else { "$cFaint$($i + 1)$RS $cMuted$($sekmeAd[$s])$RS$sayiS" })
     }
@@ -490,6 +490,7 @@ function EgilimSerit([double[]]$v, [int]$gen) {
     return (Spark ([double[]]@($son | ForEach-Object { $_ - $mn + 1 })) $gen $rgbAcc $rgbOk ($mx - $mn + 1))
 }
 function BolumKartlar($L, $a) {
+    $claudeCalisan = @($a.ClaudeIsler | Where-Object { $_ -and $_.Durum -eq 'calisiyor' }).Count
     $w = $script:w; $ic = $w - 4; $n = { param($k) $(if ($a.Sayac.ContainsKey($k)) { [int]$a.Sayac[$k] } else { 0 }) }
     $calisan = & $n 'calisiyor'; $toplam = $a.Ajanlar.Count
     $lid = @($a.Ajanlar | Where-Object { $_.Tur -eq 'lider' -and $_.Durum -ne 'kapali' }).Count; $isc = @($a.Ajanlar | Where-Object { $_.Tur -eq 'isci' }).Count
@@ -503,7 +504,7 @@ function BolumKartlar($L, $a) {
             "$cPeach${BOLD}Claude$RS $cText$nClaude$RS$cFrame  ·  $RS$cTeal${BOLD}Codex$RS $cText$nCodex$RS",
             "$(EgilimSerit ([double[]]$script:gecmis.Cal.ToArray()) 12) ${cFaint}son 6 dk$RS$cMuted · $lid oturum$RS$(if ($isc) { "$cMuted · $RS$cTeal$isc işçi$RS" })") }
         @{ t = '🏃 KOŞULAR'; l = @("$cText$BOLD$($acikKosu.Count)$RS$cMuted açık$RS$(if ($a.Kosular.Count - $acikKosu.Count) { "$cFaint · $($a.Kosular.Count - $acikKosu.Count) biten$RS" })",
-            $(if ($kIsci) { "$cOk$kIsci işçi çalışıyor$RS" } else { "${cFaint}çalışan işçi yok$RS" }),
+            $(if ($kIsci -or $claudeCalisan) { "$cOk$(@($(if ($kIsci) { "$kIsci takım işçisi" }), $(if ($claudeCalisan) { "$claudeCalisan Claude işi" }) | Where-Object { $_ }) -join ' · ') çalışıyor$RS" } else { "${cFaint}çalışan işçi yok$RS" }),
             $(if ($sonBiten.Count) { "$cMuted$(Protect-MerkezSatir ([string]$sonBiten[0].RunId) 16)$RS $cFaint· $(KosuRozetMetin ([string]$sonBiten[0].Rozet))$RS" } else { "${cFaint}son 6 saatte biten yok$RS" })) }
         @{ t = $(if ($a.Onaylar.Count) { '🔔 ONAYLAR' } else { '🔔 ONAYLAR ✓' }); r = $(if ($a.Onaylar.Count) { $cWarn } else { '' }); l = @($(if ($a.Onaylar.Count) { "$cWarn$BOLD$($a.Onaylar.Count)$RS$cWarn senden bekleniyor$RS" } else { "$cOk✓ bekleyen yok$RS" }),
             $(if ($a.Onaylar.Count) { "$cText$BOLD$(Protect-MerkezSatir ([string]$a.Onaylar[0].Satir) 30)$RS" } else { "${cFaint}onay gelince burada çıkar$RS" }),
@@ -528,7 +529,7 @@ function BolumKartlar($L, $a) {
     $kartlar += @{ t = "📋 PANO · AKTARIM$(if ($eskiAkt) { ' ▲' })"; tr = $(if ($eskiAkt) { $cWarn } else { '' }); l = @("$cText$BOLD$($a.Kartlar.Count)$RS$cMuted açık kart$RS$(if (@($a.Kartlar | Where-Object { $_.status -eq 'review' }).Count) { "$cWarn · $(@($a.Kartlar | Where-Object { $_.status -eq 'review' }).Count) incelemede$RS" })",
         "$cText$BOLD$($a.Aktarimlar.Count)$RS$cMuted açık aktarım$RS",
         $(if ($enEski) { "${cFaint}en eskisi $(KisaYas ((Get-Date) - $enEski.T).TotalSeconds) önce$(if ($enEski.P) { " · $(Protect-MerkezSatir $enEski.P 16)" })$RS" } else { "${cFaint}bekleyen aktarım yok$RS" })) }
-    $sessiz = (-not $a.Kosular.Count -and -not $a.Onaylar.Count)
+    $sessiz = (-not $a.Kosular.Count -and -not $a.Onaylar.Count -and -not $claudeCalisan)   # Claude Workflow/Agent iscisi calisirken 'koşu yok' denmez
     if ($sessiz) { $kartlar = @($kartlar | Where-Object { $_.t -notmatch 'KOŞULAR|ONAYLAR' }) }
     if ($w -ge 120) {
         foreach ($ln in (Cards $kartlar $ic 36)) { $L.Add((Row $ln $w)) }   # 36: alti kart tek sirada metni kesiyordu
@@ -582,6 +583,9 @@ function BolumTeshis($L, $bolumBas, $a, [int]$maks) {
         $an = "teshis:$(TeshisAnahtar $t)"; $sc = SecKayit 'teshis' $an $t; $ilk = $true
         $mt = Protect-MerkezSatir ([string]$t.Metin) 400; $kmt = ''
         if ($mt -match '^(.*?)\s*·\s*(beyin [^·]+)$') { $mt = $Matches[1]; $kmt = $Matches[2].Trim() }
+        if ($kmt -match '^beyin (\S+)' -and $a.Bugun -and $a.Bugun.SonCalisma -and $a.Bugun.SonCalisma.ContainsKey($Matches[1])) {
+            $mt += " · son çalıştırma $(KisaYas ((Get-Date) - [datetime]$a.Bugun.SonCalisma[$Matches[1]]).TotalSeconds) önce"   # komut calisti mi: makbuzdan, canli
+        }
         $tek = $(if ($kmt) { "$mt$cFrame  →  $RS$cAccent$BOLD$kmt" } else { $mt })
         if ($kmt -and (VisLen "$mt  →  $kmt") -le ($ic - 2)) { $L.Add((Row (Vurgu "$icn $cText$tek$RS" $ic $sc $an) $w)) }
         else {
@@ -704,8 +708,29 @@ function KosuSatirlari($L, $k, [bool]$isciler, $a) {
     }
     $L.Add((Blank $w))
 }
+function BolumClaudeIsler($L, $bolumBas, $a, [bool]$yalnizCalisan) {
+    # Claude Code Workflow kosulari ve Agent alt ajanlari (takim kosusu disindaki isciler). Genel'de yalniz calisanlar.
+    $w = $script:w; $ci = @($a.ClaudeIsler | Where-Object { $_ }); if (-not $ci.Count) { return }
+    $calisan = @($ci | Where-Object { $_.Durum -eq 'calisiyor' })
+    if ($yalnizCalisan -and -not $calisan.Count) { return }
+    $digeri = @($ci | Where-Object { $_.Durum -ne 'calisiyor' } | Sort-Object -Property @{ Expression = { $_.Son }; Descending = $true })
+    $goster = @($calisan) + @($(if ($yalnizCalisan) { @() } else { $digeri | Select-Object -First $(if ($script:hepsi.Kosular) { 40 } else { 4 }) }))
+    Bolum $L $bolumBas 'CLAUDE' "🤖 CLAUDE İŞÇİLERİ ($($calisan.Count) çalışıyor · son 2 sa $($ci.Count))"
+    $don = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    foreach ($c in $goster) {
+        $ikon = switch ([string]$c.Durum) { 'calisiyor' { $script:CizCanli = $true; "$cOk$($don[[int]($script:tik % 10)])$RS" } 'hatali' { "$cErr✕$RS" } 'sessiz' { "$cWarn◷$RS" } default { "$cFaint✓$RS" } }
+        $durS = switch ([string]$c.Durum) { 'calisiyor' { "${cOk}çalışıyor$RS" } 'hatali' { "${cErr}hatayla bitti$RS" } 'sessiz' { "${cWarn}sessiz$RS" } default { "${cFaint}bitti$RS" } }
+        $sayi = $(if ($c.Tur -eq 'workflow') { "$($c.Biten)/$($c.Toplam) bitti$(if ($c.Hata) { " · $($c.Hata) hata" })$(if ($c.Calisan) { " · $($c.Calisan) açık" })" } else { "$($c.Toplam) ajan$(if ($c.Calisan) { " · $($c.Calisan) açık" })" })
+        $ek = @(); if ($c.Ad) { $ek += (Protect-MerkezSatir ([string]$c.Ad) 60) }; if ($c.Faz) { $ek += "faz $(Protect-MerkezSatir ([string]$c.Faz) 20)" }
+        $ek += "$(KisaYas ((Get-Date) - [datetime]$c.Son).TotalSeconds) önce"
+        $L.Add((Row "  $ikon $cPeach$BOLD$(Pad (Protect-MerkezSatir ([string]$c.Proje) 18) 18)$RS $cMuted$(Pad $(if ($c.Tur -eq 'workflow') { 'workflow' } else { 'ajan' }) 8)$RS $(Pad $durS 13) $cText$(Pad $sayi 26)$RS $cFaint$($ek -join ' · ')$RS" $w))
+    }
+    if (-not $yalnizCalisan -and $goster.Count -lt $ci.Count) { $L.Add((Row "$cFaint  +$($ci.Count - $goster.Count) biten daha · a hepsi$RS" $w)) }
+    $L.Add((Blank $w))
+}
 function BolumKosular($L, $bolumBas, $a, [bool]$hepsi, [bool]$isciler) {
     $w = $script:w
+    BolumClaudeIsler $L $bolumBas $a (-not $isciler)   # Claude Code Workflow/Agent iscileri: takim kosulariyla ayni yerde
     if (-not $a.Kosular.Count) {
         if ($isciler) {
             Bolum $L $bolumBas 'KOŞULAR' '🏃 KOŞULAR (0)'
@@ -866,7 +891,7 @@ function YardimIcerik($L) {
     $L.Add((Row "${cMuted}Tuşlar$RS" $w))
     foreach ($t in @(@('Tab · 1-4', 'sekme: Genel, Ajanlar, Koşular, Olaylar'), @('↑ ↓ · j k', 'satır seç (Olaylar sekmesinde kaydır)'), @('Enter', 'ayrıntı · işçi paneli · koşu panosu · aktarımın tam metni'),
             @('Esc', 'ayrıntıyı kapat'), @('c', 'seçili satırın güvenli komutunu panoya kopyala (çalıştırmaz)'), @('g', 'ilk soruna atla'), @('f', 'kanat filtresi: hepsi → sorunlu → Claude → Codex'),
-            @('p', 'koşu panosu'), @('a', 'boştakileri / biten koşuları göster-gizle'), @('PgUp PgDn', 'olay listesini kaydır'), @('r', 'hemen tazele'), @('q', 'çık'))) { $L.Add((Row (& $sat $t[0] $t[1]) $w)) }
+            @('p', 'koşu panosu'), @('a', 'boştakileri / biten koşuları göster-gizle'), @('PgUp PgDn', 'olay listesini kaydır'), @('r', 'yenile: kaynağı yeniden ölçer, tüm verileri yeniden okur'), @('q', 'çık'))) { $L.Add((Row (& $sat $t[0] $t[1]) $w)) }
     $L.Add((Blank $w))
     $L.Add((Row "${cMuted}Renkler ve simgeler$RS" $w))
     # parcalar satira sigdigi kadar yan yana; sigmayan alt satira (dar pencerede metin kesilmez)
@@ -950,7 +975,7 @@ function BolumAlt($L, $a, [int]$h) {
         $gizli = @($a.Ajanlar | Where-Object { $_.Durum -in @('bosta', 'kapali', 'bitti') }).Count
         $par += (& $tk 'a' $(if ($script:sekmeAktif -eq 'Kosular') { $(if ($script:hepsi.Kosular) { 'biten koşuları gizle' } else { 'biten koşuları göster' }) } elseif ($script:hepsi[$script:sekmeAktif]) { 'boştakileri gizle' } else { "boştakileri göster (+$gizli)" }))
     }
-    $par += (& $tk '?' 'yardım'); $par += (& $tk 'q' 'çık')
+    $par += (& $tk 'r' 'yenile'); $par += (& $tk '?' 'yardım'); $par += (& $tk 'q' 'çık')
     $tus = "$msj$($par -join $ay)$durumS"
     if ((VisLen $tus) -gt $w - 6) { $tus = "$msj$((@($par | Select-Object -First 3) + @((& $tk '?' 'yardım'), (& $tk 'q' 'çık'))) -join $ay)$durumS" }
     if ((VisLen $tus) -gt $w - 6) { $tus = Cut $tus ($w - 6) }
@@ -1085,7 +1110,7 @@ function TusIsle($kk) {
         '1' { SekmeGec 'Genel' } '2' { SekmeGec 'Ajanlar' } '3' { SekmeGec 'Kosular' } '4' { SekmeGec 'Olaylar' }
         'j' { SecimKaydir 1 } 'k' { SecimKaydir -1 }
         'a' { $script:hepsi[$script:sekmeAktif] = -not $script:hepsi[$script:sekmeAktif] }
-        'r' { [void]$script:onb.Remove('ts:Aktarimlar'); [void]$script:onb.Remove('ts:Kaynak'); Tazele $true; Mesaj 'tazelendi' $cOk }
+        'r' { foreach ($k in @('ts:Aktarimlar', 'ts:Kaynak', 'Maliyet', 'Bugun', 'ClaudeIsler', 'SonKosu')) { [void]$script:onb.Remove($k) }; $script:onb.KaynakTaze = $true; $script:bolumOnb = @{}; $script:lastFrame = ''; Tazele $true; Mesaj "yenilendi · $((Get-Date).ToString('HH:mm:ss')) · kaynak yeniden ölçüldü" $cOk }
         'c' { $o = Secili; if ($o) { Kopyala $o } else { Mesaj 'önce ↑↓ ile bir satır seç' } }
         'p' { KosuPanosu (Secili) }
         '?' { $script:yardimAcik = -not $script:yardimAcik }

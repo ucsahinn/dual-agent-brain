@@ -308,7 +308,7 @@ function Get-MerkezEskiAktarim($Aktarimlar, [datetime]$Simdi = (Get-Date)) {
     if (-not $eski.Count) { return $null }
     $eh = @($eski | Sort-Object -Property @{ Expression = { $_.T } })[0].H
     $bas = $(if ($eski.Count -gt 1) { "$($eski.Count) aktarım 3 günden eski · en eskisi " } else { 'aktarım 3 günden eski · ' })
-    return @{ Seviye = 'warn'; Metin = "$bas$($eh.id)$(if ($eh.toProject) { " ($($eh.toProject))" }) · oku; kapatma komutunu satırda c ile kopyala · beyin aktar" }
+    return @{ Seviye = 'warn'; Metin = "$bas$($eh.id)$(if ($eh.toProject) { " ($($eh.toProject))" }) · oku: beyin aktar · c kapatma komutunu kopyalar · beyin aktar -Tamam $($eh.id)" }
 }
 
 function ConvertTo-MerkezOlay($Kayit) {
@@ -430,8 +430,93 @@ function Test-MerkezPidCanli([int]$ProcessId, [hashtable]$Onbellek, [datetime]$S
     return [bool]$Onbellek.Pidler[[int]$ProcessId]
 }
 
+# ---------------------------------------------------------------------------------------------------------
+# CLAUDE ISCILERI (2026-10-19): Claude Code Workflow kosulari ve Agent araciyla acilan alt ajanlar. Bunlar
+# takim kosusu kaydi (team-runs) birakmaz; kendi dosyalarini ~/.claude/projects/<proje>/<oturum>/subagents
+# altina yazar. Salt okunur: yalniz dosya adi/zamani, journal.jsonl olay satirlari ve meta.json okunur;
+# transkript icerigi okunmaz. Durum: journal'da started - (result + failed) > 0 ve son yazim CanliSn icinde.
+# ---------------------------------------------------------------------------------------------------------
+$script:MerkezJournalOnb = @{}
+$script:MerkezRxJTur = [regex]'"type"\s*:\s*"(\w+)"'
+$script:MerkezRxJEtiket = [regex]'"label"\s*:\s*"((?:[^"\\]|\\.)*)"'
+$script:MerkezRxJFaz = [regex]'"phase"\s*:\s*"((?:[^"\\]|\\.)*)"'
+function Get-MerkezProjeAd([string]$Klasor) {
+    # "C--Users-ali-Desktop-ornek-proje" -> "ornek-proje"; "C--" -> "kök"
+    if ($Klasor -match '^[A-Za-z]--Users-[^-]+$') { return 'ev' }
+    $n = $Klasor -replace '^[A-Za-z]--Users-[^-]+-', '' -replace '^(Desktop|Documents|OneDrive|Masaustu|Belgeler)-', '' -replace '^[A-Za-z]--$', ''
+    if (-not $n) { $n = 'kök' }
+    return $n
+}
+function Read-MerkezJournal([IO.FileInfo]$Dosya) {
+    $k = "$($Dosya.Length)|$($Dosya.LastWriteTimeUtc.Ticks)"
+    if ($script:MerkezJournalOnb.ContainsKey($Dosya.FullName) -and $script:MerkezJournalOnb[$Dosya.FullName].K -eq $k) { return $script:MerkezJournalOnb[$Dosya.FullName].O }
+    $o = @{ Basladi = 0; Bitti = 0; Hata = 0; Ad = ''; Faz = '' }; $adlar = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($sat in [IO.File]::ReadLines($Dosya.FullName)) {
+            $m = $script:MerkezRxJTur.Match($sat); if (-not $m.Success) { continue }
+            switch ($m.Groups[1].Value) {
+                'started' {
+                    $o.Basladi++
+                    $e = $script:MerkezRxJEtiket.Match($sat); if ($e.Success) { $on = ($e.Groups[1].Value -split '[:/ ]')[0]; if ($on -and -not $adlar.Contains($on)) { $adlar.Add($on) } }
+                    $f = $script:MerkezRxJFaz.Match($sat); if ($f.Success) { $o.Faz = $f.Groups[1].Value }
+                }
+                'result' { $o.Bitti++ }
+                'failed' { $o.Hata++ }
+            }
+        }
+    } catch { }
+    $o.Ad = (@($adlar | Select-Object -First 4) -join ', ')
+    if ($script:MerkezJournalOnb.Count -gt 200) { $script:MerkezJournalOnb.Clear() }
+    $script:MerkezJournalOnb[$Dosya.FullName] = @{ K = $k; O = $o }
+    return $o
+}
+function Read-MerkezAjanMeta([string]$JsonlYol) {
+    $m = $JsonlYol -replace '\.jsonl$', '.meta.json'
+    try { if ([IO.File]::Exists($m)) { $j = [IO.File]::ReadAllText($m) | ConvertFrom-Json; $d = [string]$j.description; if (-not $d) { $d = [string]$j.agentType }; return $d } } catch { }
+    return ''
+}
+function Get-MerkezClaudeIsler {
+    param([string]$Kok = (Join-Path $env:USERPROFILE '.claude\projects'), [datetime]$Simdi = (Get-Date), [int]$PencereDk = 120, [int]$CanliSn = 180)
+    $L = New-Object System.Collections.Generic.List[object]
+    if (-not $Kok -or -not [IO.Directory]::Exists($Kok)) { return ,$L }
+    $sinir = $Simdi.ToUniversalTime().AddMinutes(-$PencereDk); $canliSinir = $Simdi.ToUniversalTime().AddSeconds(-$CanliSn)
+    foreach ($pd in [IO.Directory]::EnumerateDirectories($Kok)) {
+        $proje = Get-MerkezProjeAd ([IO.Path]::GetFileName($pd))
+        foreach ($sd in [IO.Directory]::EnumerateDirectories($pd)) {
+            $sub = [IO.Path]::Combine($sd, 'subagents'); if (-not [IO.Directory]::Exists($sub)) { continue }
+            $oturum = [IO.Path]::GetFileName($sd)
+            $wfk = [IO.Path]::Combine($sub, 'workflows')
+            if ([IO.Directory]::Exists($wfk)) {
+                foreach ($wd in [IO.Directory]::EnumerateDirectories($wfk)) {
+                    $j = New-Object IO.FileInfo ([IO.Path]::Combine($wd, 'journal.jsonl'))
+                    if (-not $j.Exists) { continue }
+                    $son = $j.LastWriteTimeUtc
+                    foreach ($f in (New-Object IO.DirectoryInfo $wd).EnumerateFiles('agent-*.jsonl')) { if ($f.LastWriteTimeUtc -gt $son) { $son = $f.LastWriteTimeUtc } }
+                    if ($son -lt $sinir) { continue }
+                    $o = Read-MerkezJournal $j
+                    $acik = [Math]::Max(0, $o.Basladi - $o.Bitti - $o.Hata); $canli = ($acik -gt 0 -and $son -gt $canliSinir)
+                    $durum = $(if ($canli) { 'calisiyor' } elseif ($acik -gt 0) { 'sessiz' } elseif ($o.Hata) { 'hatali' } else { 'bitti' })
+                    $L.Add(@{ Tur = 'workflow'; Kimlik = [IO.Path]::GetFileName($wd); Proje = $proje; Oturum = $oturum; Ad = $o.Ad; Faz = $o.Faz; Toplam = $o.Basladi; Biten = $o.Bitti; Hata = $o.Hata
+                              Calisan = $(if ($canli) { $acik } else { 0 }); Durum = $durum; Son = $son.ToLocalTime() })
+                }
+            }
+            # workflow disi: Agent araciyla acilan alt ajanlar, oturum basina tek satir
+            $top = 0; $can = 0; $sonA = [datetime]::MinValue; $adlar = New-Object System.Collections.Generic.List[string]
+            foreach ($f in (New-Object IO.DirectoryInfo $sub).EnumerateFiles('agent-*.jsonl')) {
+                if ($f.LastWriteTimeUtc -lt $sinir) { continue }
+                $top++; if ($f.LastWriteTimeUtc -gt $sonA) { $sonA = $f.LastWriteTimeUtc }
+                if ($f.LastWriteTimeUtc -gt $canliSinir) { $can++; if ($adlar.Count -lt 3) { $d = Read-MerkezAjanMeta $f.FullName; if ($d) { $adlar.Add($d) } } }
+            }
+            if ($top) {
+                $L.Add(@{ Tur = 'ajan'; Kimlik = "ajan:$oturum"; Proje = $proje; Oturum = $oturum; Ad = (@($adlar) -join ', '); Faz = ''; Toplam = $top; Biten = $top - $can; Hata = 0
+                          Calisan = $can; Durum = $(if ($can) { 'calisiyor' } else { 'bitti' }); Son = $sonA.ToLocalTime() })
+            }
+        }
+    }
+    return ,$L
+}
 function Get-MerkezAnlik {
-    param([hashtable]$Paths, [int]$SonKosuSaat = 6, [switch]$Hizli, [hashtable]$Onbellek, [string]$AyrintiAnahtar = '')
+    param([hashtable]$Paths, [int]$SonKosuSaat = 6, [switch]$Hizli, [hashtable]$Onbellek, [string]$AyrintiAnahtar = '', [string]$ClaudeKok = '')
     # -AyrintiAnahtar 'Tur:Kosu:Ad': yalniz o ajanin ayrintisi (son adimlar, jeton, bekleme) hesaplanir; hizli turda da (onbellekli).
     # $Onbellek: yavas veriler (pano, aktarim, kaynak, maliyet, balon) icin cagiran tarafin tuttugu sozluk.
     # -Hizli: yavas verileri onbellekten al, yalniz koşu + oturum + surec canliligini tazele.
@@ -508,6 +593,12 @@ function Get-MerkezAnlik {
         } catch { }
     }
     $a.SonKosu = $Onbellek.SonKosu
+    # Claude Code Workflow / Agent iscileri: tam turda taranir (~0,1 sn), hizli turda onbellekten
+    if (-not $Hizli -or -not $Onbellek.ContainsKey('ClaudeIsler')) {
+        $kok = $(if ($ClaudeKok) { $ClaudeKok } elseif ($env:BEYIN_CLAUDE_PROJE_KOK) { $env:BEYIN_CLAUDE_PROJE_KOK } else { Join-Path $env:USERPROFILE '.claude\projects' })
+        try { $Onbellek.ClaudeIsler = Get-MerkezClaudeIsler -Kok $kok -Simdi $simdi } catch { $Onbellek.ClaudeIsler = (New-Object System.Collections.Generic.List[object]) }
+    }
+    $a.ClaudeIsler = $Onbellek.ClaudeIsler
 
     # --- liderler: oturum dosyalari (hizli) ---
     foreach ($f in @($(if ($Paths.Sessions -and (Test-Path -LiteralPath $Paths.Sessions)) { Get-ChildItem -LiteralPath $Paths.Sessions -Filter '*.json' -File -ErrorAction SilentlyContinue }) | Where-Object { $_.LastWriteTime -ge $simdi.AddHours(-24) })) {
@@ -602,7 +693,8 @@ function Get-MerkezAnlik {
     $tazeKay = $Onbellek.ContainsKey('ts:Kaynak') -and ($simdi - $Onbellek['ts:Kaynak']).TotalSeconds -lt 20
     if ($Onbellek.ContainsKey('Kaynak') -and ($Hizli -or $tazeKay)) { $a.Kaynak = $Onbellek.Kaynak } else {
         $Onbellek['ts:Kaynak'] = $simdi
-        $yeniK = $null; try { $yeniK = Get-BeyinKaynakOzeti -Paths $Paths } catch { $yeniK = $null }
+        $taze = [bool]$Onbellek.KaynakTaze; $Onbellek.KaynakTaze = $false
+        $yeniK = $null; try { $yeniK = Get-BeyinKaynakOzeti -Paths $Paths -OnbellekDk $(if ($taze) { 0 } else { 1 }) } catch { $yeniK = $null }   # panel en cok 1 dk eski olcum gosterir; r yeniden olcer
         # yuk altinda olcum ara sira bos doner (CIM zaman asimi): 10 dk'ya kadar son iyi olcum kalir, yoksa bellek alarmi
         # bir kaybolup bir gelir ve her geliste yeniden bildirim/nabiz tetiklenirdi
         if ((-not $yeniK -or -not $yeniK.Ok) -and $Onbellek.Kaynak -and $Onbellek.Kaynak.Ok -and $Onbellek.ContainsKey('ts:KaynakIyi') -and ($simdi - $Onbellek['ts:KaynakIyi']).TotalMinutes -lt 10) { $yeniK = $Onbellek.Kaynak }
@@ -617,7 +709,7 @@ function Get-MerkezAnlik {
     if ($a.Kaynak -and $a.Kaynak.Ok) {
         if ($a.Kaynak.CommitYuzde -ge 85) {
             $enCok = Get-MerkezBellekDokum $Onbellek $simdi
-            $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = 'commit'; Metin = "bellek (commit) %$($a.Kaynak.CommitYuzde)$(if ($enCok) { ' · en çok: ' + $enCok }) · beyin bekci" })
+            $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = 'commit'; Metin = "bellek (commit) %$($a.Kaynak.CommitYuzde)$(if ($enCok) { ' · en çok: ' + $enCok }) · bekçi listeler, kapatma kararı senin · beyin bekci" })
         }
         if ($a.Kaynak.BostaOturum -ge 5) { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "son 24 saatte açılmış $($a.Kaynak.BostaOturum) oturum 2+ saattir sessiz (kapanmış olabilir) · beyin bekci" }) }
     }
@@ -698,7 +790,7 @@ function Get-MerkezGunSayac([string]$MakbuzDizin, [datetime]$Gun, [hashtable]$On
     $ad = $Gun.ToString('yyyy-MM-dd'); $k = "gun:$ad"
     if (-not $Onbellek.ContainsKey($k)) {
         $Onbellek[$k] = @{ Ofset = [long]0; Oturum = (New-Object int[] 1440); Ozet = (New-Object int[] 1440); Yayin = (New-Object int[] 1440)
-                           Derleme = (New-Object int[] 1440); Hata = (New-Object int[] 1440); Engel = (New-Object int[] 1440); Anahtar = (New-Object 'System.Collections.Generic.HashSet[string]') }
+                           Derleme = (New-Object int[] 1440); Hata = (New-Object int[] 1440); Engel = (New-Object int[] 1440); Anahtar = (New-Object 'System.Collections.Generic.HashSet[string]'); Son = @{} }
     }
     $d = $Onbellek[$k]
     try {
@@ -718,6 +810,9 @@ function Get-MerkezGunSayac([string]$MakbuzDizin, [datetime]$Gun, [hashtable]$On
                     'yayinla/YAYIN_OK' { $d.Yayin[$dk]++ }
                     'compile/COMPILE_OK' { $d.Derleme[$dk]++ }
                 }
+                # onerilen komutun son calismasi: aktar yalniz kapatinca sayilir (listeleme/gosterim her turda yazilir, kanit degildir)
+                $sonAd = $(if ($sc -eq 'aktar') { $(if ($oc -eq 'AKTAR_TAMAM') { 'aktar' } else { '' }) } else { $sc })
+                if ($sonAd -and (-not $d.Son.ContainsKey($sonAd) -or $t -gt $d.Son[$sonAd])) { $d.Son[$sonAd] = $t }
                 if ($oc -match 'HATA|DUSTU|BOZUK') { $d.Hata[$dk]++ } elseif ($oc -eq 'RED') { $d.Engel[$dk]++ }   # kill guard engeli hata degil
             }
             $d.Ofset = $r.Ofset
@@ -803,6 +898,7 @@ function Get-MerkezBugun([hashtable]$Paths, [hashtable]$Onbellek, $Ajanlar, [dat
     $dk = $Simdi.Hour * 60 + $Simdi.Minute
     if ($Paths.Makbuz) {
         $g = Get-MerkezGunSayac $Paths.Makbuz $Simdi.Date $Onbellek; $y = Get-MerkezGunSayac $Paths.Makbuz $Simdi.Date.AddDays(-1) $Onbellek
+        $b.SonCalisma = $g.Son
         $tk = "bugun-top:$($g.Ofset)|$($y.Ofset)|$dk|$($Simdi.ToString('yyyyMMdd'))"
         if ($Onbellek.ContainsKey($tk)) { foreach ($e in $Onbellek[$tk].GetEnumerator()) { $b[$e.Key] = $e.Value } }
         else {

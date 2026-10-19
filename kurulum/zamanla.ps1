@@ -233,6 +233,14 @@ $ayar = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances Igno
 $n = 0
 $eksikRota = 0
 $basarisiz = New-Object System.Collections.Generic.List[string]
+function Get-BeyinGorevEylemi([string]$Arg) {
+    # Gorev eylemi: Windows 10 2004+ / 11'de conhost --headless (pencere yok); aksi halde powershell.exe
+    $ch = Join-Path $env:windir 'System32\conhost.exe'
+    if ((Test-Path -LiteralPath $ch) -and [Environment]::OSVersion.Version.Build -ge 19041) {
+        return (New-ScheduledTaskAction -Execute $ch -Argument "--headless powershell.exe $Arg")
+    }
+    return (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $Arg)
+}
 foreach ($g in $GOREVLER) {
     $ad = Gorev-Adi $g.Ad
     # 'yedek' ARTIK HER ZAMAN KAYDEDILIR (2026-09-18).
@@ -265,9 +273,13 @@ foreach ($g in $GOREVLER) {
     $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dispatcher`" zamanli $komut"
     $saat = [datetime]::ParseExact($g.Saat, 'HH:mm', [Globalization.CultureInfo]::InvariantCulture)
     $tetik = if ($g.Gun) { New-ScheduledTaskTrigger -Weekly -DaysOfWeek $g.Gun -At $saat } else { New-ScheduledTaskTrigger -Daily -At $saat }
-    $eylem = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
+    # PENCERESIZ (2026-10-19): Windows 11'de varsayilan terminal Windows Terminal; Gorev Zamanlayici
+    # powershell.exe'yi baslatinca -WindowStyle Hidden devreye girmeden bir konsol penceresi aciliyordu (her
+    # gece 03:00-05:30 arasi 12 pencere). conhost --headless konsolu hic pencere acmadan barindirir
+    # (olculdu: yeni OpenConsole/WindowsTerminal sureci 0). Eski Windows'ta duz powershell.exe kalir.
+    $eylem = Get-BeyinGorevEylemi -Arg $arg
     "  {0,-22} {1} {2,-7} {3}" -f $ad, $g.Saat, $(if ($g.Gun) { $g.Gun } else { 'her gun' }), $g.Aciklama
-    if ($KuruCalisma) { "      powershell.exe $arg"; $n++; continue }
+    if ($KuruCalisma) { "      $($eylem.Execute) $($eylem.Arguments)"; $n++; continue }
     # KAYIT DOGRULANIR (olculdu 2026-09-17): eskiden sonuc hic kontrol
     # edilmiyor, `$n++` kosulsuz calisiyordu. Bir kayit basarisiz olsa bile
     # (hemen once Unregister edilmis bir gorevle yaris, yetki, ad cakismasi)

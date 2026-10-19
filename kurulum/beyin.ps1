@@ -109,6 +109,10 @@ TANI
   maliyet [gun]    Iki ajanin jeton kullanimi + API esdegeri maliyet: gun/proje/oturum, oturum basi sabit yuk,
                    200K baglami asan oturumlar (artimli tarama; model cagirmaz; -Json, -YalnizTara)
   geri-getirme-olc Geri getirme holdout olcumu: vektor/kelime rank-1, bos donus; -Dondur fixture uretir, -Esik 0.8
+  aktar dinle      Canli uyandirma: yeni aktarim gelince tek satir basar (Claude Code Monitor araciyla baslat:
+                   beyin aktar dinle -Kime claude [-Proje x]); tam metni basmaz, hicbir sey yazmaz
+  kapasite         Canli es zamanli ajan onerisi (bos RAM + commit esigi, tek formul); -Json makine icin.
+                   .state\kapasite.json'u tazeler; AgentChef takim kosusu isci sayisini buradan alir
   bekci            Kaynak bekcisi: commit/RAM, bosta oturumlar, yetim doktor, Codex MCP birikimi, disk raporu;
                    YALNIZ GOSTERIR, kapatma komutlarini panoya kopyalar (-BostaDk n, -Json, -PanoyaKopyalama)
 
@@ -529,6 +533,11 @@ switch ($KomutN) {
         foreach ($x in $PA) { $tkArg += [string]$x.T }
         Cagir 'takim.ps1' $tkArg
     }
+    { $_ -in @('kapasite', 'capacity') } {
+        # beyin kapasite [-Json] - canli es zamanli ajan onerisi; .state\kapasite.json'u tazeler (AgentChef okur)
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault') -Bayrak @('-json') -Slot 0
+        Cagir 'kapasite.ps1' @($a.Gecen)
+    }
     { $_ -in @('bekci', 'watchdog') } {
         # beyin bekci [-BostaDk n] [-Json] [-PanoyaKopyalama]  - yalniz gosterir, hicbir sureci kapatmaz
         $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-bostadk') -Bayrak @('-json', '-panoyakopyalama') -Slot 0
@@ -651,6 +660,14 @@ switch ($KomutN) {
         Cagir 'niyet.ps1' $nArgs
     }
     { $_ -in @('aktar', 'handoff') } {
+        # beyin aktar dinle -Kime claude|codex [-Proje x] : canli uyandirma (Monitor araci). "dinle" metin SAYILMAZ:
+        # eskiden bu cagri "dinle" metinli bir aktarim GONDERIRDI.
+        if (@($PA).Count -and ([string]$PA[0].T).ToLowerInvariant() -eq 'dinle') {
+            $kalan = @($PA | Select-Object -Skip 1)
+            $a = Ayristir -KomutAdi 'aktar dinle' -Parcalar $kalan -Deger @('-vault', '-kime', '-proje', '-sure') -Bayrak @() -Slot 0
+            Cagir 'aktar-dinle.ps1' @($a.Gecen)
+            break
+        }
         # beyin aktar "soru" -Kime claude|codex [-Kanit ..] [-Kapsam ..] [-Risk ..] [-Sonraki ..] [-Proje x]
         # beyin aktar [-Hepsi]  |  beyin aktar -Tamam <id>
         # niyet rotasiyla ayni kural: adli degerler disindaki TUM konumsal parcalar metindir.

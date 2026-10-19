@@ -148,7 +148,7 @@ if ($Json) { $rapor | ConvertTo-Json -Depth 5; exit 0 }
 "BEKCI  $((Get-Date).ToString('yyyy-MM-dd HH:mm', $inv))  |  vault: $(Split-Path $Vault -Leaf)  |  yalniz GOSTERIR, hicbir sureci kapatmaz"
 ''
 "KAYNAK   commit %$($k.CommitYuzde) ($($k.CommitGB)/$($k.CommitTavanGB) GB)$(if ($k.CommitYuzde -ge $commitEsik) { "  << esik %$commitEsik ASILDI" })"
-$(if ($k.OnerilenAjan -gt 0) { "ONERI    es zamanli ajan: $($k.OnerilenAjan) (bos RAM $($k.BosRamGB) GB / 1 GB basina bir ajan, 2-6 araligi; kaba tahmin, kapi degil)" })
+$(if ($k.OnerilenAjan -gt 0) { "ONERI    es zamanli ajan: $($k.OnerilenAjan) ($($k.OneriNeden); kaba tahmin, kapi degil)" })
 ''
 "OTURUMLAR (son 14 gun: $($otr.Count); $BostaDk+ dk sessiz: $($bosta.Count))"
 if ($otr.Count) {

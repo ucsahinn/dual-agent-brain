@@ -127,3 +127,41 @@ Describe 'beyin aktar CLI (2026-10-07)' {
         $r.Metin | Should Match 'kisaltildi'
     }
 }
+
+Describe 'beyin aktar dinle (2026-10-19): canli uyandirma - yeni aktarim 5 sn icinde tek satir' {
+    It 'Claude''a adresli yeni aktarim 5 sn icinde AKTAR satiri olarak duser; Codex''e gideni basmaz; kacis temizlenir, tam metin basilmaz' {
+        $kaynak = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        $fx = Join-Path ([IO.Path]::GetTempPath()) ('dinle-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path (Join-Path $fx 'motor\hooks'), (Join-Path $fx 'motor\scripts') | Out-Null
+        Copy-Item (Join-Path $kaynak 'motor\hooks\lib.ps1') (Join-Path $fx 'motor\hooks')
+        Copy-Item (Join-Path $PSScriptRoot 'aktar.ps1'), (Join-Path $PSScriptRoot 'aktar-dinle.ps1') (Join-Path $fx 'motor\scripts')
+        $cikti = Join-Path $fx 'dinle.out'; $proc = $null
+        try {
+            $proc = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $fx 'motor\scripts\aktar-dinle.ps1'), '-Vault', $fx, '-Kime', 'claude', '-Sure', '40') -RedirectStandardOutput $cikti -WindowStyle Hidden -PassThru
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            while ($sw.Elapsed.TotalSeconds -lt 15 -and -not ((Test-Path $cikti) -and (Get-Content $cikti -Raw -Encoding UTF8) -match 'dinleniyor')) { Start-Sleep -Milliseconds 100 }
+            (Get-Content $cikti -Raw -Encoding UTF8) | Should Match 'dinleniyor'
+            $uzun = 'ilk-satir ' + ([string][char]27) + '[2J ' + ('x' * 400) + ' GIZLI-SON'
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fx 'motor\scripts\aktar.ps1') -Vault $fx -Metin 'codex icin' -Kime codex | Out-Null
+            $sw.Restart()
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fx 'motor\scripts\aktar.ps1') -Vault $fx -Metin $uzun -Kime claude | Out-Null
+            $gonder = $sw.Elapsed.TotalSeconds
+            while ($sw.Elapsed.TotalSeconds -lt ($gonder + 5) -and -not ((Get-Content $cikti -Raw -Encoding UTF8) -match 'AKTAR ')) { Start-Sleep -Milliseconds 100 }
+            $gecikme = $sw.Elapsed.TotalSeconds - $gonder
+            $out = Get-Content $cikti -Raw -Encoding UTF8
+            $out | Should Match 'AKTAR \d{8}T\d{6}-\w+ \| claude'
+            ($gecikme -lt 5) | Should Be $true
+            $out | Should Not Match 'codex icin'
+            $out.IndexOf([char]27) | Should Be -1
+            $out | Should Not Match 'GIZLI-SON'
+        } finally {
+            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+            Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It 'dagitici: "beyin aktar dinle" aktarim GONDERMEZ, dinleyiciye gider (eski hatada "dinle" metinli kayit yaziliyordu)' {
+        $dag = Get-Content (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'kurulum\beyin.ps1') -Raw
+        $dag | Should Match "eq 'dinle'"
+        $dag | Should Match "Cagir 'aktar-dinle.ps1'"
+    }
+}

@@ -41,9 +41,11 @@ $ErrorActionPreference = 'SilentlyContinue'
 if (-not $Vault) { $Vault = $(if ($env:BEYIN_VAULT) { $env:BEYIN_VAULT } else { Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }) }
 if (-not (Test-Path -LiteralPath (Join-Path $Vault 'motor\hooks\lib.ps1'))) { Write-Output "HATA: vault degil: '$Vault'"; exit 2 }
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
+. (Join-Path $PSScriptRoot 'takim-uyum.ps1')
 $p = Get-BeyinPaths -Vault $Vault
 
 $acKok = Get-BeyinAgentChefKok
+$uyum190=Test-Takim190 ([string]$acKok.Surum)
 $kok = [string]$acKok.Yol
 $engine = Join-Path $kok 'scripts\team-run.mjs'
 $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
@@ -68,10 +70,14 @@ function Yaz-Ozet {
 if ($args2.Count -eq 0) {
     Yaz-Ozet
     ''
-    'Komutlar (motor: plan | start | status | collect | integrate | verify | merge | pause | resume | abort | cleanup | doctor | watch):'
+    "Komutlar (motor: plan | start | status | collect | integrate | $(if($uyum190){'lead-review | '})verify | merge | pause | resume | abort | cleanup | doctor | watch):"
     '  beyin takim plan --repo <yol> --plan-file <plan.json>      kartlari acar, kosu kaydi "planned"'
     '  beyin takim start --run <id>     (insan onayi: sohbete "baslat <id>")   isciler kendi worktree ve terminal sekmesinde'
-    '  beyin takim collect|integrate|verify --run <id>             topla -> ara dala birlestir -> test_verifier dogrular'
+    if($uyum190){
+        '  beyin takim collect|integrate --run <id>; sonra lead-review --run <id> --review-file <review.json>; sonra verify'
+        '  lead-review: yazan isci varsa integration commitine bagli gecen Claude sef incelemesi gerekir.'
+        '  cleanup --run <id> --approved: yalniz kullanici temizligi onayladiktan sonra; merge worktree silmez, ayri onayla --cleanup-approved gerekir.'
+    }else{'  beyin takim collect|integrate|verify --run <id>             topla -> ara dala birlestir -> test_verifier dogrular'}
     '  beyin takim merge --run <id>     (insan onayi: sohbete "birlestir <id>")  ara dal senin daline girer; push/PR ayri'
     'Beyin fiilleri: durum [id] | baslat <id> | birlestir <id> (terminal onayi) | durdur <id> (abort) | maliyet <id> | izle <id> [TASK] (isci panelleri)'
     "Turetilmis gorunum: $(Join-Path (Join-Path $Vault '10-command-center') 'takim.md')"
@@ -221,7 +227,7 @@ if ($kod -eq 0 -and $komut -eq 'start' -and $panelMod -eq 'on') {
     Write-Host "[takim] $panelNot" -ForegroundColor DarkGray
 }
 
-$mutasyon = @('plan', 'start', 'collect', 'integrate', 'verify', 'merge', 'pause', 'resume', 'abort', 'cleanup')
+$mutasyon = @('plan', 'start', 'collect', 'integrate', 'lead-review', 'verify', 'merge', 'pause', 'resume', 'abort', 'cleanup')
 $mdNot = ''
 if ($mutasyon -contains $komut -and -not $stateVar) {
     $md = Update-BeyinTakimMd -Paths $p

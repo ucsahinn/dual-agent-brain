@@ -15,6 +15,8 @@ if (-not $Vault) { $Vault = $(if ($env:BEYIN_VAULT) { $env:BEYIN_VAULT } else { 
 # -Run/-Kart dosya yoluna ve ekrana girer: kati bicim (yol gezinme, kacis dizisi yok)
 if ($Run -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z' -or ($Kart -and $Kart -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z')) { Write-Host 'takim-izle: gecersiz kosu/kart kimligi'; exit 2 }
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
+. (Join-Path $PSScriptRoot 'takim-uyum.ps1')
+$script:takimMotorSurum=Get-TakimUyumSurum
 $p = Get-BeyinPaths -Vault $Vault
 $Board = $p.Board
 $runRec = Join-Path $p.TeamRuns "$Run.json"
@@ -148,7 +150,7 @@ function CheckKey([string]$c) {
     if ($c -match 'npm(?:\.cmd)? test') { return 'npm test' }
     if ($c -match 'gitleaks') { return 'gitleaks' }
     if ($c -match '(^|[;&|]\s*)git commit') { return 'git commit' }
-    if ($c -match '(?:^|[;&|]\s*)(?:&\s*)?node\s+[''"]?\S*?team-run\.mjs[''"]?\s+(plan|start|status|supervise|watch|abort|collect|integrate|verify|merge|pause|resume|cleanup|doctor)\b') { return "team-run $($Matches[1])" }
+    if ($c -match '(?:^|[;&|]\s*)(?:&\s*)?node\s+[''"]?\S*?team-run\.mjs[''"]?\s+(plan|start|status|supervise|watch|abort|collect|integrate|lead-review|verify|merge|pause|resume|cleanup|doctor)\b') { return "team-run $($Matches[1])" }
     if ($c -match 'render-target-artifacts') { return 'render:targets' }
     return ''
 }
@@ -1031,8 +1033,10 @@ function RenderRun([int]$tick) {
 
     # ---- SIRADA ----
     $neden = ''; $nedenCol = $cMuted
-    if ($st2 -eq 'aborted') { $adim = "koşu iptal edildi · temizlik: beyin takim cleanup $id" }
-    elseif ($st2 -eq 'failed') { $adim = "koşu başarısız · işçi panellerine bak · temizlik: beyin takim cleanup $id" }
+    $cleanup=Get-TakimCleanupKomut $id $script:takimMotorSurum
+    $lead=Get-TakimLeadReviewAdim $rr $script:takimMotorSurum
+    if ($st2 -eq 'aborted') { $adim = "koşu iptal edildi · temizlik: $cleanup";if(Test-Takim190 $script:takimMotorSurum){$neden='işçiler durduktan, raporlar korunduktan ve kullanıcı temizliği açıkça onayladıktan sonra'} }
+    elseif ($st2 -eq 'failed') { $adim = "koşu başarısız · işçi panellerine bak · temizlik: $cleanup";if(Test-Takim190 $script:takimMotorSurum){$neden='işçiler durduktan, raporlar korunduktan ve kullanıcı temizliği açıkça onayladıktan sonra'} }
     elseif ($st2 -eq 'merged') { $adim = 'bitti: ek adım yok'; $neden = 'kartlar için sohbete onayla <TASK>; push/PR ayrı karar' }
     elseif ($st2 -eq 'planned') { $adim = "başlat: sohbete yaz  baslat $id"; $neden = 'işçiler ancak senin onayınla açılır' }
     elseif ($sahipsiz) { $adim = "gözetmen durmuş (uyku/çökme?): beyin takim resume --run $id"; $neden = 'işçiler kayıtlı Codex oturumlarından devam eder; canlı işçi varsa önce o biter'; $nedenCol = $cWarn }
@@ -1042,6 +1046,7 @@ function RenderRun([int]$tick) {
     elseif ($cakisma) { $adim = "çakışmayı çöz: $(@($ig.conflicts) -join ', ')"; $neden = 'düzeltip beyin takim integrate'; $nedenCol = $cErr }
     elseif ($kontrolDustu) { $dus = @($ig.checks | Where-Object { $_.status -ne 0 } | ForEach-Object { IsAdi ([string]$_.command) 'test' (CheckKey ([string]$_.command)) '' } | Select-Object -Unique); $adim = "kontrol başarısız: $($dus -join ', ')"; $neden = 'raporları oku; düzeltip beyin takim integrate'; $nedenCol = $cErr }
     elseif ($st2 -eq 'collected') { $adim = "bütünleştir: beyin takim integrate $id" }
+    elseif ($lead) { $adim = "şef incelemesi: $lead"; $neden='verify ve merge öncesinde geçen Claude incelemesi gerekir' }
     elseif ($st2 -eq 'integrated') { $adim = "doğrula: beyin takim verify $id" }
     elseif ($dogrulamaDustu) { $adim = "doğrulama geçmedi · raporu oku · beyin takim verify $id"; $nedenCol = $cErr; $neden = $(if ($v.reportId) { "rapor: $($v.reportId)" } else { '' }) }
     elseif ($st2 -eq 'verified') { $adim = "ana dala al: sohbete yaz  birlestir $id"; if ($uyari) { $neden = "uyarıyla doğrulandı: önce rapora bak$(if ($v.reportId) { " ($($v.reportId))" })"; $nedenCol = $cWarn } else { $neden = 'doğrulandı; ana dala alma senin onayınla' } }

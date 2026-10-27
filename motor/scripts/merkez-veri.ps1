@@ -27,6 +27,13 @@ function Get-MerkezDurum {
     $nabiz = $(if ($null -ne $K.NabizSn) { [double]$K.NabizSn } else { -1 })
     if ($K.Tur -eq 'isci') {
         $d = [string]$K.IsciDurum; $v = [string]$K.Verdict
+        # Kart son durumdaysa o kazanir (2026-10-19): salt-okunur kosu 'collected' kalir (integrate/merge adimi yok);
+        # sahip karti done/cancelled yapsa da isci sonsuza dek "incelemede" gorunuyordu.
+        switch ([string]$K.KartDurum) {
+            'done'      { return @{ Durum = 'bitti'; Kaynak = 'kart'; Bayat = $false } }
+            'cancelled' { return @{ Durum = 'kapali'; Kaynak = 'kart'; Bayat = $false } }
+            'blocked'   { if ($d -notin @('queued', 'spawning', 'running')) { return @{ Durum = 'engelli'; Kaynak = 'kart'; Bayat = $false } } }
+        }
         if ($d -in @('queued', 'spawning', 'running')) {
             if ($K.GozetmenDurdu) { return @{ Durum = 'engelli'; Kaynak = 'gozetmen'; Bayat = $true } }
             if ($K.SurecCanli -eq $false -and $d -eq 'running') { return @{ Durum = 'engelli'; Kaynak = 'surec'; Bayat = $true } }
@@ -195,15 +202,43 @@ function Get-MerkezKosuAsama($Kosu) {
     return 0
 }
 
-function Get-MerkezKosuSonraki($Kosu, [bool]$Sahipsiz) {
+# SALT OKUNUR KOSU BITISI (2026-10-19): okuma/inceleme kosusunda integrate/merge adimi yoktur; kosu 'collected'
+# kalir ve merkez onu sonsuza dek "ŞEF SIRASI · bütünleştir" diye gosteriyordu (suresi de buyuyordu). Kosu bitmis
+# sayilir: motorun salt okunur bitis durumu (MerkezSaltOkunurSon) ya da 'collected' + butun isciler 'collected' ve
+# (butun yazma kapsamlari bos YA DA butun kartlar done/cancelled). Gorunum mevcut "raporlar teslim alındı · salt
+# okunur koşu kapatıldı" yolundan gelir (etkin durum 'aborted' + hepsi collected). Kayit degismez: kopyasi doner.
+$script:MerkezSaltOkunurSon = @('completed')   # AgentChef: run.status 'completed' + run.completion {at, reason, partial}
+function Get-MerkezKosuEtkin($Kosu, $KartHarita) {
+    if (-not $Kosu) { return $Kosu }
+    $st = [string]$Kosu.status
+    $ws = @($Kosu.workers | Where-Object { $null -ne $_ })
+    $bitti = $false
+    if ($st -in $script:MerkezSaltOkunurSon) { $bitti = $true }
+    elseif ($st -eq 'collected' -and $ws.Count -and -not @($ws | Where-Object { [string]$_.status -ne 'collected' }).Count) {
+        $yazmasiz = -not @($ws | Where-Object { -not $_.PSObject.Properties['writeScope'] -or @($_.writeScope | Where-Object { $_ }).Count }).Count   # alan VAR ve bos olmali; alan yoksa kanit yok
+        $kartKapali = [bool]($KartHarita -and -not @($ws | Where-Object { [string]$KartHarita[[string]$_.taskId] -notin @('done', 'cancelled') }).Count)
+        $bitti = ($yazmasiz -or $kartKapali)
+    }
+    if (-not $bitti) { return $Kosu }
+    $c = $Kosu.PSObject.Copy(); $c.status = 'aborted'
+    $c | Add-Member -NotePropertyName merkezSaltOkunur -NotePropertyValue $true -Force
+    $c | Add-Member -NotePropertyName merkezKismi -NotePropertyValue ([bool]($Kosu.completion -and $Kosu.completion.partial)) -Force
+    return $c
+}
+. (Join-Path $PSScriptRoot 'takim-uyum.ps1')
+function Get-MerkezKosuSonraki($Kosu, [bool]$Sahipsiz, [string]$MotorSurum = '') {
     # @{ Metin; Onay (kullanicidan satir bekliyor mu); Renk = ok|warn|err|muted }
     $id = [string]$Kosu.runId; $st = [string]$Kosu.status
     if ($Sahipsiz) { return @{ Metin = "gözetmen durdu → beyin takim resume --run $id"; Onay = $false; Renk = 'err' } }
+    if(-not $MotorSurum){$MotorSurum=Get-TakimUyumSurum}
+    $lead=Get-TakimLeadReviewAdim $Kosu $MotorSurum
+    if($lead){return @{Metin="şef incelemesi → $lead";Onay=$false;Renk='warn'}}
     switch ($st) {
         'planned'  { return @{ Metin = "onay bekliyor → baslat $id"; Onay = $true; Renk = 'warn' } }
         'verified' { return @{ Metin = "onay bekliyor → birlestir $id"; Onay = $true; Renk = 'warn' } }
         'merged'   { return @{ Metin = 'ana dalda'; Onay = $false; Renk = 'ok' } }
         'aborted'  {
+            if ($Kosu.merkezSaltOkunur) { return @{ Metin = $(if ($Kosu.merkezKismi) { 'yarım kaldı · bir işçi toplanmadı ya da kararı kısmi/başarısız · salt okunur koşu kapatıldı' } else { 'raporlar teslim alındı · salt okunur koşu kapatıldı' }); Onay = $false; Renk = $(if ($Kosu.merkezKismi) { 'warn' } else { 'ok' }) } }
             $wsA = @($Kosu.workers | Where-Object { $null -ne $_ })
             if ($wsA.Count -and -not @($wsA | Where-Object { $_.status -ne 'collected' }).Count) { return @{ Metin = 'raporlar teslim alındı · salt okunur koşu kapatıldı'; Onay = $false; Renk = 'ok' } }
             return @{ Metin = 'iptal edildi'; Onay = $false; Renk = 'muted' }
@@ -242,7 +277,7 @@ function Get-MerkezKosuOzet($Kosu, [bool]$Sahipsiz = $false, [datetime]$Simdi = 
     $dogrulamaDustu = [bool]($v -and $v.verdict -and $v.verdict -notin @('pass','warn'))
     $kirik = [bool]($cakisma -or $kontrolDustu -or $dogrulamaDustu -or $st -eq 'failed' -or ($st -eq 'aborted' -and -not ($ws.Count -gt 0 -and @($ws | Where-Object { $_.status -ne 'collected' }).Count -eq 0)))
     # Salt okunur inceleme kosusu: isciler raporlarini teslim etti (collected) ve kosu kapatildi -> iptal degil.
-    $raporlu = [bool]($st -eq 'aborted' -and $ws.Count -gt 0 -and @($ws | Where-Object { $_.status -ne 'collected' }).Count -eq 0)
+    $raporlu = [bool]($Kosu.merkezSaltOkunur -or ($st -eq 'aborted' -and $ws.Count -gt 0 -and @($ws | Where-Object { $_.status -ne 'collected' }).Count -eq 0))
     if ($raporlu) { $asamalar[2] = $true; $guncel = 3 }   # topla tamam; sonraki adimlar bu kosu turunde yok (Atlanan)
     $kapsanan = 0; if ($ig -and $ig.coveredByConductor) { $kapsanan = @($ig.coveredByConductor | Where-Object { $_ }).Count }
     $rozet = if ($raporlu) { 'raporlar' } elseif ($st -eq 'aborted') { 'iptal' } elseif ($st -eq 'failed') { 'basarisiz' } elseif ($st -eq 'merged') { 'anadalda' }
@@ -264,6 +299,12 @@ function Get-MerkezKosuOzet($Kosu, [bool]$Sahipsiz = $false, [datetime]$Simdi = 
     }
     $baslangic = $null; if ($Kosu.startedAt) { try { $baslangic = [datetime]$Kosu.startedAt } catch { } }
     $sonAt = $null; foreach ($e in @($Kosu.history)) { if ($e.at) { try { $t = [datetime]$e.at; if (-not $sonAt -or $t -gt $sonAt) { $sonAt = $t } } catch { } } }
+    if ($raporlu) {
+        # salt okunur kosu: sure SON ISCININ bitisine kadar. Yeniden toplama (collect) gecmise yeni olay yazar ve completion.at'i
+        # de o ana tasir; sure 12 saate sisiyordu (olculdu: 3 dk'lik kosu "12 sa 14 dk").
+        $isciSon = $null; foreach ($w in $ws) { if ($w.finishedAt) { try { $t = [datetime]$w.finishedAt; if (-not $isciSon -or $t -gt $isciSon) { $isciSon = $t } } catch { } } }
+        if ($isciSon) { $sonAt = $isciSon } elseif ($Kosu.completion -and $Kosu.completion.at) { try { $sonAt = [datetime]$Kosu.completion.at } catch { } }
+    }
     $bitti = $st -in @('merged', 'aborted', 'failed', 'verified')
     if (-not ($bitti -and $sonAt)) { $sonAt = $Simdi }
     $sure = 0.0; if ($baslangic) { $sure = [Math]::Max(0, ($sonAt - $baslangic).TotalSeconds) }
@@ -549,8 +590,10 @@ function Get-MerkezAnlik {
     if ($Hizli -and $Onbellek.ContainsKey('Kartlar')) { $kartlar = $Onbellek.Kartlar } else {
         $kartlar = @()
         try {
-            if (Test-Path -LiteralPath $Paths.Board) { $st = (Read-MerkezPaylasimli $Paths.Board) | ConvertFrom-Json; $kartlar = @($st.tasks | Where-Object { $_ -and $_.status -in @('todo', 'in_progress', 'review', 'blocked') }) }
-            $Onbellek.Kartlar = $kartlar
+            $harita = @{}
+            if (Test-Path -LiteralPath $Paths.Board) { $st = (Read-MerkezPaylasimli $Paths.Board) | ConvertFrom-Json; $kartlar = @($st.tasks | Where-Object { $_ -and $_.status -in @('todo', 'in_progress', 'review', 'blocked') })
+                foreach ($t in @($st.tasks)) { if ($t -and $t.id) { $harita[[string]$t.id] = [string]$t.status } } }
+            $Onbellek.Kartlar = $kartlar; $Onbellek.KartDurumHarita = $harita
         } catch { if ($Onbellek.ContainsKey('Kartlar')) { $kartlar = $Onbellek.Kartlar } }   # yazilirken okunduysa onceki gorunum kalir
     }
 
@@ -562,7 +605,12 @@ function Get-MerkezAnlik {
         try { $k = Read-MerkezJsonOnb $f.FullName $Onbellek $f } catch { $k = $null }
         if (-not $k) { continue }
         if (-not $k -or -not $k.runId) { continue }
+        $kartHarita = $(if ($Onbellek.KartDurumHarita) { $Onbellek.KartDurumHarita } else { @{} })
+        $k = Get-MerkezKosuEtkin $k $kartHarita   # salt okunur kosu bitti -> raporlar teslim alindi (etkin durum)
         $bitmis = [string]$k.status -in @('merged', 'aborted', 'failed')
+        $kwsl = @($k.workers | Where-Object { $null -ne $_ })
+        if (-not $bitmis -and $kwsl.Count -and -not @($kwsl | Where-Object { [string]$_.status -in @('queued', 'spawning', 'running', 'planned', 'paused_limit') }).Count -and
+            -not @($kwsl | Where-Object { [string]$kartHarita[[string]$_.taskId] -notin @('done', 'cancelled') }).Count) { $bitmis = $true }   # salt-okunur kosu: kartlar kapandi
         if ($bitmis -and $f.LastWriteTime -lt $simdi.AddHours(-$SonKosuSaat)) { continue }
         if (-not $bitmis -and $f.LastWriteTime -lt $simdi.AddDays(-7)) { continue }   # insan onayi 7 gun gecerli; daha eski koşu bayattir
         $sahipsiz = [bool](([string]$k.status -eq 'running') -and @($k.workers | Where-Object { $_.status -in @('queued', 'spawning', 'running') }).Count -and (Test-MerkezGozetmenDurdu $k $Onbellek $simdi))
@@ -583,7 +631,7 @@ function Get-MerkezAnlik {
             $ev = $null; if ([string]$w.taskId -cmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z' -and [string]$k.runId -cmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z') { try { $ev = Join-Path (Join-Path (Join-Path $Paths.TeamRuns $k.runId) $w.taskId) 'events.jsonl' } catch { $ev = $null } }
             $nabiz = -1; if ($ev -and (Test-Path -LiteralPath $ev)) { $nabiz = ($simdi - (Get-Item -LiteralPath $ev).LastWriteTime).TotalSeconds }
             $surec = $null; if ($w.pid) { $surec = Test-MerkezPidCanli ([int]$w.pid) $Onbellek $simdi }
-            $d = Get-MerkezDurum @{ Tur = 'isci'; IsciDurum = [string]$w.status; Verdict = [string]$w.verdict; NabizSn = $nabiz; SurecCanli = $surec; GozetmenDurdu = $sahipsiz }
+            $d = Get-MerkezDurum @{ Tur = 'isci'; IsciDurum = [string]$w.status; Verdict = [string]$w.verdict; NabizSn = $nabiz; SurecCanli = $surec; GozetmenDurdu = $sahipsiz; KartDurum = $kartHarita[[string]$w.taskId] }
             $balon = ''; if ($d.Durum -in @('calisiyor', 'engelli')) { $balon = Get-MerkezIsciEtkinlik $ev }
             elseif ($d.Durum -eq 'duraklatildi') { $balon = '‖ kota doldu' } elseif ($d.Durum -eq 'bitti') { $balon = '✓ teslim etti' }
             $basla = $null; if ($w.startedAt) { try { $basla = [datetime]$w.startedAt } catch { } }
@@ -979,7 +1027,7 @@ $script:MerkezKomutBicim = @(
     '^beyin pano show --task TASK-[0-9]{1,6}$'
     '^onayla TASK-[A-Z0-9](?:[A-Z0-9-]{0,46}[A-Z0-9])?$', '^baslat R[0-9A-Za-z-]{1,40}$', '^birlestir R[0-9A-Za-z-]{1,40}$'
     '^claude --resume [0-9A-Fa-f-]{8,64}$', '^codex resume [0-9A-Fa-f-]{8,64}$'
-    '^beyin takim (izle|durum|status|collect|integrate|verify|resume|cleanup) (--run )?R[0-9A-Za-z-]{1,40}( TASK-[0-9]{1,6}| --wait| --recheck)?$'
+    '^beyin takim (izle|durum|status|collect|integrate|lead-review|verify|resume|cleanup) (--run )?R[0-9A-Za-z-]{1,40}( TASK-[0-9]{1,6}| --wait| --recheck| --approved)?$'
     '^beyin (bekci|maliyet|doktor|aktar)$'
 )
 function Test-MerkezGuvenliKomut([string]$Komut) {

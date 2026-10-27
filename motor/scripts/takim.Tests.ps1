@@ -52,6 +52,7 @@ Describe 'beyin takim sarmalayicisi (2026-10-12)' {
         New-Item -ItemType Directory -Force -Path (Join-Path $script:tv 'motor\hooks'), (Join-Path $script:tv 'motor\scripts\.state'), (Join-Path $script:tv '10-command-center') | Out-Null
         Copy-Item (Join-Path $vault 'motor\hooks\lib.ps1') (Join-Path $script:tv 'motor\hooks\lib.ps1')
         Copy-Item $takimScript (Join-Path $script:tv 'motor\scripts\takim.ps1')
+        Copy-Item (Join-Path $PSScriptRoot 'takim-uyum.ps1') (Join-Path $script:tv 'motor\scripts\takim-uyum.ps1')
         Copy-Item (Join-Path $PSScriptRoot 'takim-izle.ps1') (Join-Path $script:tv 'motor\scripts\takim-izle.ps1')
         Set-Content -Path (Join-Path $script:tv '.beyin-version') -Value '1.0.0'
         $env:BEYIN_AGENTCHEF_KOK = $script:kok
@@ -59,6 +60,13 @@ Describe 'beyin takim sarmalayicisi (2026-10-12)' {
         $env:AGENTCHEF_TEAM_PANE = $null
     }
     AfterEach { $env:BEYIN_AGENTCHEF_KOK = $null; $env:BEYIN_TAKIM_PANEL = $null; $env:AGENTCHEF_TEAM_PANE = $null }
+
+    It '1.9 lead-review and cleanup flags pass through without manufacturing approval' {
+        '{"name":"agentchef","version":"1.9.0"}'|Set-Content (Join-Path $script:kok 'package.json')
+        $o=Invoke-Takim $script:tv @('lead-review','R-9','--review-file','review.json');(Echo-Json $o).echo[0]|Should Be 'lead-review';((Echo-Json $o).echo -contains '--review-file')|Should Be $true
+        $o=Invoke-Takim $script:tv @('cleanup','R-9');((Echo-Json $o).echo -contains '--approved')|Should Be $false
+        $o=Invoke-Takim $script:tv @('cleanup','R-9','--approved');((Echo-Json $o).echo -contains '--approved')|Should Be $true
+    }
 
     It 'isci paneli: start motorun ham sekmesini kapatir (AGENTCHEF_TEAM_PANE=off), motor modunda dokunmaz; izle argv guvenli; off modunda sekme acmaz' {
         $tp = Get-BeyinPaths -Vault $script:tv

@@ -315,6 +315,15 @@ function Cards([object[]]$cards, [int]$inner, [int]$minGen = 36) {
 # silme, C1, yon kontrol) cikmadan once silinir - temizleyiciyi atlayan bir yol unutulsa bile terminale ulasamaz.
 $rxCizYabanci = [regex]"$ESC(?!\[[0-9;:]*m)(?:\[[\x20-\x3F]*[\x40-\x7E]?|\][^$ESC\a]*(?:$ESC\\|\a)?|[\s\S])?|[\u0000-\u001A\u001C-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]"
 function Get-CizGuvenliSatir([string]$s) { if ($s.IndexOf([char]27) -lt 0 -and -not $rxCizYabanci.IsMatch($s)) { return $s }; return $rxCizYabanci.Replace($s, '') }
+# Bildirim (toast) metni: XML 1.0'da gecersiz karakterler (TAB/CR/LF disindaki C0, ESC, FFFE/FFFF) LoadXml'i dusurur ve
+# bildirim sessizce kaybolur; once silinir, boy sinirlanir, sonra XML ozel karakterleri kacirilir. Her toast cagrisi bundan gecer.
+$rxCizXmlGecersiz = [regex]'[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]'
+function Get-CizToastMetni([string]$s, [int]$Boy = 400) {
+    if (-not $s) { return '' }
+    $s = $rxCizXmlGecersiz.Replace($s, ''); if ($s.Length -gt $Boy) { $s = $s.Substring(0, $Boy) }
+    if ($s.Length -and [char]::IsHighSurrogate($s[$s.Length - 1])) { $s = $s.Substring(0, $s.Length - 1) }
+    return [Security.SecurityElement]::Escape($s)
+}
 function Write-CizKare([System.Collections.Generic.List[string]]$L, [int]$w, [string]$Onceki) {
     # Tek kare yazici: imleci basa al, satirlari yaz; ESC[K YALNIZ satir pencereden kisaysa (tam genislikte imlec "kaydirma
     # bekliyor" durumundadir, ESC[K son sutunu = sag kenari siler); ESC[J kalan ekrani temizler. Degismediyse yazmaz.

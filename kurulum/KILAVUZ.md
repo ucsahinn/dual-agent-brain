@@ -1,4 +1,4 @@
-﻿# Beyin - Kullanim Kilavuzu
+# Beyin - Kullanim Kilavuzu
 
 Bu belge, sistemi hic bilmeyen bir Windows kullanicisi icin yazildi. PowerShell
 penceresi acabiliyorsan yeterli.
@@ -419,6 +419,61 @@ Ayrinti icin bkz. [7. bolum](#7-ayarlar).
 | `yardim` (`help`, `-h`, `--help`, `/?`) | Tum komutlarin kanonik listesini basar. Komut verilmezse varsayilan budur. |
 
 ---
+
+### 5.7 Canli isci kanallari (1.7.0)
+
+Codex kanali varsayilan olarak kalici app-server kullanir. Ayni sahip
+oturumdan acilan isciye birden cok tur gonderilir:
+
+```powershell
+beyin codex ac -Proje C:\kod\proje
+beyin codex sor CK-kimlik -Metin "Gorevi incele ve alti alanli handoff ver."
+beyin codex devam CK-kimlik -Metin "Ayni gorevin sonraki adimina devam et."
+beyin codex durum CK-kimlik
+beyin codex kapat CK-kimlik
+```
+
+| Codex komutu | Ne yapar |
+| --- | --- |
+| `ac -Proje <dizin> [-Rol <rol>]` | Sahipli kalici isci acar. |
+| `sor <CK> -Metin <gorev>` / `devam <CK> -Metin <gorev>` | Ayni isci/thread ile sonraki turu calistirir. `-BrifDosya` yedi alanli brif kabul eder. |
+| `gonder -Motor exec -Proje <dizin> -Metin <gorev>` | Exec/resume yedek yolunda sahipli isci baslatir. |
+| `steer <CK> -Metin <talimat>` / `interrupt <CK>` | Calisan tura ek talimat verir veya turu keser. |
+| `onay <CK> -Istek <ID> -Karar accept\|decline\|cancel` | Bekleyen istege sahip karari verir; once istegin kapsamini incele. |
+| `liste` / `durum <CK>` / `yetim` | Kayitlari, redakte hatalari, butceyi ve yetim raporunu okur. |
+| `kapat <CK>` | Yalniz bu sahip oturumun kayitli isci job'unu kapatir. |
+| `tui -Proje <dizin>` / `tui <CK>` | Sahipli paylasilan sunucuya gorunur TUI baglar. |
+| `sema` / `sema -Uret` | Secilen ikilinin surum pinini denetler / surume bagli semayi uretir. |
+| `limitler <CK>` / `tetikle <CK>` | Limit durumunu okur / zamani gelen devam kuyrugunu elle tetikler. |
+
+`-JetonButce` etkin jeton tavanidir; varsayilan 2.000.000, formulu
+`(input-cached)+output+cached*0.1`. `BEYIN_CODEX_JETON_BUTCE` ayari ile de
+belirlenebilir. Acik isciler kendi baslatma ayarlarini korur. Sandbox
+varsayilani elevated; `-WindowsSandbox unelevated` yalniz yeni isciye
+uygulanir. Workspace-write/rol siniri ve onay politikasi korunur.
+Gecici setup-refresh hatasi en fazla uc denemeyle, 10-40 sn rastgele
+gecikmeyle yeniden denenir; basarili yan etkiden sonra tekrar yoktur.
+Farkli Codex kurulumlari varsa en yeni surum secilir; `BEYIN_CODEX_YOLU`
+acik yol onceligidir. Kullanici config.toml dosyasi degistirilmez.
+
+Claude icin `beyin claude ac -Proje <dizin>`, `beyin claude sor <CK>
+-Metin <gorev>`, `beyin claude durum <CK>`, `beyin claude liste` ve
+`beyin claude kapat <CK>` ayni sahiplik siniriyla kalici stream-json
+oturumunu kullanir. Mesajlar ve hata kayitlari redakte edilir.
+
+Sef MCP sunucusunun arac listesi ve ayri kayit komutu
+[sunucu kilavuzunda](../motor/mcp/beyin-sef-mcp/README.md). Kanal kullanimi
+MCP kaydini otomatik yapmaz. Uygulama ve kabul kanitlari
+vault icindeki `50-research/codex-kanal-KANIT-2026-10-27.md` dosyasindadir; bu yerel gunluk yayin paketine dahil degildir.
+
+AgentChef 1.9.0 kullanan yazma kosularinda sira: collect -> integrate ->
+`beyin takim lead-review --run <id> --review-file <review.json>` -> verify
+-> kullanicinin birlestir onayi -> merge. Inceleme gecen Claude incelemesi,
+kanit ve guncel integration commit'i tasimalidir. Cleanup yalniz kullanici
+temizligi acikca onayladiktan sonra `cleanup --run <id> --approved` ile
+yapilir; merge worktree'leri varsayilan olarak korur, silmek icin ayrica
+`--cleanup-approved` gerekir. Bayraklar otomatik eklenmez. Eski 1.8.x
+motorda eski komut/ipucu akisi korunur.
 
 ## 6. Vault klasorleri ne ise yarar
 

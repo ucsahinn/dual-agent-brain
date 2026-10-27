@@ -51,6 +51,11 @@ weakening of it:
 Do not hand-edit files under these two directories; the engine rewrites them and
 your edit will be interleaved or lost. Corrections belong on the curated side.
 
+## Long-Running Goal Continuity (both agents)
+
+- Resume the existing goal and use the repository's single canonical plan/ledger as the authority. Brain project notes, compiled summaries, and old handoffs are pointers only; when they conflict, reconcile them to the live ledger before acting. Before delegating or running a team, consult the live beyin kapasite recommendation; a remembered session count is not current capacity.
+- At each continuation, compare the last dated checkpoint with current evidence, refresh gate counts, and advance one distinct safe gate with dated evidence in the canonical ledger. Carry forward approvals while their target, action, environment, and risk stay the same; do not repeat unchanged checks or approval requests.
+- After updating the ledger, synchronize the Brain project and active-thread pointers and close a handoff once it has been absorbed. When only user/operator evidence remains, give one consolidated action list and wait for new evidence instead of rechecking the same blockers.
 ## Operating Protocol (both agents)
 
 The memory engine under `motor/hooks` and `motor/scripts` runs in **both**

@@ -154,6 +154,7 @@ Describe 'merkez tek kare boyut ve enjeksiyon regresyonu' {
         New-Item -ItemType Directory -Force -Path $scripts,$hooks | Out-Null
         try {
             Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
+            Copy-Item (Join-Path $PSScriptRoot 'takim-uyum.ps1') $scripts
             Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
             foreach ($width in @(90,120,170)) {
                 # Alt surec UTF-8 yazar; ust surec de UTF-8 okumali, yoksa her cerceve karakteri birkac karaktere bolunur.
@@ -277,7 +278,9 @@ Describe 'merkez sabit veriyle kenar durumlari (onay, hatali kosu, engelli kart)
         New-Item -ItemType Directory -Force -Path $scripts, $hooks, $runs | Out-Null
         try {
             Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
+            Copy-Item (Join-Path $PSScriptRoot 'takim-uyum.ps1') $scripts
             Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
+            Copy-Item (Join-Path $PSScriptRoot 'takim-uyum.ps1') $scripts
             $simdi = (Get-Date).ToUniversalTime()
             @{ runId = 'R-ONAY'; repoName = 'demo'; status = 'planned'; workers = @(@{ taskId = 'TASK-1'; status = 'planned'; role = 'docs_author' }) } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $runs 'R-ONAY.json')
             @{ runId = 'R-HATA'; repoName = 'demo'; status = 'integrated'; startedAt = $simdi.AddMinutes(-20).ToString('o'); integration = @{ ok = $false; checks = @(@{ command = 'test'; status = 1 }) }
@@ -575,6 +578,7 @@ Describe 'merkez 1.5.1: QA kenar durumlari' {
             $scripts = Join-Path $root 'motor\scripts'; $hooks = Join-Path $root 'motor\hooks'
             New-Item -ItemType Directory -Force -Path $scripts, $hooks, (Join-Path $scripts '.state\team-runs'), (Join-Path $scripts '.state\makbuz') | Out-Null
             Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
+            Copy-Item (Join-Path $PSScriptRoot 'takim-uyum.ps1') $scripts
             Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
             return $root
         }
@@ -923,5 +927,105 @@ Describe 'merkez 1.6.2: takim kosusu kapasitesi gorunur (AgentChef 1.8.2 capacit
             $plain | Should Match 'kapasite önerilen 0 · sahip onayı 1'
             foreach ($l in @($plain -split "`r?`n" | Where-Object { $_ })) { "150:$($l.Length)" | Should Be '150:150' }
         } finally { Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'merkez 1.6.4: kart son durumu isci durumunu belirler (salt-okunur kosu, 2026-10-19)' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'beyin-ciz.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+    }
+    It 'collected + verdict warn: kart done -> bitti, cancelled -> kapali, blocked -> engelli; kart acikken eski davranis (inceleme)' {
+        (Get-MerkezDurum @{ Tur = 'isci'; IsciDurum = 'collected'; Verdict = 'warn'; KartDurum = 'done' }).Durum | Should Be 'bitti'
+        (Get-MerkezDurum @{ Tur = 'isci'; IsciDurum = 'collected'; Verdict = 'partial'; KartDurum = 'cancelled' }).Durum | Should Be 'kapali'
+        (Get-MerkezDurum @{ Tur = 'isci'; IsciDurum = 'collected'; Verdict = 'warn'; KartDurum = 'blocked' }).Durum | Should Be 'engelli'
+        (Get-MerkezDurum @{ Tur = 'isci'; IsciDurum = 'collected'; Verdict = 'warn'; KartDurum = 'review' }).Durum | Should Be 'inceleme'
+        (Get-MerkezDurum @{ Tur = 'isci'; IsciDurum = 'running'; Verdict = ''; KartDurum = 'blocked'; NabizSn = 5 }).Durum | Should Be 'calisiyor'
+    }
+    It 'butun kartlari kapanmis salt-okunur kosu aktif sayilmaz; kanatta isci kalmaz, acik kartli kosu kalir' {
+        $fx = Join-Path ([IO.Path]::GetTempPath()) ('kart-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path (Join-Path $fx 'motor\hooks') | Out-Null
+        try {
+            Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') (Join-Path $fx 'motor\hooks')
+            $pp = Get-BeyinPaths -Vault $fx; New-Item -ItemType Directory -Force -Path $pp.TeamRuns, (Split-Path $pp.Board -Parent) | Out-Null
+            $bas = (Get-Date).ToUniversalTime().AddMinutes(-30).ToString('o')
+            $yaz = { param($id, $tasks) Set-Content -LiteralPath (Join-Path $pp.TeamRuns "$id.json") -Encoding UTF8 -Value (@{ runId = $id; repoName = 'demo'; status = 'collected'; baseBranch = 'main'; startedAt = $bas
+                       workers = @($tasks | ForEach-Object { @{ taskId = $_; role = 'code_reviewer'; status = 'collected'; verdict = 'warn'; startedAt = $bas; finishedAt = $bas } }); history = @() } | ConvertTo-Json -Depth 6) }
+            & $yaz 'R20261019-kapali' @('TASK-VP-K1', 'TASK-VP-K2')
+            & $yaz 'R20261019-acik' @('TASK-VP-A1')
+            Set-Content -LiteralPath $pp.Board -Encoding UTF8 -Value (@{ schemaVersion = 4; tasks = @(@{ id = 'TASK-VP-K1'; status = 'done'; title = 'k1' }, @{ id = 'TASK-VP-K2'; status = 'cancelled'; title = 'k2' }, @{ id = 'TASK-VP-A1'; status = 'review'; title = 'a1' }) } | ConvertTo-Json -Depth 6)
+            $a = Get-MerkezAnlik -Paths $pp -Onbellek @{} -ClaudeKok 'C:\yok-klasor'
+            $kapali = @($a.Kosular | Where-Object { $_.RunId -eq 'R20261019-kapali' })
+            $kapali.Count | Should Be 1; $kapali[0].Bitmis | Should Be $true
+            @($a.Ajanlar | Where-Object { $_.Tur -eq 'isci' -and $_.Ad -in @('TASK-VP-K1', 'TASK-VP-K2') }).Count | Should Be 0
+            $acik = @($a.Ajanlar | Where-Object { $_.Tur -eq 'isci' -and $_.Ad -eq 'TASK-VP-A1' })
+            $acik.Count | Should Be 1; $acik[0].Durum | Should Be 'inceleme'
+        } finally { Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'merkez 1.6.4: salt okunur kosu bitisi (collected / completed, 2026-10-19)' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'beyin-ciz.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+        $script:isci = { param($id, $yaz) [pscustomobject]@{ taskId = $id; status = 'collected'; verdict = 'pass'; writeScope = @($yaz | Where-Object { $_ }) } }
+    }
+    It 'collected + butun isciler collected + yazma kapsami bos: raporlar, bitmis, butunlestir onerisi yok' {
+        $k = [pscustomobject]@{ runId = 'R1'; status = 'collected'; workers = @((& $isci 'TASK-A' $null), (& $isci 'TASK-B' $null)); history = @() }
+        $e = Get-MerkezKosuEtkin $k @{}
+        $e.status | Should Be 'aborted'; $k.status | Should Be 'collected'   # kayit degismez, kopya doner
+        (Get-MerkezKosuSonraki $e $false).Metin | Should Be 'raporlar teslim alındı · salt okunur koşu kapatıldı'
+        (Get-MerkezKosuOzet $e).Rozet | Should Be 'raporlar'
+    }
+    It 'yazma kapsamli ama kartlari kapali kosu da biter; kartlari acik yazan kosu bütünleştir der' {
+        $k = [pscustomobject]@{ runId = 'R2'; status = 'collected'; workers = @((& $isci 'TASK-C' 'src/a.ts')); history = @() }
+        (Get-MerkezKosuSonraki (Get-MerkezKosuEtkin $k @{ 'TASK-C' = 'done' }) $false).Metin | Should Match 'raporlar teslim alındı'
+        (Get-MerkezKosuSonraki (Get-MerkezKosuEtkin $k @{ 'TASK-C' = 'review' }) $false).Metin | Should Match 'bütünleştir'
+    }
+    It 'motorun completed durumu: tam ve kismi' {
+        $k = [pscustomobject]@{ runId = 'R3'; status = 'completed'; completion = [pscustomobject]@{ partial = $false }; workers = @((& $isci 'TASK-D' $null)); history = @() }
+        (Get-MerkezKosuSonraki (Get-MerkezKosuEtkin $k @{}) $false).Metin | Should Be 'raporlar teslim alındı · salt okunur koşu kapatıldı'
+        $kp = [pscustomobject]@{ runId = 'R4'; status = 'completed'; completion = [pscustomobject]@{ partial = $true }; workers = @([pscustomobject]@{ taskId = 'TASK-E'; status = 'failed' }); history = @() }
+        $s = Get-MerkezKosuSonraki (Get-MerkezKosuEtkin $kp @{}) $false
+        $s.Metin | Should Be 'yarım kaldı · bir işçi toplanmadı ya da kararı kısmi/başarısız · salt okunur koşu kapatıldı'; $s.Renk | Should Be 'warn'
+    }
+    It 'anlik goruntude: salt okunur collected kosu Bitmis, sonraki adim raporlar' {
+        $fx = Join-Path ([IO.Path]::GetTempPath()) ('so-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path (Join-Path $fx 'motor\hooks') | Out-Null
+        try {
+            Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') (Join-Path $fx 'motor\hooks')
+            $pp = Get-BeyinPaths -Vault $fx; New-Item -ItemType Directory -Force -Path $pp.TeamRuns | Out-Null
+            $bas = (Get-Date).ToUniversalTime().AddMinutes(-50).ToString('o')
+            Set-Content -LiteralPath (Join-Path $pp.TeamRuns 'R20261019-so1.json') -Encoding UTF8 -Value (@{ runId = 'R20261019-so1'; repoName = 'demo'; status = 'collected'; startedAt = $bas
+                workers = @(@{ taskId = 'TASK-S1'; status = 'collected'; verdict = 'pass'; writeScope = @() }); history = @(@{ at = $bas; event = 'collected' }) } | ConvertTo-Json -Depth 6)
+            $a = Get-MerkezAnlik -Paths $pp -Onbellek @{} -ClaudeKok 'C:\yok-klasor'
+            $r = @($a.Kosular | Where-Object { $_.RunId -eq 'R20261019-so1' })[0]
+            $r.Bitmis | Should Be $true
+            $r.Sonraki.Metin | Should Match 'raporlar teslim alındı'
+        } finally { Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'merkez 1.6.4: salt okunur kosu suresi son isci bitisinde durur (2026-10-20)' {
+    BeforeAll {
+        . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1')
+        . (Join-Path $PSScriptRoot 'beyin-ciz.ps1')
+        . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
+    }
+    It 'completed kosu: yeniden toplama 12 saat sonra olsa da sure = baslangic -> son isci finishedAt (3 dk)' {
+        $bas = [datetime]'2026-10-19T22:18:00Z'; $isci = $bas.AddMinutes(3); $yeniden = $bas.AddHours(12)
+        $k = [pscustomobject]@{ runId = 'R1'; status = 'completed'; startedAt = $bas.ToString('o'); completion = [pscustomobject]@{ at = $yeniden.ToString('o'); partial = $false }
+            workers = @([pscustomobject]@{ taskId = 'TASK-A'; status = 'collected'; finishedAt = $bas.AddMinutes(2).ToString('o') }, [pscustomobject]@{ taskId = 'TASK-B'; status = 'collected'; finishedAt = $isci.ToString('o') })
+            history = @([pscustomobject]@{ at = $bas.ToString('o'); event = 'started' }, [pscustomobject]@{ at = $yeniden.ToString('o'); event = 'completed_read_only' }) }
+        $o = Get-MerkezKosuOzet (Get-MerkezKosuEtkin $k @{}) $false ($yeniden.AddHours(1))
+        [int]$o.Sure | Should Be 180
+    }
+    It 'isci finishedAt yoksa completion.at kullanilir' {
+        $bas = [datetime]'2026-10-19T22:18:00Z'
+        $k = [pscustomobject]@{ runId = 'R2'; status = 'completed'; startedAt = $bas.ToString('o'); completion = [pscustomobject]@{ at = $bas.AddMinutes(10).ToString('o'); partial = $false }
+            workers = @([pscustomobject]@{ taskId = 'TASK-A'; status = 'collected' }); history = @([pscustomobject]@{ at = $bas.AddHours(5).ToString('o'); event = 'x' }) }
+        [int](Get-MerkezKosuOzet (Get-MerkezKosuEtkin $k @{}) $false ($bas.AddHours(6))).Sure | Should Be 600
     }
 }

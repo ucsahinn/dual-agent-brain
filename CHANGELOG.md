@@ -21,6 +21,48 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.7.0 - 2026-10-27 - Canli isci kanallari ve AgentChef 1.9.0 uyumu
+
+- `beyin codex`: kalici app-server kanali, ayni thread'de cok tur, steer,
+  interrupt, teslim/handoff dogrulamasi ve exec/resume yedek yolu. TUI
+  paylasimi yalniz sahipli loopback sunucusuyla yapilir.
+- `beyin claude`: kalici stream-json Claude kanali; sahipli ac/sor/kapat
+  akisi ve oturum baglaminin korunmasi. Sef MCP sunucusu ortak isci
+  araclarini sunar; MCP kaydi kullanicinin/sefin ayri adimidir.
+- Kill guard sahip-işçi istisnasi: yalniz kayitli sahip kendi isci job'unu
+  kapatabilir; diger ajanlar ve PID kimligi degisen surecler korunur.
+- Codex ikilisi tek noktada cozulur: BEYIN_CODEX_YOLU onceligi, yoksa
+  kurulum adaylarindan en yeni surum. Exec/app-server/sema/TUI ayni ikiliyi
+  kullanir; yol, surum ve cakisan kurulumlar kayda girer.
+- Gecici sandbox setup-refresh hatasinda 10-40 sn araliklarla en fazla uc
+  deneme, yalniz son denemede unelevated geri dususu. Ortak baslangic
+  kilidi ilk komut/ajan olayina veya 60 sn'ye kadar ACL yarisini sinirlar.
+  Gecerli cevap stderr uyarisi yuzunden basarisiz sayilmaz.
+- Isci butcesi etkin jetonla hesaplanir: (input-cached)+output+cached*0.1.
+  Varsayilan 2.000.000; -JetonButce / BEYIN_CODEX_JETON_BUTCE ile degisir.
+- Windows PowerShell 5.1'de ebeveyn UTF-8 kodlamasinin stdin'e BOM
+  eklemesi duzeltildi. Gecerli canli tur, eski rollout hash farki nedeniyle
+  yeniden gonderilmez; normal cevap metni setup retry'i tetiklemez.
+- AgentChef 1.9.0: yazan isci kosusunda integrate sonrasi lead-review
+  gosterilir; verify/merge gecen inceleme ister. cleanup --approved,
+  merge'de worktree silme --cleanup-approved ile kullanicinin ayri
+  onayina baglidir. AgentChef 1.8.x icin eski ipuclari korunur.
+- Close-BeyinHandoff basarili kapanista aktarim gorunumunu yeniler;
+  kapanmis aktarimlar ekranda acik kalmaz.
+
+Onceki yayinlanmamis Merkez duzeltmeleri de bu surume dahildir:
+
+- Salt-okunur takim kosulari `collected` kalir (integrate/merge yok); sahip kartlari done/cancelled yapsa da kanatta
+  isciler sonsuza dek "incelemede" gorunuyordu (bir projede: 12 kapali kart, 12 aktif isci). Artik kart son durumu kazanir:
+  done -> bitti, cancelled -> kapali, blocked -> engelli; butun iscilerinin karti kapanmis kosu bitmis sayilir ve aktif
+  gorunumden duser.
+- Salt okunur kosu bitisi: AgentChef 1.8.4+ `completed` durumu (completion.partial ile "yarim kaldi")
+  ve eski motorda `collected` + butun isciler collected + (yazma kapsami bos ya da kartlar kapali) -> "✓ RAPORLAR ALINDI";
+  artik "ŞEF SIRASI · bütünleştir" gostermez. Sure son iscinin bitisinde durur (yeniden toplama 3 dk'lik kosuyu "12 sa" yapiyordu).
+- Guvenlik sertlestirmesi (2026-10-22 denetimi, dusuk): Windows bildirimi metni `Get-CizToastMetni` ile XML 1.0'da gecersiz
+  kontrol karakterlerinden temizlenir, sinirlanir ve kacirilir; boyle bir karakter `LoadXml`'i dusurup bildirimi sessizce
+  kaybediyordu.
+
 ## 1.6.3 - 2026-10-19 - Insan onayi: harfli kart kimligi
 
 - `onayla TASK-x` sohbet satiri yalniz TASK-<sayi> taniyordu: `onayla TASK-VP-TR2` hicbir sey yazmadan DUSUYORDU

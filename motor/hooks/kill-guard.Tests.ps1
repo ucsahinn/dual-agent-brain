@@ -31,6 +31,17 @@ function Invoke-Guard($Komut, [hashtable]$Env = @{}, [string]$Arac = 'Bash', [st
 }
 
 Describe 'kill guard (BB5)' {
+    It 'registered worker PID stays protected and points to its owner-only channel command' {
+        $state=Join-Path $kgVault 'motor/scripts/.state/codex-kanal'
+        New-Item -ItemType Directory -Force $state | Out-Null
+        $workerId='CK-'+[guid]::NewGuid().ToString('N')
+        @{Owner='beyin-codex-kanal-v1';Id=$workerId;RootPid=$PID;RootStart=(Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o');OwnerSession='kg-test'} | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $state ($workerId+'.json'))
+        $r=Invoke-Guard "taskkill /PID $PID /F"
+        $r.Kod | Should Be 2
+        $r.Err | Should Match ('beyin codex kapat '+$workerId)
+        (Invoke-Guard ('beyin codex kapat '+$workerId)).Kod | Should Be 0
+        Remove-Item -LiteralPath (Join-Path $state ($workerId+'.json'))
+    }
     It 'ajanlari AD ile toptan olduren komutlar reddedilir (exit 2, gerekce stderr)' {
         foreach ($k in @('taskkill /IM node.exe /F', 'taskkill /F /IM "claude.exe"', 'Stop-Process -Name codex -Force', 'Get-Process node | Stop-Process', 'pkill -9 node', 'wmic process where name="node.exe" delete')) {
             $r = Invoke-Guard $k

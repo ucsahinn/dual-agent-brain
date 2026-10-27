@@ -94,4 +94,12 @@
             "$(Split-Path -Leaf $diger): $($ortak -join ',')" | Should Be "$(Split-Path -Leaf $diger): "
         }
     }
+    It 'Get-CizToastMetni: XML 1.0 gecersiz kontrol karakterini siler, ozel karakteri kacirir, boyu sinirlar' {
+        $g = Get-CizToastMetni ("a" + [char]1 + "<b>&'" + [char]0x1B + "[31m" + [char]0xB + "c" + [char]0xFFFE)
+        $g | Should Be 'a&lt;b&gt;&amp;&apos;[31mc'
+        { [xml]("<t>" + $g + "</t>") } | Should Not Throw
+        Get-CizToastMetni ("x`ty`r`nz") | Should Be "x`ty`r`nz"
+        (Get-CizToastMetni ('a' * 500) 220).Length | Should Be 220
+        Get-CizToastMetni $null | Should Be ''
+    }
 }

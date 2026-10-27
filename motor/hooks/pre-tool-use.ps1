@@ -91,6 +91,23 @@ try {
         if ($hedef.Count -gt 0) {
             $korunan = Get-BeyinKorunanPid -Paths $p
             foreach ($h in $hedef) {
+                # A registered worker is stopped only through its owner-checked job command.
+                # Raw PID kills remain denied, including when the worker is not an ancestor.
+                $kanalState = Join-Path $vault 'motor/scripts/.state/codex-kanal'
+                if (Test-Path -LiteralPath $kanalState) {
+                    foreach ($kf in Get-ChildItem -LiteralPath $kanalState -Filter 'CK-*.json' -File) {
+                        try {
+                            $kr = [IO.File]::ReadAllText($kf.FullName) | ConvertFrom-Json
+                            if ($kr.Owner -ne 'beyin-codex-kanal-v1' -or $kr.Id -cnotmatch '^CK-[a-f0-9]{32}$') { continue }
+                            $kp = Get-Process -Id $h -ErrorAction SilentlyContinue
+                            if ($kp -and $kr.RootPid -eq $h -and $kr.RootStart -and [math]::Abs(($kp.StartTime.ToUniversalTime()-[datetime]::Parse($kr.RootStart).ToUniversalTime()).TotalSeconds) -lt 1) {
+                                $red = "kayitli isci PID $h korunuyor; yalniz sahip oturum beyin codex kapat $($kr.Id) kullanabilir."
+                                break
+                            }
+                        } catch { }
+                    }
+                }
+                if ($red) { break }
                 if ($korunan.ContainsKey($h)) { $red = "korunan surec PID $h ($($korunan[$h])) hedefleniyor: bu bir ajan oturumu ya da onun ata surecidir. Oldurmek gerekiyorsa kullanici kendisi yapmali."; break }
             }
         }

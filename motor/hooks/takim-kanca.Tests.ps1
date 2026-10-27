@@ -168,6 +168,20 @@ Describe 'Takim (2026-10-12): adresli aktarim (sema v3)' {
         $icerik | Should Match 'codex/TASK-41 -> claude'
         $icerik | Should Match 'claude -> codex@TASK-41'
     }
+    It 'Close-BeyinHandoff: tek atimlik devir kapandiginda turetilmis acik aktarim gorunumu yenilenir' {
+        $h = Add-BeyinHandoff -Paths $tp -Metin 'tek-atimlik devir' -Kime codex -Kind 'devir' -FromAgent codex -Proje 'proj' -GorunumYok
+        $null = Update-BeyinAktarimlarMd -Paths $tp
+        $once = Get-Content -LiteralPath (Join-Path $tv '10-command-center\aktarimlar.md') -Raw -Encoding UTF8
+        ($once -match [regex]::Escape($h.Id)) | Should Be $true
+        $kapatildi = Close-BeyinHandoff -Paths $tp -Id $h.Id -DoneBy 'gosterildi (tek atimlik devir)'
+        $sonra = Get-Content -LiteralPath (Join-Path $tv '10-command-center\aktarimlar.md') -Raw -Encoding UTF8
+        $acikBolum = [regex]::Match($sonra, '(?ms)^## Acik \(\d+\)(.*?)(?=^## Kapali)').Groups[1].Value
+        $kapatildi | Should Be $true
+        ($acikBolum -match [regex]::Escape($h.Id)) | Should Be $false
+        $sonra | Should Match ([regex]::Escape($h.Id))
+        $sonra | Should Match '## Acik \(4\)'
+        $sonra | Should Match '## Kapali \(son 1\)'
+    }
     It 'kill-guard-on.mjs anlik teslim: isci yalniz toWorker mesajini alir, sef toWorker mesajini almaz' {
         if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Set-TestInconclusive 'node yok'; return }
         $mjs = Join-Path $tv 'motor\hooks\kill-guard-on.mjs'

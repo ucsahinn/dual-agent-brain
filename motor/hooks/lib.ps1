@@ -5110,7 +5110,12 @@ function Close-BeyinHandoff {
         $h = Get-BeyinHandoff -Paths $Paths -Id $Id
         if (-not $h -or [string]$h.status -ne 'acik') { return $false }
         $h.status = 'tamam'; $h.doneBy = $DoneBy; $h.doneTs = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
-        return [bool](Set-BeyinHandoff -Paths $Paths -Kayit $h).Ok
+        $yaz = Set-BeyinHandoff -Paths $Paths -Kayit $h
+        if (-not [bool]$yaz.Ok) { return $false }
+        # Any successful status change must refresh the derived view. session-start
+        # closes one-shot handoffs here, outside the CLI's explicit refresh path.
+        $null = Update-BeyinAktarimlarMd -Paths $Paths
+        return $true
     } catch { return $false }
 }
 

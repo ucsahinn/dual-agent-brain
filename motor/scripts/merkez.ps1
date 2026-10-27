@@ -107,7 +107,7 @@ function Bildir([string]$baslik, [string]$metin, [string]$tur = '') {
         # ses yalniz toast kipinde ve sessiz saat disinda (Windows'un varsayilan bildirim sesi eskiden her bildirimde caliyordu)
         $sesli = ($script:sesKip -eq 'toast' -and -not (SessizMi (Get-Date)))
         $ses = $(if (-not $sesli -or -not $tur) { "<audio silent='true'/>" } else { "<audio src='ms-winsoundevent:Notification.$(switch ($tur) { 'hata' { 'Reminder' } 'onay' { 'IM' } 'uyari' { 'Default' } default { 'Mail' } })'/>" })
-        $x.LoadXml("<toast><visual><binding template='ToastGeneric'><text>$([Security.SecurityElement]::Escape($baslik))</text><text>$([Security.SecurityElement]::Escape($metin))</text></binding></visual>$ses</toast>")
+        $x.LoadXml("<toast><visual><binding template='ToastGeneric'><text>$(Get-CizToastMetni $baslik)</text><text>$(Get-CizToastMetni $metin)</text></binding></visual>$ses</toast>")
         $app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show([Windows.UI.Notifications.ToastNotification]::new($x))
     } catch { }

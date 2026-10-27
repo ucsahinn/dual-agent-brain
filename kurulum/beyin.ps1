@@ -526,6 +526,16 @@ switch ($KomutN) {
         foreach ($x in $PA) { $pnArg += [string]$x.T }
         Cagir 'pano.ps1' $pnArg
     }
+    'codex' {
+        $ckArg = @()
+        foreach ($x in $PA) { $ckArg += [string]$x.T }
+        Cagir 'codex-kanal.ps1' $ckArg
+    }
+    'claude' {
+        $clArg = @()
+        foreach ($x in $PA) { $clArg += [string]$x.T }
+        Cagir 'claude-kanal.ps1' $clArg
+    }
     { $_ -in @('takim', 'team') } {
         # HAM GECIS (pano gibi): komut ve --bayraklar AgentChef team-run.mjs'e aynen gider;
         # Beyin fiilleri (durum|baslat|birlestir|durdur|maliyet) ve onay kapisi takim.ps1'de.

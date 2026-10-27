@@ -70,6 +70,11 @@ tasinmasi gerekir.
 | Gunluk log (makine) | `85-daylogs/` |
 | Genel bakis | `10-command-center/dashboard.md` |
 
+## Uzun hedef devam protokolu (iki ajan)
+
+- Mevcut goal'i surdur; depodaki tek kanonik plan/ledger yetkilidir. Brain proje notu, derlenmis ozet ve eski aktarim yalnizca isaretcidir; celiskide once kanonik ledger'a gore duzelt. Takim veya paralel delege etmeden once canli beyin kapasite onerisine bak; hafizadaki ajan sayisini guncel kapasite sayma.
+- Her devamda son tarihli checkpoint'i yeni kanitla karsilastir, kapali/acik sayisini yenile ve farkli bir guvenli kapiyi tarihli kanitla ilerlet. Hedef, eylem, ortam ve risk ayniysa onayi yeniden sorma veya degismemis kontrolu tekrarlama.
+- Ledger'dan sonra proje ve aktif isaretcilerini esitle; devralinmis aktarim cozuldugunde kapat. Yalniz kullanici/operator kaniti kaldiysa tek toplu eylem listesi ver ve yeni kanit gelene kadar ayni blokajlari yoklama.
 ## Hafiza protokolu
 
 Makine `85-daylogs/` ve `86-compiled/` klasorlerini kendi yazar. Sen **iliski
@@ -190,3 +195,11 @@ Her anlamli oturum iz birakir: ya bir not, ya bir karar, ya guncellenmis bir dos
   yazin AYRI bir baslik altina gitsin.
 - Codex oturumlarini `/exit` ile kapat: Codex SessionEnd'i yalniz normal
   kapanista atesler, pencereyi kapatinca atesmez.
+- Motor 1.7.0 (2026-10-27): `beyin codex` canli Codex isci kanalidir -
+  `gonder`/`ac`/`sor`/`devam` ile Claude bir Codex iscisine is verir ve cevabi ayni komutta
+  alir, ayni thread'de konusmayi surdurur; `steer`/`interrupt` calisan ise mudahale eder;
+  `liste`/`durum`/`kapat`/`yetim` isci kaydini yonetir; `tui` kullanicinin Codex ekranini
+  paylasilan loopback sunucusuna baglar. `beyin claude ac|sor|kapat` kalici stream-json Claude
+  iscisidir. Sef MCP sunucusu (`motor/mcp/beyin-sef-mcp`) ayni araclari MCP olarak verir.
+  Is bolumu ve kapilar: `80-memory/rules.md`, karar: `60-decisions/ADR-013`.
+  Ayrinti: `kurulum/KILAVUZ.md`.

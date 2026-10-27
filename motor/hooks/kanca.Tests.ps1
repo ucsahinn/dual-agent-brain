@@ -40,7 +40,10 @@ function New-KancaVault {
 }
 function Invoke-KancaIn([string]$Tv, [string]$Betik, [hashtable]$Payload) {
     $here = Join-Path $Tv 'motor\hooks'
-    return Invoke-Kanca $Betik $Payload
+    # These fixtures address Claude handoffs; the enclosing Codex shell must
+    # not select a different recipient through inherited CODEX_* variables.
+    $previousAgent=$env:BEYIN_AGENT
+    try{$env:BEYIN_AGENT='claude';return Invoke-Kanca $Betik $Payload}finally{$env:BEYIN_AGENT=$previousAgent}
 }
 function Remove-Oturum([string]$Sid) {
     Get-ChildItem -LiteralPath $p.Sessions -Filter "$Sid*" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue

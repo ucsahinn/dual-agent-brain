@@ -48,7 +48,11 @@ param(
     # ISCI ADRESI (2026-10-12, takim modu, sema v3): -Isci TASK-x yalniz o takim iscisine (Codex)
     # gider; genel '-Kime codex' mesaji isciye DUSMEZ. -Oturum <anahtar> belirli bir oturuma.
     [string]$Isci = '',
-    [string]$Oturum = ''
+    [string]$Oturum = '',
+    [string]$Gor = '',
+    [string]$Durum = '',
+    [string]$Kayit = '',
+    [string]$Olay = ''
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -121,6 +125,20 @@ function Bekle-Yanit([string]$SoruId, [int]$Saniye) {
 # fonksiyonun yazdigi satirlar o zaman cikis degerine karisir ve ekrana hic basilmaz (olculdu).
 $script:BekleKod = 0
 
+if ($Gor) {
+    $h = Read-BeyinHandoff -Paths $p -Id $Gor -Agent $ajan
+    if (-not $h) { Hata "aktarim bulunamadi: $Gor" }
+    Yaz ($h | ConvertTo-Json -Depth 6)
+    exit 0
+}
+if ($Durum) {
+    if (-not $Kayit -or $Durum -notin @('submitted','working','input-required','completed','failed','canceled')) { Hata '-Kayit <id> -Durum submitted|working|input-required|completed|failed|canceled gerekli' }
+    if (-not (Set-BeyinHandoffState -Paths $p -Id $Kayit -State $Durum -Agent $ajan)) { Hata 'durum yazilamadi' 3 }
+    $null = Update-BeyinAktarimlarMd -Paths $p
+    Yaz "Durum: $Kayit $Durum"
+    exit 0
+}
+
 # --- Bekle: -Bekle <id> ---
 if ($Bekle) {
     if (-not (Get-BeyinHandoff -Paths $p -Id $Bekle)) { Hata "aktarim bulunamadi: $Bekle" }
@@ -135,6 +153,7 @@ if ($Yanit) {
     if (-not $Metin) { Hata "yanit metni yok. Kullanim: beyin aktar `"yanit metni`" -Yanit $Yanit" }
     if ([string]$soru.status -ne 'acik') { Hata "soru zaten kapali ($($soru.doneBy)); yeni bir soru icin: beyin aktar `"...`" -Kime $($soru.from.agent)" }
     if ([string]$soru.to -ne $ajan) { Hata "bu soru '$($soru.to)' ajanina yazilmis; yanitini o ajan verir (sen: $ajan)." }
+    $null = Read-BeyinHandoff -Paths $p -Id $Yanit -Agent $ajan
     # $hedef ADI KULLANILAMAZ: -Hedef parametresiyle ayni degisken (PS harf duyarsiz); onu
     # ezip yaniti 'codex' adli bir projeye sinirliyordu (olculdu 2026-10-07).
     $yanitKime = [string]$soru.from.agent
@@ -156,15 +175,12 @@ if ($Yanit) {
 if ($Tamam) {
     $k = Get-BeyinHandoff -Paths $p -Id $Tamam
     if (-not $k) { Hata "aktarim bulunamadi: $Tamam  (liste: beyin aktar -Hepsi)" }
+    if ($k.to -ne $ajan) { Hata 'aktarimi yalniz alici kapatabilir' }
     if ($k.status -eq 'tamam') { Yaz "Zaten kapali: $Tamam ($($k.doneBy), $($k.doneTs))" 'Yellow'; exit 0 }
-    $k.status = 'tamam'
-    $k.doneBy = $ajan
-    $k.doneTs = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
-    $yaz = Set-BeyinHandoff -Paths $p -Kayit $k
-    if (-not $yaz.Ok) {
-        Write-BeyinLog -Vault $Vault -Message "aktar: KAPATILAMADI $Tamam ($($yaz.Hata))"
-        Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_YAZILAMADI' -Note $yaz.Hata
-        Hata "aktarim kapatilamadi - $($yaz.Hata)" 3
+    if (-not (Set-BeyinHandoffState -Paths $p -Id $Tamam -State completed -Agent $ajan)) {
+        Write-BeyinLog -Vault $Vault -Message "aktar: KAPATILAMADI $Tamam"
+        Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_YAZILAMADI' -Note $Tamam
+        Hata 'aktarim kapatilamadi' 3
     }
     Update-BeyinAktarimlarMd -Paths $p | Out-Null
     Write-BeyinLog -Vault $Vault -Message "aktar: kapatildi $Tamam (kapatan=$ajan)"
@@ -199,6 +215,7 @@ if (-not $Metin) {
         if ($h.from.PSObject.Properties['worker'] -and $h.from.worker) { $kimden += "/$($h.from.worker)" }
         Yaz "$($h.id)  [$durum]  [$tur]  $kimden -> $($h.to)  proje: $($h.from.project)$hedefP  $ts" $(if ($acik) { 'Cyan' } else { 'DarkGray' })
         Yaz "  soru   : $($h.question)"
+        Yaz "  A2A    : $(Get-BeyinHandoffState $h) | tekrar: $(if ($h.occurrences) { $h.occurrences } else { 1 })"
         if ($h.ref)      { Yaz "  yanitladigi: $($h.ref)" }
         if ($h.evidence) { Yaz "  kanit  : $($h.evidence)" }
         if ($h.scope)    { Yaz "  kapsam : $($h.scope)" }
@@ -231,7 +248,7 @@ if ($tur -eq 'devir' -and $kime -ne $ajan) {
 }
 $sonuc = Add-BeyinHandoff -Paths $p -Metin $Metin -Kime $kime -Kanit $Kanit -Kapsam $Kapsam -Risk $Risk -Sonraki $Sonraki `
     -Proje $proje -Kind $tur -FromAgent $ajan -FromSession $gonderenOturum -HedefProje $Hedef `
-    -ToWorker $Isci -ToSession ([string]$Oturum) -FromWorker $gonderenIsci
+    -ToWorker $Isci -ToSession ([string]$Oturum) -FromWorker $gonderenIsci -Ref $Olay
 if ($sonuc.Kod -eq 'BOS') { Hata 'bos soru/handoff metni' }
 if ($sonuc.Kod -eq 'REDAKSIYON_DUSTU') {
     Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'AKTAR_REDAKSIYON_DUSTU' -Note $sonuc.Hata

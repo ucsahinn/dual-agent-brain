@@ -6,6 +6,7 @@ function Get-KanalActiveCount($Context){
     return $count
 }
 function Resolve-KanalLaunch($Context,[string]$Engine='codex') {
+    if(-not (Resolve-KanalEngine $Engine)){throw 'Unknown engine; launch refused'}
     if($Engine -eq 'codex'){return Resolve-KanalCodex $Context}
     $node=Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $native=Get-Command ($Engine+'.exe') -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -28,7 +29,8 @@ function Open-KanalBridge($Context,[string]$Project,[string]$Role='', [switch]$S
         $engine=$(if($Context.Engine){$Context.Engine}else{'codex'})
         $id='CK-'+[guid]::NewGuid().ToString('N');$directory=Join-Path $Context.State $id
         New-Item -ItemType Directory -Force $directory | Out-Null
-        $record=[pscustomobject]@{Owner='beyin-codex-kanal-v1';Id=$id;OwnerSession=(Get-KanalOwnerSession);Backend='app-server';Project=(Resolve-Path -LiteralPath $Project).ProviderPath;Role=$roleInfo.Name;RoleModel=$roleInfo.Model;Sandbox=$roleInfo.Sandbox;RoleText=(Protect-KanalText $Context $roleInfo.Text);Status='queued';SessionId='';Turn=0;Created=[datetime]::UtcNow.ToString('o');Started='';Finished='';Pid=0;ProcessStart='';Prompt='';Answer='';Summary='';Error='';DurationSeconds=0;Background=$true;HandoffValid=$false;HandoffCheck='';Notification=''}
+        if(-not (Resolve-KanalEngine $engine)){throw 'Unknown engine; launch refused'}
+        $record=[pscustomobject]@{Owner='beyin-codex-kanal-v1';Engine=$engine;Id=$id;OwnerSession=(Get-KanalOwnerSession);Backend='app-server';Project=(Resolve-Path -LiteralPath $Project).ProviderPath;Role=$roleInfo.Name;RoleModel=$roleInfo.Model;Sandbox=$roleInfo.Sandbox;RoleText=(Protect-KanalText $Context $roleInfo.Text);Status='queued';SessionId='';Turn=0;Created=[datetime]::UtcNow.ToString('o');Started='';Finished='';Pid=0;ProcessStart='';Prompt='';Answer='';Summary='';Error='';DurationSeconds=0;Background=$true;HandoffValid=$false;HandoffCheck='';Notification=''}
         Save-KanalRecord $Context $record
         $record|Add-Member -NotePropertyName WindowsSandbox -NotePropertyValue $(if($Context.WindowsSandbox){$Context.WindowsSandbox}else{'elevated'}) -Force
         if($engine -eq 'codex'){
@@ -50,8 +52,19 @@ function Open-KanalBridge($Context,[string]$Project,[string]$Role='', [switch]$S
         $paths=Get-BeyinPaths -Vault $Context.Vault
         $handoffDirectory=$(if($Context.BridgeLaunch){Join-Path $Context.State 'fixture-notifications'}else{$paths.Handoff})
         $checker='';$chef=Get-KanalChefRoot;if($chef -and (Test-Path (Join-Path $chef 'scripts/coordination-board.mjs'))){$checker=Join-Path $chef 'scripts/coordination-board.mjs'}
-        $config=@{state=$Context.State;id=$id;owner=$record.OwnerSession;command=$launch.command;args=$arguments;timeout=15000;share=[bool]$Share;handoffDirectory=$handoffDirectory;engine=$engine;readOnly=($record.Sandbox -eq 'read-only');tokenBudget=
+        $config=@{vault=$Context.Vault;state=$Context.State;id=$id;owner=$record.OwnerSession;command=$launch.command;args=$arguments;timeout=15000;share=[bool]$Share;handoffDirectory=$handoffDirectory;engine=$engine;readOnly=($record.Sandbox -eq 'read-only');tokenBudget=
             $(if($Context.TokenBudget){$Context.TokenBudget}else{[long](Get-BeyinAyar 'BEYIN_CODEX_JETON_BUTCE' '2000000')});pricesFile=(Join-Path $Context.Vault 'motor/scripts/fiyat.json');checker=$checker;dietFile=$dietFile}
+        if($engine -eq 'codex'){
+            $config.profiles=@(Get-KanalProfiles $Context);$config.autoProfileSwitch=[bool]$Context.AutoProfileSwitch
+            if($Share -and $config.profiles.Count){throw 'Profile selection currently requires a private stdio channel'}
+            foreach($selected in $config.profiles){
+                $profileContext=$Context.Clone()
+                if($selected.home){$profileContext.ConfigPath=Join-Path $selected.home 'config.toml'}
+                $profileDirectory=Join-Path $directory ('profile-'+$selected.name)
+                $profileDiet=New-KanalMcpProfile $profileContext $record.Role $profileDirectory
+                $selected.arguments=@($profileDiet.Arguments)
+            }
+        }
         if($Context.SetupLockOptions){$config.setupLockOptions=$Context.SetupLockOptions}
         [IO.File]::WriteAllText((Join-Path $directory 'launch.json'),($config|ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding $false))
         $code='& '+(Quote-KanalLiteral $Context.Entry)+' -Komut sunucu -Id '+(Quote-KanalLiteral $id)+' -Vault '+(Quote-KanalLiteral $Context.Vault)+' -EtatRacine '+(Quote-KanalLiteral $Context.State)
@@ -63,6 +76,31 @@ function Open-KanalBridge($Context,[string]$Project,[string]$Role='', [switch]$S
     do{[Threading.Thread]::Sleep(50);$record=Read-KanalRecord $Context $id;if($record.Status -in @('failed','closed')){throw ('Channel host failed during startup: '+$record.Error)}}while($record.Status -eq 'queued' -and [datetime]::UtcNow -lt $until)
     if($record.Status -eq 'queued'){try{Close-KanalWorker $Context $id|Out-Null}catch{};throw "Channel startup timeout; inspect owned worker $id"}
     return $record
+}
+function Resume-KanalBridge($Context,[string]$Id){
+    $gate=Open-KanalLock (Join-Path $Context.State 'admission.lock')
+    try{
+        $r=Read-KanalRecord $Context $Id
+        if($r.OwnerSession -cne (Get-KanalOwnerSession)){throw 'Channel owner session mismatch'}
+        if(Test-KanalProcessIdentity $r.Pid $r.ProcessStart){return $r}
+        if(-not $r.SessionId -or -not (Resolve-KanalBackend $r.Backend)){throw 'No owned resumable checkpoint'}
+        $directory=Join-Path $Context.State $Id;$launch=Join-Path $directory 'launch.json'
+        $config=[IO.File]::ReadAllText($launch)|ConvertFrom-Json
+        if($config.owner -cne $r.OwnerSession -or $config.id -cne $Id -or $config.state -cne $Context.State){throw 'Checkpoint launch ownership mismatch'}
+        $engine=Resolve-KanalEngine $r.Engine $config.engine
+        if(-not $engine -or $engine -cne $config.engine){throw 'Unknown or mismatched checkpoint engine'}
+        if($r.Status -eq 'closed'){throw 'Explicitly closed workers cannot auto-resume'}
+        $cap=Get-KanalCapacity $Context;if($cap.onerilen -le (Get-KanalActiveCount $Context)){throw 'capacity rejected for checkpoint resume'}
+        $r.Status='queued';$r.Error='';$r|Add-Member -NotePropertyName ResumeCheckpoint -NotePropertyValue $true -Force;Save-KanalRecord $Context $r
+        $code='& '+(Quote-KanalLiteral $Context.Entry)+' -Komut sunucu -Id '+(Quote-KanalLiteral $Id)+' -Vault '+(Quote-KanalLiteral $Context.Vault)+' -EtatRacine '+(Quote-KanalLiteral $Context.State)
+        $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
+        $child=Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -WindowStyle Hidden -WorkingDirectory $Context.Vault -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$encoded) -PassThru
+        try{$r.Pid=$child.Id;$r.ProcessStart=$child.StartTime.ToUniversalTime().ToString('o');Save-KanalRecord $Context $r}finally{$child.Dispose()}
+    }finally{$gate.Dispose()}
+    $until=[datetime]::UtcNow.AddSeconds(95)
+    do{[Threading.Thread]::Sleep(50);$r=Read-KanalRecord $Context $Id}while($r.Status -eq 'queued' -and [datetime]::UtcNow -lt $until)
+    if($r.Status -ne 'ready'){throw ('Checkpoint resume failed: '+$r.Status+' '+$r.Error)}
+    return $r
 }
 function Run-KanalBridgeHost($Context,[string]$Id) {
     $until=[datetime]::UtcNow.AddSeconds(15);$gate=$null

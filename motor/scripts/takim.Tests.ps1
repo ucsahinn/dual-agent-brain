@@ -13,6 +13,8 @@ $powershell = (Get-Command powershell.exe -ErrorAction Stop).Source
 function New-SahteTeamRun {
     param([string]$Kok)
     New-Item -ItemType Directory -Force -Path (Join-Path $Kok 'scripts') | Out-Null
+    # Legacy fixture exercises experimental opt-in; 1.9 tests select their version explicitly.
+    [IO.File]::WriteAllText((Join-Path $Kok 'package.json'), '{"name":"agentchef","version":"1.5.0"}', (New-Object Text.UTF8Encoding $false))
     $js = @'
 import fs from "node:fs";
 import path from "node:path";
@@ -46,6 +48,8 @@ function Echo-Json([string]$Out) { return (($Out -split "`n" | Where-Object { $_
 
 Describe 'beyin takim sarmalayicisi (2026-10-12)' {
     BeforeEach {
+        $script:takimSavedEnv = @{}
+        foreach ($name in @('BEYIN_AGENTCHEF_KOK','BEYIN_TAKIM_PANEL','AGENTCHEF_TEAM_PANE','AGENTCHEF_TEAM_MODE')) { $script:takimSavedEnv[$name] = [Environment]::GetEnvironmentVariable($name) }
         $script:kok = Join-Path $TestDrive ('ac-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
         New-SahteTeamRun -Kok $script:kok
         $script:tv = Join-Path $TestDrive ('vault-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
@@ -59,7 +63,7 @@ Describe 'beyin takim sarmalayicisi (2026-10-12)' {
         $env:BEYIN_TAKIM_PANEL = 'off'   # testler Windows Terminal sekmesi ACMAZ
         $env:AGENTCHEF_TEAM_PANE = $null
     }
-    AfterEach { $env:BEYIN_AGENTCHEF_KOK = $null; $env:BEYIN_TAKIM_PANEL = $null; $env:AGENTCHEF_TEAM_PANE = $null }
+    AfterEach { foreach ($name in $script:takimSavedEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $script:takimSavedEnv[$name]) } }
 
     It '1.9 lead-review and cleanup flags pass through without manufacturing approval' {
         '{"name":"agentchef","version":"1.9.0"}'|Set-Content (Join-Path $script:kok 'package.json')
@@ -194,11 +198,13 @@ Describe 'beyin takim sarmalayicisi (2026-10-12)' {
 }
 
 Describe 'AgentChef kesfi (2026-10-14): Belgeler/kod klasorleri, git origin guveni, yazar yolu yok' {
+    Mock Get-BeyinAgentChefSearchRoots { @($env:USERPROFILE, (Join-Path $env:USERPROFILE 'source\repos')) }
     It 'source\repos altindaki agentchef bulunur; origin baska depoyu gosteren agentchef-kopya elenir; hicbiri yoksa Yol bos' {
         $ev = Join-Path $TestDrive ('ev-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
-        $eskiEv = $env:USERPROFILE; $eskiAyar = $env:BEYIN_AGENTCHEF_KOK
+        $eskiEv = $env:USERPROFILE; $eskiAyar = $env:BEYIN_AGENTCHEF_KOK; $eskiRoot = $env:AGENTCHEF_ROOT
         try {
             $env:USERPROFILE = $ev; $env:BEYIN_AGENTCHEF_KOK = (Join-Path $ev 'yok-agentchef')   # makinedeki gercek ayari ez; gecersiz ayar taramayi durdurmamali
+            $env:AGENTCHEF_ROOT = $null
             New-Item -ItemType Directory -Force -Path (Join-Path $ev '.beyin') | Out-Null
             $yap = { param($k, $surum, $origin) New-Item -ItemType Directory -Force -Path (Join-Path $k 'scripts'), (Join-Path $k '.git') | Out-Null
                 Set-Content -LiteralPath (Join-Path $k 'scripts\coordination-board.mjs') -Value '//' -Encoding ASCII
@@ -214,7 +220,7 @@ Describe 'AgentChef kesfi (2026-10-14): Belgeler/kod klasorleri, git origin guve
             $k.Yol | Should Be (Join-Path $ev 'source\repos\agentchef')
             $k.Kaynak | Should Be 'tarama'
             (Get-BeyinAgentChefKok).Kaynak | Should Be 'onbellek'
-        } finally { $env:USERPROFILE = $eskiEv; $env:BEYIN_AGENTCHEF_KOK = $eskiAyar }
+        } finally { $env:USERPROFILE = $eskiEv; $env:BEYIN_AGENTCHEF_KOK = $eskiAyar; $env:AGENTCHEF_ROOT = $eskiRoot }
     }
 }
 

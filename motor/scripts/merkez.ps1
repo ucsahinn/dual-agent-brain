@@ -269,7 +269,7 @@ function AjanSatirHam($ag, [int]$gen, [bool]$secili, [bool]$idGoster, [int]$ekGe
     $yasRenk = $(if ($ag.Bayat -or $uzun) { $cWarn } else { $cMuted })
     if (-not $ag.Bayat -and -not $uzun -and $d -eq 'calisiyor') { $yasRenk = $(if ($yasSn -ge 0 -and $yasSn -le 10) { $cOk } elseif ($yasSn -le 60) { $cText } else { $cMuted }) }   # taze nabiz yesil
     $yas = "$yasRenk$(if ($yasSn -ge 3600) { KisaYas $yasSn } else { Kisa $yasSn })$(if ($ag.Bayat) { ' !' })$RS"
-    $ek = @(); if ($ag.Jeton) { $ek += "$(Fmt $ag.Jeton) jt" }; if ($ag.Dosya) { $ek += "$($ag.Dosya) dosya" }
+    $ek = @(); if ($ag.Jeton) { $ek += "$(Fmt $ag.Jeton) jt" }; if ($ag.Onay) { $ek += "$($ag.Onay) onay" }; if ($ag.Dosya) { $ek += "$($ag.Dosya) dosya" }
     $ekS = $(if ($ek.Count) { "$cFaint$($ek -join ' · ')$RS" } else { '' })
     # dar satirda "N mesaj" sutunu gizlenir: yer en bilgilendirici kisma, balona kalir
     $sol = "$isaret $nokta $(Pad $ad 18) $(if ($gen -ge 110) { (Pad $rol 15) + ' ' })$(Pad $durumYazi 16) "
@@ -545,6 +545,10 @@ function BolumKartlar($L, $a) {
     }
 }
 function BolumSirada($L, $bolumBas, $a) {
+    if ($a.Kuyruk -or $a.Sprint) {
+        $summary = "Kuyruk: $(@($a.Kuyruk).Count) | Sprint: " + ((@($a.Sprint | ForEach-Object { "$(Protect-MerkezSatir $_.Ad 30) ($($_.Acik) acik)" })) -join ', ')
+        $L.Add((Row (Protect-MerkezSatir $summary ($script:w - 6)) $script:w))
+    }
     $w = $script:w; $ic = $w - 4; $sr = $a.Sirada; if (-not $sr) { return }
     $srr = switch ([string]$sr.Renk) { 'ok' { $cOk } 'warn' { $cWarn } 'err' { $cErr } default { $cText } }
     # yalniz HATA serit nabiz atar; uyari sabit sari, yolunda sabit mavi

@@ -8,7 +8,8 @@ param(
     [string]$Vault = '', [string]$EtatRacine = '', [ValidateSet('exec','app-server')][string]$Motor='app-server',
     [string]$Istek='',[ValidateSet('accept','decline','cancel')][string]$Karar='decline',[switch]$Uret,
     [ValidateSet('codex','claude')][string]$Engine='codex',[string[]]$YazmaKapsami=@(),[long]$JetonButce=2000000,
-    [ValidateSet('elevated','unelevated')][string]$WindowsSandbox='elevated'
+    [ValidateSet('elevated','unelevated')][string]$WindowsSandbox='elevated',
+    [string]$CodexHome='', [string]$CodexProfil='', [string]$ProfilDosya='', [switch]$LimitteProfilDegistir
 )
 $ErrorActionPreference = 'Stop'
 try {
@@ -22,6 +23,9 @@ try {
     $ctx = New-KanalContext $Vault
     $ctx.Engine=$Engine;$ctx.WriteScopes=$YazmaKapsami;$ctx.TokenBudget=$JetonButce
     $ctx.WindowsSandbox=$WindowsSandbox
+    $ctx.CodexHome=$CodexHome;$ctx.CodexProfile=$CodexProfil;$ctx.CodexProfileFile=$ProfilDosya;$ctx.AutoProfileSwitch=[bool]$LimitteProfilDegistir
+    if($Engine -ne 'codex' -and ($CodexHome -or $CodexProfil -or $ProfilDosya -or $LimitteProfilDegistir)){throw 'Codex profiles require the codex engine'}
+    if($Motor -eq 'exec' -and ($CodexHome -or $CodexProfil -or $ProfilDosya -or $LimitteProfilDegistir)){throw 'Codex profile selection requires app-server'}
     if($Engine -eq 'claude'){$ctx.State=Join-Path $Vault 'motor/scripts/.state/claude-kanal';$ctx.Entry=Join-Path $PSScriptRoot 'claude-kanal.ps1'}
     if ($EtatRacine) {
         if ($Komut -notin @('isci','sunucu')) { throw 'EtatRacine is internal to detached workers' }
@@ -65,8 +69,12 @@ try {
         'devam' {
             if (-not $Id -or $Rol -or $Proje) { throw 'devam requires owned id; project and role are fixed' }
             $owned=Read-KanalRecord $ctx $Id
-            if($owned.Backend -in @('app-server','claude-stream')){$r=Send-KanalBridge $ctx $Id 'sor' (New-KanalCompiledPrompt $ctx $owned.RoleText (New-KanalBrief $Metin $owned.Project)).Text -Background:$Arkaplan}
-            else{$r = Submit-KanalTurn $ctx -Id $Id -Metin $Metin -Arkaplan:$Arkaplan}
+            if($owned.BackendStatus -eq 'unknown' -or (-not (Resolve-KanalBackend $owned.Backend) -and $owned.Backend)){throw 'Unknown backend; resume refused'}
+            if($owned.EngineStatus -eq 'unknown' -or ($owned.Engine -and -not (Resolve-KanalEngine $owned.Engine))){throw 'Unknown engine; resume refused'}
+            if($owned.Backend -in @('app-server','claude-stream')){
+                if(-not (Test-KanalProcessIdentity $owned.Pid $owned.ProcessStart)){$owned=Resume-KanalBridge $ctx $Id}
+                $r=Send-KanalBridge $ctx $Id 'sor' (New-KanalCompiledPrompt $ctx $owned.RoleText (New-KanalBrief $Metin $owned.Project)).Text -Background:$Arkaplan
+            }else{$r = Submit-KanalTurn $ctx -Id $Id -Metin $Metin -Arkaplan:$Arkaplan}
             $r | ConvertTo-Json -Depth 10
             if ($r.Status -in @('failed','invalid-handoff')) { exit 3 }
         }

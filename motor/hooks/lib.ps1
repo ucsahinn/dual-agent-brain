@@ -188,6 +188,7 @@ function Get-BeyinAyarKayitlari {
     # yerde Get-BeyinAyar cagrisi. Kopyasini baska bir betige YAZMA.
     if ($null -ne $script:BeyinAyarKayitlari) { return $script:BeyinAyarKayitlari }
     $script:BeyinAyarKayitlari = @(
+        @{ Ad = 'BEYIN_GETIRME_RRF'; Varsayilan = '0'; Secenekler = @('0','1'); Aciklama = 'RRF retrieval fusion opt-in (0: hybrid, 1: rrf60)' },
         @{ Ad = 'BEYIN_OZETLEYICI';  Varsayilan = 'auto';                   Secenekler = @('auto', 'claude', 'codex'); Aciklama = 'Ozetleyici arka uc' },
         @{ Ad = 'BEYIN_CODEX_MODEL'; Varsayilan = '';                       Secenekler = @();                          Aciklama = 'Codex arka ucu model adi (bos = codex varsayilani)' },
         @{ Ad = 'BEYIN_EMBED_MODEL'; Varsayilan = 'bge-m3';                 Secenekler = @();                          Aciklama = 'Ollama gomme modeli' },
@@ -1578,7 +1579,7 @@ function Get-BeyinTranscriptFormat {
 
 function ConvertTo-BeyinTurnText {
     # Bir icerik alanini (string ya da blok dizisi) duz metne cevirir.
-    # Arac GIRDILERI alinmaz - sir en cok orada olur; yalniz aracin adi kalir.
+    # R9: yalniz duz konusma metni; arac adlari da hafizaya girmez.
     param($Content)
     if ($null -eq $Content) { return '' }
     if ($Content -is [string]) { return $Content }
@@ -1591,13 +1592,6 @@ function ConvertTo-BeyinTurnText {
         switch -Regex ($bt) {
             '^(text|input_text|output_text)$' {
                 if ($blk.PSObject.Properties['text']) { $text += [string]$blk.text + "`n" }
-            }
-            '^(tool_use|function_call|local_shell_call|custom_tool_call)$' {
-                $n = 'arac'
-                foreach ($k in @('name','tool_name')) {
-                    if ($blk.PSObject.Properties[$k] -and $blk.$k) { $n = [string]$blk.$k; break }
-                }
-                $text += "[arac: $n]`n"
             }
         }
     }
@@ -2779,7 +2773,7 @@ function Get-BeyinConceptIndex {
     $enYeni = ($dosyalar | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc.Ticks
     # 'v2-' (2026-10-05): terimler artik ek soyucudan geciyor ve 'guncel' alani
     # eklendi; eski onbellek ayni parmak iziyle bayat kalirdi.
-    $parmak = "v2-$($dosyalar.Count)-$enYeni"
+    $parmak = "v3-heading-$($dosyalar.Count)-$enYeni"
     # UZANTI '.dat', '.json' DEGIL (2026-09-11).
     #
     # brain-cli vault'taki .json dosyalarini sema denetiminden geciriyor ve
@@ -2834,6 +2828,12 @@ function Get-BeyinConceptIndex {
             $guncel = ''
             $mu = [regex]::Match($metin, '(?m)^updated:\s*"?(\d{4}-\d{2}-\d{2})')
             if ($mu.Success) { $guncel = $mu.Groups[1].Value }
+            $chunkTerms = @()
+            if ($f.Length -le 1MB) {
+                $body = [IO.File]::ReadAllText($f.FullName) -replace '(?s)\A\uFEFF?---\r?\n.*?\r?\n---\r?\n', ''
+                $body = [regex]::Replace($body, $script:BeyinIlgiliBolumRx, '', $script:BeyinRxCIMS)
+                $chunkTerms = @(Split-BeyinHeadingChunks -Text $body | ForEach-Object { [pscustomobject]@{ terim=@(Get-BeyinKelimeler -Text $_) } })
+            }
             $items.Add([pscustomobject]@{
                 dosya   = $f.Name
                 baslik  = $baslik
@@ -2843,6 +2843,7 @@ function Get-BeyinConceptIndex {
                 # govdede gecenden cok daha guclu bir alaka sinyalidir.
                 bterim  = @(Get-BeyinKelimeler -Text ($baslik + ' ' + [IO.Path]::GetFileNameWithoutExtension($f.Name)))
                 gterim  = @(Get-BeyinKelimeler -Text $govde)
+                parcalar = $chunkTerms
             })
         } catch { }
     }
@@ -2901,11 +2902,17 @@ function Find-BeyinRelevantConcepts {
 
     $skorlu = New-Object System.Collections.Generic.List[object]
     foreach ($it in $idx) {
-        $skor = 0
-        $tutan = New-Object System.Collections.Generic.List[string]
-        foreach ($t in $qt) {
-            if ($it.bterim -contains $t)      { $skor += 2; $tutan.Add($t) }
-            elseif ($it.gterim -contains $t)  { $skor += 1; $tutan.Add($t) }
+        $skor = 0; $tutan = @()
+        # Score one heading-bounded chunk at a time; unrelated sections cannot
+        # jointly satisfy the two-term relevance gate. Old caches remain readable.
+        $chunks = @([pscustomobject]@{terim=@($it.gterim)}) + @($it.parcalar | Where-Object { $_ })
+        foreach ($chunk in $chunks) {
+            $chunkScore = 0; $matched = @()
+            foreach ($t in $qt) {
+                if ($it.bterim -contains $t) { $chunkScore += 2; $matched += $t }
+                elseif ($chunk.terim -contains $t) { $chunkScore++; $matched += $t }
+            }
+            if ($chunkScore -gt $skor) { $skor=$chunkScore; $tutan=$matched }
         }
         # IKI KOSUL BIRDEN: hem agirlikli skor esigi hem EN AZ IKI AYRI TERIM.
         #
@@ -4814,6 +4821,8 @@ function Set-BeyinHandoff {
         if (-not (Test-BeyinHandoffId -Id ([string]$Kayit.id))) { return @{ Ok = $false; Hata = "gecersiz kimlik: $($Kayit.id)" } }
         New-Item -ItemType Directory -Force -Path $Paths.Handoff -ErrorAction Stop | Out-Null
         $f = Join-Path $Paths.Handoff "$($Kayit.id).json"
+        $archived = Join-Path (Join-Path $Paths.Handoff 'arsiv') "$($Kayit.id).json"
+        if (-not (Test-Path -LiteralPath $f) -and (Test-Path -LiteralPath $archived)) { $f = $archived }
         Write-BeyinText -Path $f -Text (ConvertTo-Json -InputObject $Kayit -Depth 4 -Compress)
         if (-not (Test-Path -LiteralPath $f)) { return @{ Ok = $false; Hata = 'dosya olusmadi' } }
         return @{ Ok = $true; Hata = '' }
@@ -4952,6 +4961,17 @@ function Update-BeyinAktarimlarMd {
 }
 
 function Add-BeyinHandoff {
+    param([hashtable]$Paths, [string]$Metin, [string]$Kime, [string]$Kanit = '', [string]$Kapsam = '', [string]$Risk = '',
+          [string]$Sonraki = '', [string]$Proje = '', [string]$Kind = 'soru', [string]$Ref = '', [string]$Coordinator = '',
+          [string]$FromAgent = '', [string]$FromSession = '', [switch]$GorunumYok, [string]$HedefProje = '',
+          [string]$ToWorker = '', [string]$ToSession = '', [string]$FromWorker = '',
+          [ValidateSet('submitted','working','input-required','completed','failed','canceled')][string]$A2aStatus = 'submitted')
+    $handoffArgs = @{}; foreach ($key in $PSBoundParameters.Keys) { $handoffArgs[$key] = $PSBoundParameters[$key] }
+    New-Item -ItemType Directory -Force -Path $Paths.Handoff | Out-Null
+    Invoke-BeyinWithLock -LockPath (Join-Path $Paths.Handoff 'events.lock') -Action { Add-BeyinHandoffCore @handoffArgs }
+}
+
+function Add-BeyinHandoffCore {
     # TEK KAYIT YOLU (2026-10-06): aktar.ps1 ve pano brifingi ayni fonksiyondan yazar.
     # Sema v2: kind (soru|brifing|devir), ref (tekillestirme anahtari), coordinator.
     # Alanlar Protect-BeyinSecrets'ten FAIL-CLOSED gecer; yazim geri okunur.
@@ -4959,7 +4979,7 @@ function Add-BeyinHandoff {
     param([hashtable]$Paths, [string]$Metin, [string]$Kime, [string]$Kanit = '', [string]$Kapsam = '', [string]$Risk = '',
           [string]$Sonraki = '', [string]$Proje = '', [string]$Kind = 'soru', [string]$Ref = '', [string]$Coordinator = '',
           [string]$FromAgent = '', [string]$FromSession = '', [switch]$GorunumYok, [string]$HedefProje = '',
-          [string]$ToWorker = '', [string]$ToSession = '', [string]$FromWorker = '')
+          [string]$ToWorker = '', [string]$ToSession = '', [string]$FromWorker = '', [string]$A2aStatus = 'submitted')
     $r = @{ Ok = $false; Id = ''; Hata = ''; Kod = ''; Maske = 0 }
     $kisalt = { param([string]$T, [int]$Max) $t = ([string]$T -replace '\s+', ' ').Trim(); if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max - 3) + '...' }; $t }
     # HEDEF DOGRULAMASI (2026-10-07): claude|codex disinda bir hedefe yazilan aktarimi hic
@@ -4993,6 +5013,22 @@ function Add-BeyinHandoff {
         $alanlar[$ad] = (& $kisalt $deger $sinir[$ad])
     }
     if (-not $alanlar.question) { $r.Kod = 'BOS'; $r.Hata = 'bos soru/handoff metni'; return $r }
+    # Ref is the producer's event identity. Distinct states and recipients never merge.
+    if ($Ref) {
+        $existing = @(Get-BeyinHandoffListe -Paths $Paths -Hepsi | Where-Object {
+            $_.ref -eq $Ref -and $_.from.agent -eq $FromAgent -and $_.from.worker -eq $FromWorker -and
+            $_.to -eq $Kime -and $_.toWorker -eq $ToWorker -and $_.toSession -eq $ToSession -and
+            $_.toProject -eq $HedefProje -and $_.kind -eq $Kind -and (Get-BeyinHandoffState $_) -eq $A2aStatus
+        } | Select-Object -First 1)
+        if ($existing.Count) {
+            $h = $existing[0]
+            $count = 1; if ($h.PSObject.Properties['occurrences']) { $count = [int]$h.occurrences }
+            $h | Add-Member -NotePropertyName occurrences -NotePropertyValue ($count + 1) -Force
+            $saved = Set-BeyinHandoff -Paths $Paths -Kayit $h
+            $r.Ok = $saved.Ok; $r.Id = [string]$h.id; $r.Kod = 'TEKILLESTIRILDI'; $r.Hata = $saved.Hata
+            return $r
+        }
+    }
     $inv = [Globalization.CultureInfo]::InvariantCulture
     $id = (Get-Date).ToString('yyyyMMddTHHmmss', $inv) + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 4))
     $surum = $(if ($ToWorker -or $ToSession -or $FromWorker) { 3 } else { 2 })
@@ -5002,7 +5038,7 @@ function Add-BeyinHandoff {
         to = $Kime; toProject = $HedefProje; toWorker = $ToWorker; toSession = $ToSession
         kind = $(if ($Kind) { $Kind } else { 'soru' }); ref = $Ref; coordinator = $Coordinator
         question = $alanlar.question; evidence = $alanlar.evidence; scope = $alanlar.scope; risk = $alanlar.risk; next = $alanlar.next
-        status = 'acik'; doneBy = ''; doneTs = ''
+        status = 'acik'; a2aStatus = $A2aStatus; occurrences = 1; doneBy = ''; doneTs = ''
     }
     $yaz = Set-BeyinHandoff -Paths $Paths -Kayit $kayit
     if (-not $yaz.Ok) { $r.Kod = 'YAZILAMADI'; $r.Hata = $yaz.Hata; return $r }
@@ -5010,7 +5046,53 @@ function Add-BeyinHandoff {
     if (-not $geri -or [string]$geri.question -ne [string]$alanlar.question) { $r.Kod = 'YAZILAMADI'; $r.Hata = 'geri okuma farkli ya da yok'; return $r }
     if (-not $GorunumYok) { $null = Update-BeyinAktarimlarMd -Paths $Paths }
     $r.Ok = $true; $r.Id = $id; $r.Kod = 'KAYDEDILDI'
+    Write-BeyinMakbuz -Paths $Paths -Script 'aktar' -Outcome 'KAYDEDILDI' -Agent $FromAgent -Note $id
     return $r
+}
+
+function Get-BeyinHandoffState {
+    param($Kayit)
+    if ($Kayit.PSObject.Properties['a2aStatus'] -and $Kayit.a2aStatus) { return [string]$Kayit.a2aStatus }
+    if ($Kayit.status -eq 'tamam') { return 'completed' }
+    return 'submitted'
+}
+
+function Set-BeyinHandoffState {
+    param([hashtable]$Paths, [string]$Id,
+          [ValidateSet('submitted','working','input-required','completed','failed','canceled')][string]$State,
+          [string]$Agent = '', [string]$DoneBy = '')
+    if (-not (Test-Path -LiteralPath $Paths.Handoff)) { return $false }
+    if (-not $Agent) { $Agent = Get-BeyinAgent }
+    Invoke-BeyinWithLock -LockPath (Join-Path $Paths.Handoff 'events.lock') -Action {
+        $h = Get-BeyinHandoff -Paths $Paths -Id $Id
+        if (-not $h -or $h.to -ne $Agent) { return $false }
+        $current = Get-BeyinHandoffState $h
+        if ($current -eq $State) { return $true }
+        if ($current -in @('completed','failed','canceled') -or $State -eq 'submitted') { return $false }
+        $h | Add-Member -NotePropertyName a2aStatus -NotePropertyValue $State -Force
+        if ($State -in @('completed','failed','canceled')) {
+            $h.status = 'tamam'; $h.doneBy = $(if ($DoneBy) { $DoneBy } else { $Agent }); $h.doneTs = Get-BeyinIsoNow
+        } else { $h.status = 'acik' }
+        $ok = [bool](Set-BeyinHandoff -Paths $Paths -Kayit $h).Ok
+        if ($ok) { Write-BeyinMakbuz -Paths $Paths -Script 'aktar' -Outcome $(if ($h.status -eq 'tamam') { 'KAPANDI' } else { 'DURUM' }) -Agent $Agent -Note "$Id $State" }
+        return $ok
+    }
+}
+
+function Read-BeyinHandoff {
+    param([hashtable]$Paths, [string]$Id, [string]$Agent = '')
+    if (-not (Test-Path -LiteralPath $Paths.Handoff)) { return $null }
+    if (-not $Agent) { $Agent = Get-BeyinAgent }
+    Invoke-BeyinWithLock -LockPath (Join-Path $Paths.Handoff 'events.lock') -Action {
+        $h = Get-BeyinHandoff -Paths $Paths -Id $Id
+        if (-not $h -or $h.to -ne $Agent) { return $null }
+        if (-not $h.PSObject.Properties['readTs'] -or -not $h.readTs) {
+            $h | Add-Member -NotePropertyName readTs -NotePropertyValue (Get-BeyinIsoNow) -Force
+            if (-not (Set-BeyinHandoff -Paths $Paths -Kayit $h).Ok) { throw 'read receipt could not be persisted' }
+            Write-BeyinMakbuz -Paths $Paths -Script 'aktar' -Outcome 'OKUNDU' -Agent $Agent -Note $Id
+        }
+        return $h
+    }
 }
 
 # ============================================================================
@@ -5105,13 +5187,18 @@ function Request-BeyinTeslimHakki {
 
 function Close-BeyinHandoff {
     # Acik aktarimi kapatir (status=tamam). Zaten kapaliysa $false.
-    param([hashtable]$Paths, [string]$Id, [string]$DoneBy = '')
+    param([hashtable]$Paths, [string]$Id, [string]$DoneBy = '', [string]$Agent = '')
     try {
         $h = Get-BeyinHandoff -Paths $Paths -Id $Id
         if (-not $h -or [string]$h.status -ne 'acik') { return $false }
-        $h.status = 'tamam'; $h.doneBy = $DoneBy; $h.doneTs = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
-        $yaz = Set-BeyinHandoff -Paths $Paths -Kayit $h
-        if (-not [bool]$yaz.Ok) { return $false }
+        if (-not $Agent) {
+            # A single-shot self-devir is consumed by the memory engine on
+            # behalf of its stored owner, including cross-agent summarizers.
+            # Ordinary messages and explicit callers retain recipient checks.
+            if ($h.kind -eq 'devir' -and $h.to -in @('claude','codex') -and $h.from.agent -eq $h.to) { $Agent = [string]$h.to }
+            else { $Agent = Get-BeyinAgent }
+        }
+        if (-not (Set-BeyinHandoffState -Paths $Paths -Id $Id -State completed -Agent $Agent -DoneBy $DoneBy)) { return $false }
         # Any successful status change must refresh the derived view. session-start
         # closes one-shot handoffs here, outside the CLI's explicit refresh path.
         $null = Update-BeyinAktarimlarMd -Paths $Paths
@@ -5143,7 +5230,9 @@ function Add-BeyinDevir {
     if (-not $metin) { return $r }
     $ref = "devir@$SessionKey"
     foreach ($h in @(Get-BeyinHandoffListe -Paths $Paths)) {
-        if ([string]$h.kind -eq 'devir' -and [string]$h.ref -eq $ref) { $null = Close-BeyinHandoff -Paths $Paths -Id ([string]$h.id) -DoneBy 'devir (yenisi yazildi)' }
+        if ([string]$h.kind -eq 'devir' -and [string]$h.ref -eq $ref -and $h.to -eq $Agent -and $h.from.agent -eq $Agent) {
+            $null = Close-BeyinHandoff -Paths $Paths -Id ([string]$h.id) -DoneBy 'devir (yenisi yazildi)' -Agent $Agent
+        }
     }
     $a = Add-BeyinHandoff -Paths $Paths -Metin $metin -Kime $Agent -Proje $Proje -Kind 'devir' -Ref $ref -FromAgent $Agent -FromSession $SessionKey
     $r.Ok = [bool]$a.Ok; $r.Id = [string]$a.Id; $r.Kod = [string]$a.Kod
@@ -5347,6 +5436,19 @@ function Invoke-BeyinNodeUtf8 {
     try { return (& $Node @Arglar 2>&1) }
     finally { if ($eski) { try { [Console]::OutputEncoding = $eski } catch { } } }
 }
+function Get-BeyinAgentChefSearchRoots {
+    # One boundary for machine-specific folders; tests replace it with fixture roots.
+    $roots = New-Object System.Collections.Generic.List[string]
+    foreach ($root in @($env:USERPROFILE, ([Environment]::GetFolderPath('MyDocuments')), ([Environment]::GetFolderPath('Desktop')))) {
+        if ($root -and -not $roots.Contains($root)) { $roots.Add($root) }
+    }
+    foreach ($child in @('source\repos','src','dev','code','kod','projects','Projects','repos','git','github','GitHub')) {
+        $root = Join-Path $env:USERPROFILE $child
+        if ((Test-Path -LiteralPath $root -PathType Container) -and -not $roots.Contains($root)) { $roots.Add($root) }
+    }
+    return $roots.ToArray()
+}
+
 function Get-BeyinAgentChefKok {
     param([switch]$Hizli)
     # AGENTCHEF YOLU. Sira: (1) ayar BEYIN_AGENTCHEF_KOK, (2) ortam AGENTCHEF_ROOT, (3) onbellek
@@ -5379,9 +5481,7 @@ function Get-BeyinAgentChefKok {
             if (-not $ob -and $Hizli -and $obYas -lt 10) { return $r }
         }
     } catch { }
-    $kokler = New-Object System.Collections.Generic.List[string]
-    foreach ($k in @($env:USERPROFILE, ([Environment]::GetFolderPath('MyDocuments')), ([Environment]::GetFolderPath('Desktop')))) { if ($k -and -not $kokler.Contains($k)) { $kokler.Add($k) } }
-    foreach ($alt in @('source\repos', 'src', 'dev', 'code', 'kod', 'projects', 'Projects', 'repos', 'git', 'github', 'GitHub')) { $k = Join-Path $env:USERPROFILE $alt; if ((Test-Path -LiteralPath $k -PathType Container) -and -not $kokler.Contains($k)) { $kokler.Add($k) } }
+    $kokler = @(Get-BeyinAgentChefSearchRoots)
     $enIyi = $null; $enIyiV = $null; $enIyiOn = $false
     foreach ($kok in $kokler) {
         foreach ($a in @(Get-ChildItem -LiteralPath $kok -Directory -ErrorAction SilentlyContinue)) {
@@ -5805,7 +5905,7 @@ function Protect-BeyinBlok {
 }
 
 function Get-BeyinKaynakOzeti {
-    param([hashtable]$Paths, [int]$CommitEsik = 85, [int]$BostaDk = 120, [string]$SessionKey = '', [int]$OnbellekDk = 10)
+    param([hashtable]$Paths, [int]$CommitEsik = 85, [int]$BostaDk = 120, [string]$SessionKey = '', [int]$OnbellekDk = 10, [switch]$SaltOkunur)
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $r = @{ Ok = $false; CommitYuzde = -1; CommitGB = 0.0; CommitTavanGB = 0.0; BosRamGB = -1.0; OnerilenAjan = 0; OlcumYasiDk = 0; BostaOturum = 0; AktifOturum = 0; Esik = $false; Satir = ''; Ms = 0 }
     try {
@@ -5839,7 +5939,7 @@ function Get-BeyinKaynakOzeti {
                 # '<=4 isci' yerine olcumden turetilen ONERI. Ayni CIM nesnesinden, ek maliyet yok.
                 try { $r.BosRamGB = [math]::Round([double]$os.FreePhysicalMemory / 1MB, 1) } catch { }
                 $r.Ok = $true
-                if ($onbF) {
+                if ($onbF -and -not $SaltOkunur) {
                     try {
                         Write-BeyinText -Path $onbF -Text (@{ ts = (Get-Date).ToString('o', [Globalization.CultureInfo]::InvariantCulture); commitYuzde = $r.CommitYuzde; commitGB = $r.CommitGB; commitTavanGB = $r.CommitTavanGB; bosRamGB = $r.BosRamGB; onerilenAjan = [int][math]::Min(6, [math]::Max(2, [math]::Floor([math]::Max(0, $r.BosRamGB)))) } | ConvertTo-Json -Compress)
                     } catch { }
@@ -5867,7 +5967,7 @@ function Get-BeyinKaynakOzeti {
         # %88'de bile 4 oneriyordu; artik commit esigi asildiysa 0-1.
         $ko = Get-BeyinKapasiteOneri -CommitYuzde $r.CommitYuzde -BosRamGB $r.BosRamGB -CommitEsik $CommitEsik
         $r.OnerilenAjan = $ko.Onerilen; $r.OneriNeden = $ko.Neden; $r.KapasiteTavan = $ko.Tavan
-        if ($r.Ok -and $Paths -and $Paths.ScrState) { try { Write-BeyinKapasite -Paths $Paths -Kaynak $r } catch { } }
+        if ($r.Ok -and $Paths -and $Paths.ScrState -and -not $SaltOkunur) { try { Write-BeyinKapasite -Paths $Paths -Kaynak $r } catch { } }
         $r.Esik = (($r.CommitYuzde -ge $CommitEsik) -or ($r.BostaOturum -ge 5))
         if ($r.Esik) {
             $saat = [math]::Round($BostaDk / 60.0, 1)
@@ -6059,6 +6159,11 @@ function Start-BeyinEmbedWarmup {
     } catch { }
 }
 
+function Get-BeyinRetrievalFusion {
+    if ((Get-BeyinAyar 'BEYIN_GETIRME_RRF' '0') -eq '1') { return 'rrf60' }
+    return 'hibrit'
+}
+
 function Find-BeyinRelevantConceptsVec {
     # Vektor + anahtar kelime hibrit geri getirme. Donus: @{ Ok; Sonuc=@(...) }.
     # Ok=$false -> vektor yolu kullanilamadi, cagiran kelime yoluna duser.
@@ -6070,13 +6175,13 @@ function Find-BeyinRelevantConceptsVec {
         [int]$TopK = 6,
         [double]$MinBenzerlik = 0.42,   # olculdu: dogru not 0.45-0.67, medyan 0.33-0.40 (bge-m3)
         [int]$TimeoutMs = 800,
-        # FUSION DENEYI (BB2): 'hibrit' (varsayilan: cos*10 + baslik*2 + govde) ya da
-        # 'rrfK' (K=5/60: esigi gecen adaylarda cos sirasi ile kelime sirasinin
-        # karsilikli sira birlesimi). Varsayilan ancak holdout >= +0.02 olursa degisir.
-        [string]$Fusion = 'hibrit',
+        # F2: RRF uses the union of independent vector and keyword rankings.
+        # Frozen holdout 2026-10-28: hybrid and rrf60 rank-1 both 0.969 (32 cases).
+        [string]$Fusion = '',
         [switch]$SonmeYok
     )
     $r = @{ Ok = $false; Sonuc = @() }
+    if (-not $Fusion) { $Fusion = Get-BeyinRetrievalFusion }
     try {
         $vi = Get-BeyinVectorIndex -Paths $Paths
         if (-not $vi) { return $r }
@@ -6144,13 +6249,10 @@ function Find-BeyinRelevantConceptsVec {
             $secilen.Add([pscustomobject]@{ Item = $it; Skor = $hibrit; Tutan = @($tutan.ToArray()); Cos = [math]::Round($cos, 3); Kel = ($bt * 2 + $gt) })
         }
         $liste = @($secilen.ToArray())
-        if ($Fusion -match '^rrf(\d+)$' -and $liste.Count -gt 1) {
-            $rrfK = [double]$Matches[1]
-            $rc = @{}; $rk = @{}; $sira = 1
-            foreach ($x in @($liste | Sort-Object Cos -Descending)) { $rc[[string]$x.Item.dosya] = $sira; $sira++ }
-            $sira = 1
-            foreach ($x in @($liste | Sort-Object Kel -Descending)) { $rk[[string]$x.Item.dosya] = $sira; $sira++ }
-            foreach ($x in $liste) { $x.Skor = [math]::Round(100.0 * (1.0 / ($rrfK + $rc[[string]$x.Item.dosya]) + 1.0 / ($rrfK + $rk[[string]$x.Item.dosya])), 3) }
+        if ($Fusion -match '^rrf(\d+)$') {
+            $rrfK = [int]$Matches[1]
+            $keywords = @(Find-BeyinRelevantConcepts -Paths $Paths -Query $Query -EnFazla $TopK -SonmeYok)
+            $liste = @(Merge-BeyinRanks -Vector @($liste | Sort-Object Cos -Descending) -Keyword $keywords -K $rrfK)
         }
         if (-not $SonmeYok) {
             $sn = Get-BeyinKullanimSonme -Paths $Paths
@@ -6612,6 +6714,285 @@ function ConvertTo-BeyinSlug {
     if ($ayrilmis -contains $govde) { $t = $t + '-kaynak' }
 
     return $t
+}
+
+function Merge-BeyinRanks {
+    param([object[]]$Vector, [object[]]$Keyword, [ValidateRange(1,10000)][int]$K = 60)
+    $scores = @{}; $items = @{}
+    foreach ($ranking in @(@{ Rows=$Vector }, @{ Rows=$Keyword })) {
+        $seen = @{}; $rank = 0
+        foreach ($row in @($ranking.Rows)) {
+            if (-not $row -or -not $row.Item.dosya) { continue }
+            $key = [string]$row.Item.dosya
+            if ($seen.ContainsKey($key)) { continue }
+            $seen[$key] = $true; $rank++
+            $scores[$key] = [double]$scores[$key] + 1.0 / ($K + $rank)
+            if (-not $items.ContainsKey($key)) { $items[$key] = $row }
+        }
+    }
+    $rows = foreach ($key in $scores.Keys) {
+        [pscustomobject]@{ Item=$items[$key].Item; Skor=$scores[$key]; Tutan=@($items[$key].Tutan); Cos=$items[$key].Cos }
+    }
+    return @($rows | Sort-Object -Property @{Expression={$_.Skor};Descending=$true}, @{Expression={$_.Item.dosya}})
+}
+
+function Split-BeyinHeadingChunks {
+    param([string]$Text, [ValidateRange(32,65536)][int]$MaxChars = 2000)
+    $section = New-Object Text.StringBuilder
+    $fenced = $false
+    foreach ($line in ($Text -split '\r?\n')) {
+        $heading = (-not $fenced -and $line -match '^#{1,6}\s+')
+        if ($heading -and $section.Length) {
+            $body = $section.ToString().Trim()
+            for ($offset=0; $offset -lt $body.Length; $offset += $MaxChars) { $body.Substring($offset, [math]::Min($MaxChars, $body.Length - $offset)) }
+            [void]$section.Clear()
+        }
+        if ($line -match '^\s*(```|~~~)') { $fenced = -not $fenced }
+        [void]$section.AppendLine($line)
+    }
+    $body = $section.ToString().Trim()
+    for ($offset=0; $offset -lt $body.Length; $offset += $MaxChars) { $body.Substring($offset, [math]::Min($MaxChars, $body.Length - $offset)) }
+}
+
+function Get-BeyinNodeReplReport {
+    param([object[]]$Processes, [int]$Limit = 4)
+    if (-not $PSBoundParameters.ContainsKey('Processes')) {
+        $Processes = @(Get-CimInstance Win32_Process -Property Name,ProcessId,ParentProcessId,CreationDate -OperationTimeoutSec 5 -ErrorAction Stop)
+    }
+    $byId = @{}; foreach ($pr in $Processes) { $byId[[int]$pr.ProcessId] = $pr }
+    $rows = @($Processes | Where-Object { $_.Name -eq 'node_repl.exe' } | ForEach-Object {
+        $parent = $byId[[int]$_.ParentProcessId]
+        $orphan = -not $parent
+        if ($parent -and $parent.CreationDate -and $_.CreationDate) { $orphan = ([datetime]$parent.CreationDate -gt [datetime]$_.CreationDate) }
+        [pscustomobject]@{ Pid=[int]$_.ProcessId; Parent=[int]$_.ParentProcessId; Orphan=$orphan }
+    })
+    return @{ Count=$rows.Count; OrphanCount=@($rows | Where-Object { $_.Orphan }).Count; Excess=($rows.Count -gt $Limit); Limit=$Limit; Processes=$rows }
+}
+
+function Add-BeyinSessionHistory {
+    param([hashtable]$Paths, [string]$Session, [string]$Project, [string]$Task = '',
+          [ValidateSet('open','resume','complete','failed','close')][string]$Event, [string]$Agent = '', [string]$EventId = '')
+    $root = Join-Path $Paths.ScrState 'session-history'
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    # Project is local runtime identity, like Sessions.cwd; it is never sent to a model.
+    # Personal-path redaction would break filtering and continuation chains.
+    $safe = Protect-BeyinSecrets -Text ($Session + "`n" + $Task) -Vault $Paths.Vault
+    if ($safe.Failed -gt 0 -or $safe.Redactions -gt 0) { throw 'history metadata redaction failed' }
+    $entry = [ordered]@{ zaman=(Get-BeyinIsoNow); isciId=$Task; motor=$Agent; oturumId=$Session; proje=$Project; isAnahtari=$Task; olay=$Event; eventId=$EventId }
+    Invoke-BeyinWithLock -LockPath (Join-Path $root 'history.lock') -Action {
+        if ($EventId -and (Test-Path -LiteralPath (Join-Path $root 'events.jsonl'))) {
+            foreach ($line in [IO.File]::ReadAllLines((Join-Path $root 'events.jsonl'))) {
+                try { if (($line | ConvertFrom-Json).eventId -eq $EventId) { return } } catch { }
+            }
+        }
+        Add-BeyinText -Path (Join-Path $root 'events.jsonl') -Text (($entry | ConvertTo-Json -Compress) + "`n")
+    }
+}
+
+function Get-BeyinChannelSnapshot {
+    param([hashtable]$Paths)
+    $snapshot = @{}
+    foreach ($engine in @('codex','claude')) {
+        $root = Join-Path $Paths.ScrState ($engine + '-kanal')
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $root -Filter 'CK-*.json' -File)) {
+            try {
+                $r = [IO.File]::ReadAllText($file.FullName) | ConvertFrom-Json
+                if ($r.Owner -ne 'beyin-codex-kanal-v1' -or $r.Id -cnotmatch '\ACK-[a-f0-9]{32}\z' -or $r.Id -ne $file.BaseName) { continue }
+                $snapshot[[string]$r.Id] = $r
+            } catch { }
+        }
+    }
+    return $snapshot
+}
+
+function Sync-BeyinChannelHistory {
+    # Dispatcher integration: never load channel code or write its records.
+    param([hashtable]$Paths, [hashtable]$Before, [string]$Engine, [string]$Action, [string]$TargetId = '', [string]$Project = '')
+    $after = Get-BeyinChannelSnapshot -Paths $Paths
+    foreach ($id in $after.Keys) {
+        $r = $after[$id]
+        if ($TargetId -and $r.Id -ne $TargetId) { continue }
+        if ($Project -and $r.Project -ne $Project) { continue }
+        if ($r.Engine -ne $Engine -or -not $r.SessionId -or -not $r.Project) { continue }
+        Sync-BeyinChannelRecordEvidence -Paths $Paths -Record $r
+    }
+}
+
+function Sync-BeyinChannelRecordEvidence {
+    # Called by all producers AND the dispatcher. A durable cursor and stable
+    # event/report identities make replay and overlapping callers idempotent.
+    param([hashtable]$Paths, $Record)
+    $r=$Record
+    if ($r.Owner -ne 'beyin-codex-kanal-v1' -or $r.Id -cnotmatch '\ACK-[a-f0-9]{32}\z' -or
+        $r.Engine -notin @('codex','claude') -or -not $r.SessionId -or -not $r.Project) { return }
+    $root=Join-Path $Paths.ScrState 'session-history/channel'
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    $cursor=Join-Path $root ($r.Id+'.json')
+    Invoke-BeyinWithLock -LockPath (Join-Path $root ($r.Id+'.lock')) -Action {
+        $old=$null
+        if (Test-Path -LiteralPath $cursor) { $old=[IO.File]::ReadAllText($cursor) | ConvertFrom-Json }
+        $task=$(if ($r.TaskKey) { [string]$r.TaskKey } else { [string]$r.Id })
+        $base=([string]$r.Id)+'|'+([string]$r.SessionId)+'|'+([string]$r.Turn)
+        $events=@()
+        if (-not $old -or $old.SessionId -ne $r.SessionId) { $events+='open' }
+        elseif ([long]$old.Turn -ne [long]$r.Turn) { $events+='resume' }
+        if ($r.Status -eq 'completed') { $events+='complete' }
+        elseif ($r.Status -eq 'closed') { $events+='close' }
+        elseif ($r.Status -in @('failed','interrupted','stalled','invalid-handoff')) { $events+='failed' }
+        foreach ($event in $events) {
+            Add-BeyinSessionHistory -Paths $Paths -Session ([string]$r.SessionId) -Project ([string]$r.Project) -Task $task -Event $event -Agent ([string]$r.Engine) -EventId ($base+'|'+$event)
+        }
+        if ($r.Status -eq 'completed' -and $r.HandoffValid -and $r.Answer) {
+            $sha=[Security.Cryptography.SHA256]::Create()
+            try { $reportKey=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($base)))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+            $null=Write-BeyinProjectReport -Project ([string]$r.Project) -Task ([string]$r.Id) -Text ([string]$r.Answer) -ReportKey $reportKey
+        }
+        Write-BeyinText -Path $cursor -Text (@{SessionId=$r.SessionId;Turn=$r.Turn;Status=$r.Status} | ConvertTo-Json -Compress)
+    }
+}
+
+function Get-BeyinSessionHistory {
+    param([hashtable]$Paths, [string]$Project = '', [string]$Task = '')
+    $files = New-Object System.Collections.Generic.List[string]
+    $own = Join-Path $Paths.ScrState 'session-history'
+    if (Test-Path -LiteralPath $own) {
+        foreach ($f in @(Get-ChildItem -LiteralPath $own -Filter '*.jsonl' -File -Recurse)) { $files.Add($f.FullName) }
+    }
+    foreach ($engine in @('codex','claude')) {
+        $root = Join-Path $Paths.ScrState ($engine + '-kanal')
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        # Read the channel's own journal, including its archive; never manufacture history.
+        foreach ($f in @(Get-ChildItem -LiteralPath $root -Filter '*gunluk*.jsonl' -File -Recurse)) { $files.Add($f.FullName) }
+    }
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($file in $files) {
+        foreach ($line in [IO.File]::ReadLines($file)) {
+            try {
+                $r = $line | ConvertFrom-Json
+                if ($Project -and $r.proje -ne $Project) { continue }
+                if ($Task -and $r.isAnahtari -ne $Task) { continue }
+                $rows.Add($r)
+            } catch { }
+        }
+    }
+    return @($rows | Sort-Object zaman)
+}
+
+function Resolve-BeyinContainedFile {
+    param([string]$Root, [string]$Path)
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw 'evidence root missing' }
+    $fullRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (-not $fullPath.StartsWith($fullRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'evidence outside root' }
+    if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) { throw 'evidence file missing' }
+    $scan = Get-Item -LiteralPath $fullPath -Force
+    while ($scan) {
+        if ($scan.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'evidence crosses a reparse point' }
+        if ($scan -is [IO.FileInfo]) { $scan = $scan.Directory } else { $scan = $scan.Parent }
+    }
+    return $fullPath
+}
+
+function Get-BeyinReportRoot {
+    param([string]$Project)
+    if (-not (Test-Path -LiteralPath $Project -PathType Container)) { throw 'project root missing' }
+    $full = [IO.Path]::GetFullPath($Project).TrimEnd('\','/')
+    # Refuse junctions/symlinks in both the project ancestry and the managed root.
+    $scan = Get-Item -LiteralPath $full -Force
+    while ($scan) {
+        if ($scan.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'report root crosses a reparse point' }
+        $scan = $scan.Parent
+    }
+    $root = Join-Path $full '.beyin\raporlar'
+    foreach ($path in @((Join-Path $full '.beyin'), $root)) {
+        if ((Test-Path -LiteralPath $path) -and ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'report root is a reparse point' }
+    }
+    return $root
+}
+
+function Get-BeyinProjectReports {
+    param([string]$Project)
+    $root = Get-BeyinReportRoot -Project $Project
+    if (-not (Test-Path -LiteralPath $root)) { return @() }
+    foreach ($file in @(Get-ChildItem -LiteralPath $root -Filter '*.md' -File | Where-Object { $_.Name -ne 'index.md' } | Sort-Object Name)) {
+        if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+        $head = [string](Read-BeyinFileHead -Path $file.FullName -Lines 24)
+        $match = [regex]::Match($head, '(?im)^Outcome\s*:\s*(.+)$')
+        if (-not $match.Success) { $match = [regex]::Match($head, '(?im)^#{1,6}[ \t]+Outcome[ \t]*\r?\n[ \t]*([^\r\n]+)') }
+        [pscustomobject]@{ Path=$file.FullName; Name=$file.Name; Outcome=$match.Groups[1].Value.Trim() }
+    }
+}
+
+function Write-BeyinProjectReport {
+    param([string]$Project, [string]$Task, [string]$Text, [string]$ReportKey = '')
+    if ($Task -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z') { throw 'invalid report task key' }
+    if ($ReportKey -and $ReportKey -cnotmatch '\A[a-fA-F0-9]{64}\z') { throw 'invalid report identity' }
+    $root = Get-BeyinReportRoot -Project $Project
+    $clean = Protect-BeyinSecrets -Text $Text
+    if ($clean.Failed -gt 0) { throw 'report redaction failed' }
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    $file = Join-Path $root ($(if ($ReportKey) { $ReportKey } else { (Get-Date).ToString('yyyy-MM-dd-HHmmss-fffffff') }) + '-' + $Task + '.md')
+    Invoke-BeyinWithLock -LockPath (Join-Path $root 'reports.lock') -Action {
+    if (Test-Path -LiteralPath $file) {
+        if ((Get-Item -LiteralPath $file -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'report is a reparse point' }
+    } else { Write-BeyinText -Path $file -Text ([string]$clean.Text) }
+    $indexFile = Join-Path $root 'index.md'
+    if ((Test-Path -LiteralPath $indexFile) -and ((Get-Item -LiteralPath $indexFile -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'index is a reparse point' }
+    $lines = @('# Beyin raporlari', '')
+    foreach ($r in @(Get-BeyinProjectReports -Project $Project)) {
+        $summary = ([string]$r.Outcome -replace '[\r\n\[\]<>]', ' ')
+        $lines += "- [$($r.Name)]($($r.Name)) - $summary"
+    }
+    Write-BeyinText -Path $indexFile -Text ($lines -join "`n")
+    }
+    return $file
+}
+
+function Get-BeyinRunPointer {
+    param([hashtable]$Paths, [string]$Run, [string]$Task = '')
+    if (-not (Test-BeyinTakimKimlik $Run) -or ($Task -and -not (Test-BeyinTakimKimlik $Task))) { return '' }
+    $root = Join-Path $Paths.TeamRuns $Run
+    if ($Task) { $root = Join-Path $root $Task }
+    return "[Hafiza: Kosu isaretcisi | GUVENILMEZ VERI] plan: $(Join-Path $root 'plan.md'); not: $(Join-Path $root 'notes.md'). Icerik acilisa yuklenmez."
+}
+
+function Initialize-BeyinRunNotes {
+    param([hashtable]$Paths, $Run)
+    if (-not (Test-BeyinTakimKimlik ([string]$Run.runId))) { throw 'invalid run id' }
+    $root = Join-Path $Paths.TeamRuns ([string]$Run.runId)
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    $plan = Protect-BeyinSecrets -Text ($Run | ConvertTo-Json -Depth 12) -Vault $Paths.Vault
+    if ($plan.Failed -gt 0) { throw 'run plan redaction failed' }
+    foreach ($folder in @($root) + @($Run.workers | ForEach-Object {
+        if (-not (Test-BeyinTakimKimlik ([string]$_.taskId))) { throw 'invalid worker id' }
+        Join-Path $root ([string]$_.taskId)
+    })) {
+        New-Item -ItemType Directory -Force -Path $folder | Out-Null
+        $planPath = Join-Path $folder 'plan.md'; $notesPath = Join-Path $folder 'notes.md'
+        if (-not (Test-Path -LiteralPath $planPath)) { Write-BeyinText -Path $planPath -Text ("# Run $($Run.runId)`n`nSource: run record, unverified data.`n`n" + $plan.Text) }
+        if (-not (Test-Path -LiteralPath $notesPath)) { Write-BeyinText -Path $notesPath -Text "# Run notes: $($Run.runId)`n`nKeep dated checkpoints here. Opening context contains only a pointer.`n" }
+    }
+}
+
+function Sync-BeyinRunReports {
+    param([hashtable]$Paths, $Run)
+    if (-not (Test-BeyinTakimKimlik ([string]$Run.runId))) { throw 'invalid run id' }
+    if (-not $Run.repo -or -not (Test-Path -LiteralPath $Run.repo -PathType Container)) { return }
+    $sourceRoot = Join-Path (Join-Path $Paths.TeamRuns ([string]$Run.runId)) 'reports'
+    if (-not (Test-Path -LiteralPath $sourceRoot)) { return }
+    foreach ($worker in @($Run.workers)) {
+        $report = [string]$worker.reportId
+        if (-not $report) { continue }
+        if ($report -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,160}\.md\z') { throw 'invalid report path' }
+        $source = Join-Path $sourceRoot $report
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { continue }
+        $source = Resolve-BeyinContainedFile -Root $Paths.TeamRuns -Path $source
+        $receipt = Join-Path $sourceRoot ($report + '.project-path')
+        if (Test-Path -LiteralPath $receipt) { continue }
+        $target = Write-BeyinProjectReport -Project ([string]$Run.repo) -Task ([string]$worker.taskId) -Text ([IO.File]::ReadAllText($source))
+        Write-BeyinText -Path $receipt -Text $target
+    }
 }
 
 function Write-BeyinLog {

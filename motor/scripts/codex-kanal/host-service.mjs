@@ -3,9 +3,10 @@ import {AppServerRpc} from './protocol.mjs';
 import {startShared,launchTui} from './sharing.mjs';
 import {Supervisor,Ledger} from './supervisor.mjs';
 import {ClaudeRpc} from '../claude-kanal/stream.mjs';
-import {approvalPolicy,briefWriteScopes,budgetState,detectLimit,LimitQueue,handoffSchema,toHandoff} from './policy.mjs';
+import {approvalPolicy,briefWriteScopes,channelBudget,channelEngine,channelBackend,workerExit,detectLimit,LimitQueue,handoffSchema,toHandoff} from './policy.mjs';
 import {spawnSync} from 'node:child_process';
 import {acquireSetupLock} from './setup-lock.mjs';
+import {persistChannelEvidence} from '../channel-evidence.mjs';
 
 export function redact(value,secrets=[]){
  if(typeof value!=='string')return JSON.stringify(sanitize(value,secrets));
@@ -44,12 +45,57 @@ export class ChannelHost {
   this.cfg=config;this.file=path.join(config.state,config.id+'.json');this.directory=path.join(config.state,config.id);
   this.record=JSON.parse(fs.readFileSync(this.file,'utf8').replace(/^\uFEFF/,''));
   if(this.record.Owner!=='beyin-codex-kanal-v1'||this.record.OwnerSession!==config.owner)throw new Error('Channel owner mismatch');
+  this.record.Engine=this.record.EngineStatus==='unknown'?null:channelEngine(this.record.Engine,config.engine??'codex');
+  if(config.engine&&this.record.Engine!==config.engine)this.record.Engine=null;
+  this.record.Backend=this.record.BackendStatus==='unknown'?null:channelBackend(Object.hasOwn(this.record,'Backend')?this.record.Backend:(this.record.Engine==='claude'?'claude-stream':'app-server'));
+  if(!this.record.Engine)this.record.EngineStatus='unknown';if(!this.record.Backend)this.record.BackendStatus='unknown';
   fs.mkdirSync(path.join(this.directory,'commands'),{recursive:true});fs.mkdirSync(path.join(this.directory,'responses'),{recursive:true});
   this.approvals=new Map();this.active=null;this.stopping=false;this.lastEvent=Date.now();
   this.secretValues=[];
   this.supervisor=new Supervisor(config.supervisor);this.ledger=new Ledger(path.join(this.directory,'ledger.json'));this.idleSince=Date.now();
   this.limitQueue=new LimitQueue(this.record.LimitQueue);this.turnQueue=Promise.resolve();this.autoResuming=false;
   this.prices={};if(config.pricesFile){try{this.prices=JSON.parse(fs.readFileSync(config.pricesFile,'utf8').replace(/^\uFEFF/,''));}catch{}}
+ }
+ warning(message){this.record.Warnings=[...(this.record.Warnings||[]),redact(message,this.secretValues).slice(-8192)].slice(-100);}
+ budget(){return channelBudget(this.record.Usage,this.cfg.tokenBudget||2000000,this.record.RoleModel||'',this.prices,this.record.BillingMode||'unknown',this.record.RateLimits);}
+ checkpoint(text){
+  if(text!==undefined)fs.writeFileSync(path.join(this.directory,'plan.md'),redact(text,this.secretValues),{mode:0o600});
+  fs.writeFileSync(path.join(this.directory,'notes.md'),redact(this.record.Answer||this.record.Summary||'No completed handoff yet.',this.secretValues),{mode:0o600});
+  atomicJson(path.join(this.directory,'checkpoint.json'),{threadId:this.record.SessionId,turn:this.record.Turn,status:this.record.Status,engine:this.record.Engine,backend:this.record.Backend,at:new Date().toISOString()},this.secretValues);
+ }
+ async discover(){
+  if(this.record.Engine!=='codex'){this.record.BillingMode='unknown';return;}
+  const models=[];let cursor=null;const seen=new Set();
+  try{do{
+   const page=await this.rpc.call('model/list',{...(cursor?{cursor}:{}),limit:100});
+   for(const m of page.data||[])if(typeof m.model==='string'&&/^[A-Za-z0-9._:-]+$/.test(m.model))models.push({model:m.model,isDefault:m.isDefault===true});
+   cursor=page.nextCursor;if(cursor&&seen.has(cursor))throw new Error('Repeated model cursor');if(cursor)seen.add(cursor);
+   if(seen.size>20)throw new Error('Model list exceeded page limit');
+  }while(cursor);
+   this.record.ModelList=models;this.record.ModelListStatus='available';
+  }catch{this.record.ModelList=[];this.record.ModelListStatus='unavailable';this.warning('model/list unavailable; using configured catalog then review_model');}
+  const requested=this.record.RequestedModel??this.record.RoleModel;this.record.RequestedModel=requested||'';
+  const available=this.record.ModelList.map(m=>m.model);
+  const selected=[requested,this.record.CatalogModel,this.record.ReviewModel].find(m=>m&&available.includes(m))||this.record.ModelList.find(m=>m.isDefault)?.model||available[0];
+  this.record.RoleModel=selected||this.record.CatalogModel||this.record.ReviewModel||requested||'';
+  this.record.ModelSelection={requested:requested||'',selected:this.record.RoleModel,source:selected?'model/list':'configured-fallback'};
+  try{const result=await this.rpc.call('account/read',{});this.record.BillingMode=result.account?.type==='chatgpt'?'subscription':result.account?.type==='apiKey'?'api':'unknown';}catch{this.record.BillingMode='unknown';}
+ }
+ async rotateProfile(){
+  if(!this.cfg.autoProfileSwitch||this.record.Engine!=='codex'||this.cfg.share)return false;
+  const index=(this.record.ProfileIndex||0)+1,profile=this.cfg.profiles?.[index];if(!profile)return false;
+  const previous=this.cfg.profiles?.[this.record.ProfileIndex||0];
+  const oldHome=path.resolve(previous?.home||process.env.CODEX_HOME||path.join(process.env.USERPROFILE||process.env.HOME||'.','.codex'));
+  const newHome=path.resolve(profile.home||process.env.CODEX_HOME||path.join(process.env.USERPROFILE||process.env.HOME||'.','.codex'));
+  const changedHome=process.platform==='win32'?oldHome.toLowerCase()!==newHome.toLowerCase():oldHome!==newHome;
+  this.restarting=true;
+  try{
+   await this.rpc.close();this.record.ProfileIndex=index;this.record.ProfileName=profile.name;
+   this.record.ProfileSwitch={name:profile.name,sessionPolicy:changedHome?'fresh-home':'resume',previousThread:this.record.SessionId};
+   if(changedHome){this.record.PreviousSessions=[...(this.record.PreviousSessions||[]),this.record.SessionId];this.record.SessionId='';this.record.ProfileCarry=true;}
+   await this.start();this.event('profile-switched',{name:profile.name});return true;
+  }
+  finally{this.restarting=false;}
  }
  rememberSecret(value){if(value&&!this.secretValues.includes(value))this.secretValues.push(value);}
  async enterSetup(){
@@ -63,11 +109,22 @@ export class ChannelHost {
   if(!this.setupLease)return;this.setupLease.release();this.setupLease=null;clearTimeout(this.setupTimer);
   this.record.SetupLock.ReleasedAt=new Date().toISOString();this.record.SetupLock.ReleaseReason=reason;this.save();
  }
- save(){this.record.LastEvent=new Date(this.lastEvent).toISOString();atomicJson(this.file,this.record,this.secretValues);}
+ save(){
+  this.record.LastEvent=new Date(this.lastEvent).toISOString();atomicJson(this.file,this.record,this.secretValues);
+  // Old launch plans predate vault; infer it only from the canonical state layout.
+  const vault=this.cfg.vault||(/[/\\]motor[/\\]scripts[/\\]\.state[/\\](codex|claude)-kanal$/i.test(this.cfg.state)?path.resolve(this.cfg.state,'../../../..'):null);
+  const key=JSON.stringify([this.record.SessionId,this.record.Turn,this.record.Status]);
+  if(vault&&this.record.SessionId&&this.evidenceKey!==key){
+   try{persistChannelEvidence({vault,engine:this.record.Engine,id:this.record.Id});this.evidenceKey=key;delete this.record.EvidenceError;}
+   catch{this.record.EvidenceError='Common history/report persistence failed; retry on the next transition';atomicJson(this.file,this.record,this.secretValues);}
+  }
+ }
  event(type,detail={}){
   this.lastEvent=Date.now();fs.appendFileSync(path.join(this.directory,'events.jsonl'),redact({at:new Date().toISOString(),type,...detail},this.secretValues)+'\n',{mode:0o600});this.save();
  }
  async start(){
+  if(!this.record.Engine||!this.record.Backend){this.record.Status='unknown';this.record.Error='Unknown engine/backend; launch refused';this.save();throw new Error(this.record.Error);}
+  delete this.record.WorkerExit;
   await this.enterSetup();
   try{
   if(this.cfg.engine!=='claude'){
@@ -79,18 +136,27 @@ export class ChannelHost {
   }
   if(this.cfg.share){this.shared=await startShared({...this.cfg,cwd:this.record.Project});this.rememberSecret(this.shared.token);this.rpc=this.shared.rpc;this.record.RemoteEndpoint=this.shared.url;}
   else if(this.cfg.engine==='claude')this.rpc=new ClaudeRpc({...this.cfg,cwd:this.record.Project,sessionId:this.record.SessionId});
-  else this.rpc=new AppServerRpc({command:this.cfg.command,args:this.cfg.args,cwd:this.record.Project,timeout:this.cfg.timeout||15000});
+  else {
+   const profile=this.cfg.profiles?.[this.record.ProfileIndex||0];
+   const args=[...this.cfg.args];
+   if(profile?.arguments){for(let i=args.length-2;i>=0;i--)if(args[i]==='-c'&&/^mcp_servers\./.test(args[i+1]))args.splice(i,2);}
+   const at=args.indexOf('app-server');args.splice(at<0?args.length:at,0,...(profile?.profile?['--profile',profile.profile]:[]),...(profile?.arguments||[]));
+   const childEnv={...process.env,...(profile?.home?{CODEX_HOME:profile.home}:{})};
+   this.rpc=new AppServerRpc({command:this.cfg.command,args,cwd:this.record.Project,env:childEnv,timeout:this.cfg.timeout||15000});
+   if(profile)this.record.ProfileName=profile.name;
+  }
   this.rpc.on('notification',m=>this.notification(m));
   this.rpc.on('request',m=>this.approval(m));
-  this.rpc.on('closed',()=>{if(this.restarting)return;if(this.active){clearTimeout(this.active.timer);this.active.reject(new Error('App-server exited'));this.active=null;}if(!this.stopping){this.record.Status='disconnected';this.event('disconnected');}});
+  this.rpc.on('closed',detail=>{if(this.restarting)return;this.record.WorkerExit=workerExit(detail?.code,detail?.signal,this.record.Engine);if(this.active){clearTimeout(this.active.timer);this.active.reject(new Error('App-server exited'));this.active=null;}if(!this.stopping){this.record.Status=this.record.WorkerExit.kind==='signal'?'interrupted':'disconnected';this.checkpoint();this.event('disconnected');}});
   await this.rpc.initialize();
+  await this.discover();
   if(this.cfg.engine==='claude'&&this.rpc.model)this.record.RoleModel=this.rpc.model;
   const result=await this.rpc.call(this.record.SessionId?'thread/resume':'thread/start',{
    ...(this.record.SessionId?{threadId:this.record.SessionId}:{}),cwd:this.record.Project,sandbox:this.record.Sandbox||'workspace-write',approvalPolicy:'on-request',
    ...(this.record.RoleModel?{model:this.record.RoleModel}:{})
   });
   if(!result.thread?.id)throw new Error('App-server omitted thread id');
-  this.record.SessionId=result.thread.id;this.record.Status='ready';this.ledger.add('ready','ready',this.record.Turn);this.event('ready');return this.record;
+  this.record.SessionId=result.thread.id;this.record.Status='ready';this.checkpoint();this.ledger.add('ready','ready',this.record.Turn);this.event('ready');return this.record;
   }catch(error){this.leaveSetup('startup-failed');throw error;}
  }
  approval(message){
@@ -106,7 +172,7 @@ export class ChannelHost {
   const toolFailed=isItem&&(p.item?.status==='failed'||(exitCode!=null&&exitCode!==0));
   const diagnostic=/error|warn/i.test(message.method)||toolFailed?redact(JSON.stringify(p),this.secretValues).slice(-8192):'';
   this.event(message.method,{turnId:p.turnId||p.turn?.id||'',...(diagnostic?{message:diagnostic}:{})});
-  if(diagnostic){this.record.Error=(this.record.Error+'\n'+diagnostic).trim().slice(-16384);if(this.active&&/setup refresh had errors/i.test(diagnostic))this.active.setupFailure=true;this.save();}
+  if(diagnostic){this.warning(diagnostic);if(this.active&&/setup refresh had errors/i.test(diagnostic)){this.active.setupFailure=true;this.attemptSetupFailure=true;}this.save();}
   if(/error|warn/i.test(message.method)&&modelNotFound(p))this.attemptModelMissing=true;
   this.supervisor.reset();
   if(message.method==='thread/modelUpdated'&&typeof p.model==='string'){this.record.RoleModel=p.model;this.save();}
@@ -122,7 +188,7 @@ export class ChannelHost {
    const totals=p.tokenUsage?.total||{};this.record.UsageByThread??={};const previous=this.record.UsageByThread[this.record.SessionId]||{};this.record.Usage??={};
    for(const key of ['inputTokens','outputTokens','cachedInputTokens']){const value=Math.max(0,Number(totals[key])||0);this.record.Usage[key]=(this.record.Usage[key]||0)+Math.max(0,value-(previous[key]||0));}
    this.record.UsageByThread[this.record.SessionId]=totals;this.record.FixedLoad??=Number(totals.inputTokens||0);
-   this.record.Budget=budgetState(this.record.Usage,this.cfg.tokenBudget||2000000,this.record.RoleModel||'',this.prices);this.record.BudgetBlocked=this.record.Budget.blocked;this.save();
+   this.record.Budget=this.budget();this.record.BudgetBlocked=this.record.Budget.blocked;this.save();
   }
   if(message.method==='turn/completed'&&this.active){
    if(this.active.id&&p.turn.id!==this.active.id)return;
@@ -136,39 +202,53 @@ export class ChannelHost {
     let ok=false;try{ok=check.status===0&&JSON.parse(check.stdout).ok===true;}catch{}this.record.HandoffValid=ok;this.record.HandoffCheck=ok?'AgentChef handoff-check':'AgentChef handoff-check failed';
    }
    this.record.Status=p.turn.status==='completed'?(this.record.HandoffValid?'completed':'invalid-handoff'):p.turn.status;
-   if(active.setupToolFailure)this.record.Status='failed';
    if(p.turn.error){if(modelNotFound(p.turn.error))this.attemptModelMissing=true;const message=redact(JSON.stringify(p.turn.error),this.secretValues).slice(-8192);this.record.Error=(this.record.Error+'\n'+message).trim().slice(-16384);if(/setup refresh had errors/i.test(message))active.setupFailure=true;this.event('turn-error',{message});}
    if(this.record.Status!=='completed'){
     const tail=redact(this.rpc.stderrTail||'',this.secretValues).slice(-8192);this.record.StderrTail=tail;
     if(/setup refresh had errors/i.test(tail))active.setupFailure=true;
-    this.record.Error=(this.record.Error+'\n'+tail).trim().slice(-16384)||'Turn failed without an agent handoff';
+    this.record.Error=(this.record.Error+'\n'+(this.record.Warnings||[]).join('\n')+'\n'+tail).trim().slice(-16384)||'Turn failed without an agent handoff';
    }
+   if(this.record.Status==='completed'){if(this.record.Error)this.warning(this.record.Error);this.record.Error='';}
    const limit=detectLimit(p.turn.error);if(limit){this.limitQueue.plan(this.record.SessionId,this.record.Turn,limit.dueAt);this.record.LimitQueue=this.limitQueue.value;this.record.Status='limit-waiting';}
    this.record.Delivery={Status:active.answer?'islendi':'alindi-cevapsiz',PromptHash:this.record.PromptHash};
    this.record.Summary=this.record.Answer.replace(/\s+/g,' ').slice(0,240);this.record.Finished=new Date().toISOString();this.idleSince=Date.now();
    const eventKey='turn-'+this.record.Turn+'-attempt-'+this.record.Attempts+'-'+this.record.Status;
-   if(this.ledger.add(eventKey,this.record.Status,this.record.Turn)&&!(active.setupFailure&&!active.successfulItems&&this.record.Attempts===1))this.notify(this.record.Status);
-   this.save();active.resolve({...this.record,setupFailure:active.setupFailure,successfulItems:active.successfulItems});
+   this.ledger.add(eventKey,this.record.Status,this.record.Turn);
+   this.checkpoint();this.save();active.resolve({...this.record,setupFailure:active.setupFailure,successfulItems:active.successfulItems});
   }
  }
- async runTurn(text,taskKey){if(this.turnBusy||this.stopping)throw new Error('Worker unavailable for another turn');this.turnBusy=true;try{return await this.performTurn(text,taskKey);}finally{this.leaveSetup('turn-ended');this.turnBusy=false;}}
+ async runTurn(text,taskKey){
+  if(this.turnBusy||this.stopping)throw new Error('Worker unavailable for another turn');this.turnBusy=true;
+  try{const result=await this.performTurn(text,taskKey);this.notify(result.Status);return result;}
+  catch(error){if(!['interrupted','disconnected','budget-blocked'].includes(this.record.Status)){this.record.Status='failed';this.record.Error=redact(error.message,this.secretValues);this.checkpoint();this.save();this.notify('failed');}throw error;}
+  finally{this.leaveSetup('turn-ended');this.turnBusy=false;}
+ }
  async performTurn(text,taskKey){
   if(this.active)throw new Error('Worker has an active turn');
   if(!text?.trim())throw new Error('Prompt is empty');
   if(!this.record.ExplicitWriteScopes)this.record.WriteScopes=briefWriteScopes(text);
-  this.record.Budget=budgetState(this.record.Usage,this.cfg.tokenBudget||2000000,this.record.RoleModel||'',this.prices);
+  if(this.rpc.closed&&this.record.Engine==='codex'){this.record.ResumeCheckpoint=true;this.restarting=true;try{await this.start();}finally{this.restarting=false;}}
+  this.record.Budget=this.budget();
   this.record.BudgetBlocked=this.record.Budget.blocked;
-  if(this.record.Budget.blocked){this.record.BudgetBlocked=true;this.record.Error='Worker token budget exhausted';this.save();this.notify('budget-blocked');throw new Error('Worker token budget exhausted');}
   if(this.cfg.engine!=='claude'){
-   try{
-    const limits=await this.rpc.call('account/rateLimits/read',{});const primary=limits.rateLimits?.primary;this.record.RateLimits=primary?{usedPercent:primary.usedPercent,resetsAt:primary.resetsAt}:null;
-    if(primary?.usedPercent>=100){const due=detectLimit({code:'usage_limit_reached',resetsAt:primary.resetsAt}).dueAt;if(this.autoResuming&&this.limitQueue.value)this.limitQueue.failed(Date.now());else{this.limitQueue.plan(this.record.SessionId,this.record.Turn,due);this.limitQueue.value.pendingPrompt=redact(text,this.secretValues);this.limitQueue.value.taskKey=taskKey;}this.record.LimitQueue=this.limitQueue.value;this.record.Status='limit-waiting';this.save();this.notify('limit-waiting');return {...this.record};}
-   }catch{this.record.RateLimits=null;this.record.RateLimitStatus='unavailable';}
+   let limits;try{limits=await this.rpc.call('account/rateLimits/read',{});}catch{this.record.RateLimits=null;this.record.RateLimitStatus='unavailable';}
+   if(limits){
+    this.record.RateLimits=sanitize(limits.rateLimits||null);this.record.RateLimitStatus=this.record.RateLimits?'available':'unavailable';
+    const exhausted=[limits.rateLimits?.primary,limits.rateLimits?.secondary].filter(w=>w?.usedPercent>=100);
+    this.record.Budget=this.budget();this.record.BudgetBlocked=this.record.Budget.blocked;
+    if(exhausted.length){
+     if(await this.rotateProfile())return this.performTurn(text,taskKey);
+     const due=Math.max(...exhausted.map(w=>detectLimit({code:'usage_limit_reached',resetsAt:w.resetsAt}).dueAt));if(this.autoResuming&&this.limitQueue.value)this.limitQueue.failed(Date.now());else{this.limitQueue.plan(this.record.SessionId,this.record.Turn,due);this.limitQueue.value.pendingPrompt=redact(text,this.secretValues);this.limitQueue.value.taskKey=taskKey;}this.record.LimitQueue=this.limitQueue.value;this.record.Status='limit-waiting';this.checkpoint(text);this.save();this.notify('limit-waiting');return {...this.record};}
+   }
   }
+  this.record.Budget=this.budget();this.record.BudgetBlocked=this.record.Budget.blocked;
+  if(this.record.Budget.blocked){this.record.Status='budget-blocked';this.record.Error='Worker budget exhausted';this.save();this.notify('budget-blocked');throw new Error('Worker budget exhausted');}
+  if(this.record.ProfileCarry){text='### Previous home checkpoint handoff\n'+(this.record.Answer||this.record.Summary||'No completed handoff yet.')+'\n\n'+text;delete this.record.ProfileCarry;}
   const age=this.record.Finished?(Date.now()-Date.parse(this.record.Finished))/60000:0;
-  const reason=taskKey&&this.record.TaskKey&&taskKey!==this.record.TaskKey?'task-changed':age>=60?'age':this.record.Usage?.inputTokens>200000?'context':this.record.Turn>300?'requests':'same-task-recent';
-  this.record.Continuation={Decision:reason==='same-task-recent'?'resume':'fresh',Reason:reason};
-  if(reason!=='same-task-recent'){
+  const reason=this.record.ResumeCheckpoint?'checkpoint':taskKey&&this.record.TaskKey&&taskKey!==this.record.TaskKey?'task-changed':age>=60?'age':this.record.Usage?.inputTokens>200000?'context':this.record.Turn>300?'requests':'same-task-recent';
+  delete this.record.ResumeCheckpoint;
+  this.record.Continuation={Decision:['same-task-recent','checkpoint'].includes(reason)?'resume':'fresh',Reason:reason};
+  if(this.record.Continuation.Decision==='fresh'){
    text='### Previous owned session handoff\n'+(this.record.Summary||'none')+'\n\n'+text;
    const previous=this.record.SessionId;
    const response=await this.rpc.call('thread/start',{cwd:this.record.Project,sandbox:this.record.Sandbox||'workspace-write',approvalPolicy:'on-request',...(this.record.RoleModel?{model:this.record.RoleModel}:{})});
@@ -181,14 +261,15 @@ export class ChannelHost {
   let modelRetried=false,setupRetries=0;
   for(let attempt=0;attempt<4;attempt++){
    await this.enterSetup();
-   this.record.Attempts++;this.attemptEffects=0;this.attemptModelMissing=false;this.record.Status='running';this.record.Answer='';this.record.Error='';this.record.StderrTail='';this.rpc.stderrTail='';this.record.Started=new Date().toISOString();this.record.Delivery={Status:'alindi-cevapsiz',PromptHash:this.record.PromptHash};this.save();
+   this.record.Attempts++;this.attemptEffects=0;this.attemptSetupFailure=false;this.attemptModelMissing=false;this.record.Status='running';this.record.Answer='';this.record.Error='';this.record.StderrTail='';this.rpc.stderrTail='';this.record.Started=new Date().toISOString();this.record.Delivery={Status:'alindi-cevapsiz',PromptHash:this.record.PromptHash};this.checkpoint(text);this.save();
    const finished=new Promise((resolve,reject)=>{this.active={resolve,reject,answer:'',id:null,setupFailure:false,successfulItems:0};this.active.timer=setTimeout(()=>{const active=this.active;this.active=null;this.record.Error='Worker turn timeout';this.save();active?.reject(new Error('Worker turn timeout'));void this.close('failed');},this.cfg.turnTimeout||45*60000);});
    finished.catch(()=>{});
    try{await this.rpc.call('turn/start',{threadId:this.record.SessionId,input:[{type:'text',text}],outputSchema:handoffSchema,...(this.record.RoleModel?{model:this.record.RoleModel}:{})});}catch(e){const a=this.active;this.active=null;clearTimeout(a?.timer);a?.reject(e);}
    let result;try{result=await finished;}catch(e){
     if(this.cfg.engine==='claude')throw e;
     const tail=redact(this.rpc.stderrTail||'',this.secretValues).slice(-8192);this.record.Status='failed';this.record.StderrTail=tail;this.record.Error=(this.record.Error+'\n'+redact(e.message,this.secretValues)+'\n'+tail).trim().slice(-16384);this.save();
-    result={...this.record,setupFailure:/setup refresh had errors/i.test(this.record.Error),successfulItems:this.attemptEffects||0};
+    if(this.record.WorkerExit?.kind==='signal')this.record.Status='interrupted';
+    result={...this.record,setupFailure:this.attemptSetupFailure||/setup refresh had errors/i.test(this.record.Error),successfulItems:this.attemptEffects||0};
    }
    this.leaveSetup('attempt-ended');
    if(result.Status!=='completed'){
@@ -198,7 +279,7 @@ export class ChannelHost {
     if(/setup refresh had errors/i.test(tail))result.setupFailure=true;this.save();
    }
    // Only diagnostics from error/tool events enter Error, never agent prose.
-   if(result.Status==='completed'||result.successfulItems||this.cfg.engine==='claude')return result;
+   if(result.Status==='completed'||result.Status==='interrupted'||result.successfulItems||this.cfg.engine==='claude')return result;
    const modelMissing=this.attemptModelMissing;
    if(modelMissing&&!modelRetried){
     const from=this.record.RoleModel||'unknown';
@@ -271,7 +352,7 @@ export class ChannelHost {
   if(!this.active&&!this.turnBusy&&this.limitQueue.value?.status!=='planned'&&now-this.idleSince>=(this.cfg.idleMs||30*60000))await this.close('closed','idle');
  }
  async resumeDue(){
-  if(this.autoResuming||this.active||this.turnBusy||this.record.BudgetBlocked)return;
+  if(this.autoResuming||this.active||this.turnBusy||(this.record.BudgetBlocked&&this.record.BillingMode==='api'))return;
   const action=this.limitQueue.due(Date.now(),this.record.Turn);if(action==='superseded'){this.record.LimitQueue=this.limitQueue.value;this.save();return;}if(action!=='resume')return;
   this.autoResuming=true;try{const r=await this.runTurn(this.limitQueue.value.pendingPrompt||'The usage limit reset. Continue the same task within its original scope and return the six-field handoff.',this.limitQueue.value.taskKey||this.record.TaskKey);if(r.Status==='completed'){this.limitQueue.value.status='verified';delete this.limitQueue.value.pendingPrompt;}else if(r.Status!=='limit-waiting')this.limitQueue.failed(Date.now());}catch{this.limitQueue.failed(Date.now());}finally{this.autoResuming=false;this.record.LimitQueue=this.limitQueue.value;this.save();}
  }

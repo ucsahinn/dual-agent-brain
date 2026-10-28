@@ -82,11 +82,12 @@ foreach ($k in $oturumlar.Keys) {
                 while (-not $okuyucu.EndOfStream) {
                     $ln = $okuyucu.ReadLine()
                     if (-not $ln -or $ln.IndexOf('86-compiled', [System.StringComparison]::Ordinal) -lt 0) { continue }
+                    # Never search raw JSON: tool results and injected system content
+                    # can mention a note without the agent ever using it (R9).
+                    $turn = Convert-BeyinLinesToTurns -Lines @($ln) -Format claude -MaxTurnChars 1048576
+                    $plain = @($turn.Turns) -join "`n"
                     foreach ($c in $o.Kavramlar.Keys) {
-                        if ($ln.IndexOf($c, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
-                        # Arac cagrisi mi (Read/Grep/Glob girdisi), yoksa metin mi?
-                        if ($ln -match '"type":"tool_use"' -and $ln -match '"name":"(Read|Grep|Glob|Bash)"') { $acilan[$c] = $true }
-                        elseif ($ln -match '"type":"assistant"' -or $ln -match '"type":"text"') { $anilan[$c] = $true }
+                        if ($plain.IndexOf($c, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $anilan[$c] = $true }
                     }
                 }
             } finally { $okuyucu.Dispose() }

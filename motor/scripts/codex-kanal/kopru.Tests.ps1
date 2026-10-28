@@ -2,10 +2,35 @@ $repo=Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
 . (Join-Path $repo 'motor/hooks/lib.ps1')
 . (Join-Path $PSScriptRoot 'core.ps1')
 . (Join-Path $PSScriptRoot 'kopru.ps1')
+function New-KopruFixtureContext([string]$Name,[string]$Engine='codex') {
+    # State overrides alone do not isolate admission: it also scans Vault's
+    # codex/claude roots. Give every fixture its own complete runtime namespace.
+    $fixture=Join-Path $TestDrive $Name
+    New-Item -ItemType Directory -Force (Join-Path $fixture 'motor/hooks') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repo 'motor/hooks/lib.ps1') -Destination (Join-Path $fixture 'motor/hooks/lib.ps1')
+    $context=New-KanalContext $fixture
+    $context.Engine=$Engine
+    $context.State=Join-Path $fixture ('motor/scripts/.state/'+$Engine+'-kanal')
+    $context.Entry=Join-Path $repo ('motor/scripts/'+$Engine+'-kanal.ps1')
+    $context.Timeout=20
+    return $context
+}
 Describe 'Persistent channel with a fake app-server process' {
+    BeforeEach {
+        # Any read of the user's runtime state is a test isolation failure.
+        Mock Get-KanalRecords { throw 'Unrelated real-vault state was scanned' } -ParameterFilter { $Context.Vault -eq $repo }
+    }
+    It 'admits a fixture worker without reading unrelated real-vault channel states' {
+        Mock Get-KanalCapacity { @{onerilen=8} };Mock Get-KanalTeamCount { 0 }
+        $ctx=New-KopruFixtureContext 'isolated-admission'
+        $ctx.BridgeLaunch=@{command=(Get-Command node.exe).Source;args=@((Join-Path $PSScriptRoot 'fixtures/app-server.mjs'))}
+        $r=$null
+        try { $r=Open-KanalBridge $ctx $TestDrive; $r.Status | Should Be ready }
+        finally { if($r){$null=Close-KanalWorker $ctx $r.Id} }
+    }
     It 'rejects the same active task on another ready worker before delivery' {
         Mock Get-KanalCapacity { @{onerilen=8} };Mock Get-KanalTeamCount { 0 }
-        $ctx=New-KanalContext $repo;$ctx.State=Join-Path $TestDrive 'claims-bridge';$ctx.Timeout=20
+        $ctx=New-KopruFixtureContext 'claims-bridge'
         $ctx.BridgeLaunch=@{command=(Get-Command node.exe).Source;args=@((Join-Path $PSScriptRoot 'fixtures/app-server.mjs'))}
         $ctx.SetupLockOptions=@{holdMs=100;waitMs=3000;name=('Local\Beyin-fixture-'+[guid]::NewGuid().ToString('N'))}
         $a=$null;$b=$null
@@ -16,7 +41,7 @@ Describe 'Persistent channel with a fake app-server process' {
     }
     It 'routes the Claude wrapper through one owned persistent stream process' {
         Mock Get-KanalCapacity { @{onerilen=8} };Mock Get-KanalTeamCount { 0 }
-        $ctx=New-KanalContext $repo;$ctx.State=Join-Path $TestDrive 'claude-bridge';$ctx.Timeout=20;$ctx.Engine='claude';$ctx.Entry=Join-Path $repo 'motor/scripts/claude-kanal.ps1'
+        $ctx=New-KopruFixtureContext 'claude-bridge' 'claude'
         $ctx.BridgeLaunch=@{command=(Get-Command node.exe).Source;args=@((Join-Path $repo 'motor/scripts/claude-kanal/fixtures/claude.mjs'),'--fixture-state',(Join-Path $TestDrive 'claude-context'))}
         $r=Open-KanalBridge $ctx $TestDrive
         try{
@@ -35,7 +60,7 @@ Describe 'Persistent channel with a fake app-server process' {
     It 'opens, sends two turns and closes the exact owned job' {
         Mock Get-KanalCapacity { @{onerilen=8} }
         Mock Get-KanalTeamCount { 0 }
-        $ctx=New-KanalContext $repo;$ctx.State=Join-Path $TestDrive 'bridge';$ctx.Timeout=20
+        $ctx=New-KopruFixtureContext 'bridge'
         $ctx.BridgeLaunch=@{command=(Get-Command node.exe).Source;args=@((Join-Path $PSScriptRoot 'fixtures/app-server.mjs'))}
         $r=Open-KanalBridge $ctx $TestDrive
         try{

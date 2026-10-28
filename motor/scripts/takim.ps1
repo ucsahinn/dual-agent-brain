@@ -74,7 +74,7 @@ if ($args2.Count -eq 0) {
     '  beyin takim plan --repo <yol> --plan-file <plan.json>      kartlari acar, kosu kaydi "planned"'
     '  beyin takim start --run <id>     (insan onayi: sohbete "baslat <id>")   isciler kendi worktree ve terminal sekmesinde'
     if($uyum190){
-        '  beyin takim collect|integrate --run <id>; sonra lead-review --run <id> --review-file <review.json>; sonra verify'
+        '  beyin takim collect --run <id>; beyin takim integrate --run <id>; beyin takim lead-review --run <id> --review-file <review.json>; beyin takim verify --run <id>'
         '  lead-review: yazan isci varsa integration commitine bagli gecen Claude sef incelemesi gerekir.'
         '  cleanup --run <id> --approved: yalniz kullanici temizligi onayladiktan sonra; merge worktree silmez, ayri onayla --cleanup-approved gerekir.'
     }else{'  beyin takim collect|integrate|verify --run <id>             topla -> ara dala birlestir -> test_verifier dogrular'}
@@ -228,6 +228,16 @@ if ($kod -eq 0 -and $komut -eq 'start' -and $panelMod -eq 'on') {
 }
 
 $mutasyon = @('plan', 'start', 'collect', 'integrate', 'lead-review', 'verify', 'merge', 'pause', 'resume', 'abort', 'cleanup')
+if ($kod -eq 0 -and $runId -and -not $stateVar -and $komut -in @('plan','collect')) {
+    try {
+        $runFile = Join-Path $p.TeamRuns ($runId + '.json')
+        if (Test-Path -LiteralPath $runFile) {
+            $runRecord = Get-Content -LiteralPath $runFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($komut -eq 'plan') { Initialize-BeyinRunNotes -Paths $p -Run $runRecord }
+            if ($komut -eq 'collect') { Sync-BeyinRunReports -Paths $p -Run $runRecord }
+        }
+    } catch { Write-Output "HATA: kosu plan/rapor aktarimi basarisiz: $($_.Exception.Message)"; $kod = 1 }
+}
 $mdNot = ''
 if ($mutasyon -contains $komut -and -not $stateVar) {
     $md = Update-BeyinTakimMd -Paths $p

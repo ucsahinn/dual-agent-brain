@@ -21,6 +21,35 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.8.0 - 2026-10-28 - Durust kanal durumu, canli gorunum ve tutarlilik denetimi
+
+- `beyin codex` durumu turun gercek sonucundan gelir: arada toparlanan arac
+  hatalari `Warnings` alanina yazilir, tamamlanmis tur artik "failed" diye
+  bildirilmez.
+- Model secimi once Codex'in kendi `model/list` cevabindan yapilir; secim kayda
+  yazilir. Abonelik hesabinda butce freni limit yuzdesine bakar, uydurma API
+  maliyeti gostermez.
+- Bilinmeyen motor degerleri varsayilana cevrilmez; sinyalle kapanan isci
+  "interrupted" olarak ayrilir. Isci sureci olurse kayittaki thread ile devam
+  edilir (plan, not ve checkpoint dosyalari).
+- Coklu Codex profili (`CODEX_HOME`) secimi ve limitte profil gecisi
+  (varsayilan kapali).
+- `beyin merkez`: kanal ve takim iscileri tek tabloda (rol, proje, durum, son
+  olay, bekleyen onay, sure, etkin jeton).
+- Aktarim bildirimleri tekillesir; makbuz zinciri kaydedildi -> gosterildi ->
+  okundu. Aktarimlar A2A durumlarini tasir (submitted, working, input-required,
+  completed, failed, canceled); eski kayitlar okunur.
+- `beyin gecmis` ve proje ici tek rapor koku; kanal ve sef MCP gecisleri ortak
+  gecmise yazilir.
+- Transcript okumalari yalniz kullanici ve asistan duz metnini alir.
+- Ipucu-komut tutarlilik denetimi: belgelerdeki ve ipuclarindaki her `beyin`
+  komutu ve takim bayragi gercek CLI'ya karsi denetlenir.
+- `beyin bekci` yetim ve asiri `node_repl` sureclerini raporlar.
+- Geri getirmede RRF birlesimi eklendi ama varsayilan KAPALI (isabeti
+  artirmadan gecikmeyi iki katina cikariyordu); `beyin ayar BEYIN_GETIRME_RRF 1`
+  ile acilir.
+- Codex'ten Claude'a geri kanal: `beyin aktar` + `beyin aktar dinle` (ADR-013 eki).
+
 ## 1.7.0 - 2026-10-27 - Canli isci kanallari ve AgentChef 1.9.0 uyumu
 
 - `beyin codex`: kalici app-server kanali, ayni thread'de cok tur, steer,

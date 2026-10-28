@@ -58,6 +58,22 @@ export function budgetState(usage={},limit=2000000,model='',prices={}){
  return {tokens:
   input+output,effectiveTokens,limit,formula:'(input-cached)+output+cached*0.1',cacheWeight:0.1,cost,apiEquivalent:true,blocked:effectiveTokens>=limit,reason:effectiveTokens>=limit?'token-budget':'within-budget'};
 }
+export function channelEngine(value,planned){
+ const candidate=value==null||value===''?planned:value;
+ return ['codex','claude'].includes(candidate)?candidate:null;
+}
+export function channelBackend(value){return ['exec','app-server','claude-stream'].includes(value)?value:null;}
+export function workerExit(code,signal,engine){
+ const n=Number.isInteger(code)&&code>128&&code<=192?code-128:null;
+ return {kind:signal||n?'signal':code===0?'normal':'fault',signal:signal||n||null,fault:!(signal||n||code===0),engine:channelEngine(engine)};
+}
+export function channelBudget(usage,limit,model,prices,mode,limits){
+ if(mode==='api')return {...budgetState(usage,limit,model,prices),billingMode:mode};
+ const windows=[limits?.primary,limits?.secondary].filter(w=>Number.isFinite(w?.usedPercent));
+ const usedPercent=windows.length?Math.max(...windows.map(w=>w.usedPercent)):null;
+ const blocked=mode==='subscription'&&usedPercent!==null&&usedPercent>=100;
+ return {billingMode:mode,cost:null,apiEquivalent:false,usedPercent,blocked,reason:mode!=='subscription'?'billing-unknown':usedPercent===null?'rate-limits-unavailable':blocked?'rate-limit':'within-rate-limit'};
+}
 export function detectLimit(error,now=Date.now()){
  if(!error||!['rate_limit_exceeded','usage_limit_reached'].includes(error.code))return null;
  const dueAt=Number.isFinite(Number(error.resetsAt))&&Number(error.resetsAt)>0?Number(error.resetsAt)*1000:now+5*3600000;

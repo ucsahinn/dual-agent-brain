@@ -25,17 +25,19 @@ param(
     [switch]$Json,
     # DENEY (BB2): varsayilan disi bir ayar DENEY sayilir; rapor geri-getirme-deney.json'a
     # gider ve makbuz OLC_DENEY yazar - haftalik regresyon kapisini (OLC_OK/DUSTU) kirletmez.
-    [string]$Fusion = 'hibrit',
+    [string]$Fusion = '',
     [int]$TopK = 6,
     [switch]$SonmeYok
 )
-$deney = ($Fusion -ne 'hibrit' -or $TopK -ne 6 -or $SonmeYok)
 
 $ErrorActionPreference = 'SilentlyContinue'
 $vaultOk = $false
 try { $vaultOk = [bool]($Vault -and (Test-Path -LiteralPath $Vault -PathType Container) -and (Test-Path -LiteralPath (Join-Path $Vault 'motor\hooks\lib.ps1'))) } catch { }
 if (-not $vaultOk) { Write-Output "HATA: vault degil (motor\hooks\lib.ps1 yok): '$Vault'"; exit 2 }
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
+$defaultFusion = Get-BeyinRetrievalFusion
+if (-not $Fusion) { $Fusion = $defaultFusion }
+$deney = ($Fusion -ne $defaultFusion -or $TopK -ne 6 -or $SonmeYok)
 $p  = Get-BeyinPaths -Vault $Vault
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $fixtureDir = Join-Path $PSScriptRoot 'fixtures'

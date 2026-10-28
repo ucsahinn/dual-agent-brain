@@ -7,6 +7,6 @@ for(const choice of ['catalog','review','none','same-catalog','always','combined
  try{await host.start();const r=await host.dispatch({owner:'owner',method:'sor',text:'task'});
   if(choice==='none'){assert.equal(r.Status,'failed');assert.equal(r.Attempts,1);assert.match(r.Error,/review_model|catalog/i);}
   else if(choice==='tool-text'){assert.equal(r.Status,'failed');assert.equal(r.Attempts,1);assert.ok(!r.ModelFallback);}
-  else{assert.equal(r.Attempts,choice==='combined'?4:2);assert.equal(r.ModelFallback.from,'unsupported-model');assert.equal(r.ModelFallback.to,choice==='catalog'?'catalog-model':'review-model');assert.equal(r.ModelFallback.reason,'model_not_found');assert.equal(r.Status,choice==='always'?'failed':'completed');if(choice==='combined'){assert.equal(r.SandboxFallback.To,'unelevated');assert.equal(r.RetryCount,3);}}
+  else{assert.equal(r.Attempts,2);assert.equal(r.ModelFallback.from,'unsupported-model');assert.equal(r.ModelFallback.to,choice==='catalog'?'catalog-model':'review-model');assert.equal(r.ModelFallback.reason,'model_not_found');assert.equal(r.Status,choice==='always'?'failed':'completed');if(choice==='combined'){assert.ok(!r.SandboxFallback);assert.equal(r.RetryCount,1);}}
  }finally{await host.close();fs.rmSync(root,{recursive:true,force:true});}
 });

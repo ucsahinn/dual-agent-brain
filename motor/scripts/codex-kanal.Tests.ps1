@@ -95,25 +95,24 @@ console.log('{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":
         try{[Console]::InputEncoding=[Text.Encoding]::UTF8;$a=Submit-KanalTurn $ctx -Proje $TestDrive -Metin 'first Türkçe ıİ şğ'}finally{[Console]::InputEncoding=$previousInput}
         $a.Status|Should Be 'completed';$a.Attempts|Should Be 1;$a.Delivery.Source|Should Be 'validated-live-turn';$a.Delivery.RolloutStatus|Should Be 'yutuldu'
     }
-    It 'prioritizes a failed command setup signature over a valid handoff and delivery retry' {
+    It 'accepts a completed handoff after a recovered command setup failure without replay' {
         $source = [IO.File]::ReadAllText($fixture)
         [IO.File]::WriteAllText($fixture, $source.Replace("console.log('{", "console.log(JSON.stringify({type:'item.completed',item:{type:'command_execution',status:'failed',exit_code:1,aggregated_output:'setup refresh had errors'}}));`nconsole.log('{"))
         Mock Start-Sleep {}
         $a = Submit-KanalTurn $ctx -Proje $TestDrive -Metin 'first second'
-        $a.Status | Should Be 'failed'
-        $a.Attempts | Should Be 3
-        $a.RetryCount | Should Be 2
-        $a.WindowsSandbox | Should Be 'unelevated'
-        $a.SandboxFallback.To | Should Be 'unelevated'
-        $a.RetryEvents[0].Reason | Should Be 'sandbox-setup-refresh'
+        $a.Status | Should Be 'completed'
+        $a.Attempts | Should Be 1
+        $a.RetryCount | Should Be 0
+        $a.Error | Should BeNullOrEmpty
+        ($a.Warnings -join ' ') | Should Match 'setup refresh'
     }
-    It 'retries an exit minus one command setup failure directly as unelevated without stderr' {
+    It 'retains a recovered exit minus one tool failure as a warning without replay' {
         $source=[IO.File]::ReadAllText($fixture)
         $inject="if(!process.argv.some(a=>a.includes('unelevated'))){console.log(JSON.stringify({type:'item.completed',item:{type:'command_execution',status:'failed',exit_code:-1,aggregated_output:'Failed to create unified exec process: helper_unknown_error: setup refresh had errors'}}));}`n"
         [IO.File]::WriteAllText($fixture,$inject+$source);Mock Start-Sleep {}
         $a=Submit-KanalTurn $ctx -Proje $TestDrive -Metin 'first second'
-        $a.Status|Should Be 'completed';$a.Attempts|Should Be 3;$a.SandboxFallback.To|Should Be 'unelevated'
-        @($a.RetryEvents).Count|Should Be 2;$a.RetryEvents[0].Reason|Should Be 'sandbox-setup-refresh'
+        $a.Status|Should Be 'completed';$a.Attempts|Should Be 1;$a.Error|Should BeNullOrEmpty
+        ($a.Warnings -join ' ')|Should Match 'setup refresh'
     }
     It 'falls back once from elevated to unelevated on failed stderr setup refresh' {
         $source=[IO.File]::ReadAllText($fixture)

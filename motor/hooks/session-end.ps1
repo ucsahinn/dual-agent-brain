@@ -49,6 +49,7 @@ $isCodex = ((Get-BeyinAgent) -eq 'codex')
 $seKart = $(if ($env:AGENTCHEF_TEAM_TASK) { [string]$env:AGENTCHEF_TEAM_TASK } else { [string]$st.takimKart })
 $seRun  = $(if ($env:AGENTCHEF_TEAM_RUN)  { [string]$env:AGENTCHEF_TEAM_RUN }  else { [string]$st.takimRun })
 if ($seKart -cnotmatch '^TASK-\d+$') { $seKart = '' }
+try { Add-BeyinSessionHistory -Paths $p -Session ([string]$hook.session_id) -Project $cwd -Task $seKart -Event close -Agent (Get-BeyinAgent) } catch { }
 $seNeden = $(if ($seKart) { "takim-$seKart" } else { 'session-end' })
 # Transkript diskte yoksa surec dogurma: bos bir flush claims\ altina olu bir
 # kilit dosyasi birakip cikiyordu (session-start kuyruk dongusu bu kontrolu

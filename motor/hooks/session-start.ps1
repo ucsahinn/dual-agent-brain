@@ -70,6 +70,9 @@ $stY = Update-BeyinSessionState -Paths $p -SessionId $hook.session_id -Degistir 
     return $s
 }
 if ($stY) { $st = $stY } else { $st = Get-BeyinSessionState -Paths $p -SessionId $hook.session_id }
+try {
+    Add-BeyinSessionHistory -Paths $p -Session ([string]$hook.session_id) -Project $cwd -Task $ssTakimKart -Agent (Get-BeyinAgent) -Event $(if ($hook.source -eq 'resume') { 'resume' } else { 'open' })
+} catch { Write-BeyinLog -Vault $vault -Message 'session history append failed' }
 # Oturum durumu omru: Codex thread'leri haftalarca yasiyor ve Codex
 # SessionEnd'i cogu kapanista atesmiyor. 3 gun cok kisaydi: durum silinince
 # prompts=0 okunuyor ve oturum sessizce dusuyordu.
@@ -508,6 +511,7 @@ try {
 } catch { }
 
 $parts = New-Object System.Collections.Generic.List[string]
+if ($ssTakimRun) { $pointer = Get-BeyinRunPointer -Paths $p -Run $ssTakimRun -Task $ssTakimKart; if ($pointer) { $parts.Add($pointer) } }
 
 # ============================================================================
 # BAGLAM BUTCESI - AJANA GORE
@@ -637,6 +641,7 @@ try {
             try { $z = ([datetime]::Parse([string]$h.ts, $inv)).ToString('MM-dd HH:mm', $inv) } catch { }
             $akKimden = $(if ([string]$h.kind -eq 'devir') { 'DEVIR: onceki oturumun' } else { [string]$h.from.agent + $(if ($h.from.PSObject.Properties['worker'] -and $h.from.worker) { '/' + [string]$h.from.worker } else { '' }) })
             $satir = "- $($h.id) ($akKimden, proje: $(if ($h.from.project) { $h.from.project } else { '-' }), $z): $($h.question)"
+            if ($h.occurrences -gt 1) { $satir += " [x$($h.occurrences)]" }
             if ($h.evidence) { $satir += " | kanit: $($h.evidence)" }
             if ($h.next)     { $satir += " | sonraki: $($h.next)" }
             if ($akGosterilen.Count -eq 0 -and ($akSb.Length + $satir.Length) -gt 820) { $satir = $satir.Substring(0, [math]::Max(80, 817 - $akSb.Length)) + '...' }
@@ -651,7 +656,7 @@ try {
             $parts.Add($akMetin)
             Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'GOSTERILDI' -Agent $akAjan -Key $st.key -Reason 'session-start' `
                 -Note "ids=$((@($akGosterilen | ForEach-Object { [string]$_.id })) -join ',')"
-            foreach ($h in @($akGosterilen | Where-Object { [string]$_.kind -eq 'devir' })) { $null = Close-BeyinHandoff -Paths $p -Id ([string]$h.id) -DoneBy 'gosterildi (tek atimlik devir)' }
+            foreach ($h in @($akGosterilen | Where-Object { [string]$_.kind -eq 'devir' })) { $null = Close-BeyinHandoff -Paths $p -Id ([string]$h.id) -DoneBy 'gosterildi (tek atimlik devir)' -Agent $akAjan }
         }
         $ssSeen = @(@($st.seenHandoff) + @($akGosterilen | ForEach-Object { [string]$_.id }))
         $st.seenHandoff = $ssSeen

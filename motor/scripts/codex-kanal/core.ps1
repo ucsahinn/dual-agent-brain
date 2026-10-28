@@ -8,6 +8,36 @@ function New-KanalContext([string]$Vault) {
     return @{ Vault = $Vault; State = (Join-Path $Vault 'motor/scripts/.state/codex-kanal');
         Codex = ''; Entry = (Join-Path $Vault 'motor/scripts/codex-kanal.ps1'); Timeout = 900 }
 }
+function Resolve-KanalEngine([string]$Value,[string]$Planned='') {
+    if(-not $Value){$Value=$Planned}
+    if($Value -cin @('codex','claude')){return $Value};return $null
+}
+function Resolve-KanalBackend([string]$Value) {
+    if($Value -cin @('exec','app-server','claude-stream')){return $Value};return $null
+}
+function Get-KanalWorkerExit([int]$Code,[string]$Engine) {
+    $signal=$(if($Code -gt 128 -and $Code -le 192){$Code-128}else{$null})
+    return @{Kind=$(if($signal){'signal'}elseif($Code -eq 0){'normal'}else{'fault'});Signal=$signal;Fault=($Code -ne 0 -and -not $signal);Engine=(Resolve-KanalEngine $Engine)}
+}
+function Get-KanalProfiles($Context) {
+    $profiles=@($Context.CodexProfiles)
+    if($Context.CodexProfileFile){
+        if((Get-Item -LiteralPath $Context.CodexProfileFile).Length -gt 65536){throw 'Channel profile file exceeds 64 KiB'}
+        $profiles=@([IO.File]::ReadAllText($Context.CodexProfileFile)|ConvertFrom-Json)
+    }
+    if(-not @($profiles|Where-Object {$_}).Count -and ($Context.CodexHome -or $Context.CodexProfile)){$profiles=@(@{name='selected';home=$Context.CodexHome;profile=$Context.CodexProfile})}
+    if($profiles.Count -gt 8){throw 'At most eight preconfigured channel profiles'}
+    $names=@()
+    foreach($p in $profiles){
+        if(-not $p){continue}
+        if($p.name -cnotmatch '^[A-Za-z0-9_-]{1,64}$' -or $p.name -in $names){throw 'Unique literal channel profile name required'}
+        $names+=$p.name
+        if($p.profile -and $p.profile -cnotmatch '^[A-Za-z0-9_-]{1,64}$'){throw 'Invalid Codex profile name'}
+        $homePath=''
+        if($p.home){if(-not (Test-Path -LiteralPath $p.home -PathType Container)){throw 'CODEX_HOME must already exist; account setup is an operator action'};$homePath=(Resolve-Path -LiteralPath $p.home).ProviderPath}
+        @{name=[string]$p.name;home=$homePath;profile=[string]$p.profile}
+    }
+}
 function Protect-KanalText($Context, [string]$Text) {
     $r = Protect-BeyinSecrets -Text $Text
     if ($r.Failed) { throw 'Secret filter failed; data was not persisted' }
@@ -108,6 +138,8 @@ function Read-KanalRecord($Context, [string]$Id) {
     return $r
 }
 function Save-KanalRecord($Context, $Record) {
+    if($Record.PSObject.Properties['Engine'] -and $Record.Engine -and -not (Resolve-KanalEngine $Record.Engine)){$Record.Engine=$null;$Record|Add-Member -NotePropertyName EngineStatus -NotePropertyValue 'unknown' -Force}
+    if($Record.PSObject.Properties['Backend'] -and $Record.Backend -and -not (Resolve-KanalBackend $Record.Backend)){$Record.Backend=$null;$Record|Add-Member -NotePropertyName BackendStatus -NotePropertyValue 'unknown' -Force}
     $path = Get-KanalRecordPath $Context $Record.Id
     $text = Protect-KanalText $Context ($Record | ConvertTo-Json -Depth 12)
     $tmp = $path + '.tmp-' + [guid]::NewGuid().ToString('N')
@@ -118,6 +150,7 @@ function Save-KanalRecord($Context, $Record) {
         [IO.File]::Delete($backup)
     }
     else { [IO.File]::Move($tmp, $path) }
+    Sync-BeyinChannelRecordEvidence -Paths (Get-BeyinPaths -Vault $Context.Vault) -Record $Record
 }
 function Get-KanalRecords($Context) {
     if (-not (Test-Path -LiteralPath $Context.State)) { return }
@@ -226,8 +259,9 @@ function Invoke-KanalProcess($Context, $Record) {
         }
         $remaining = [int][math]::Max(1, ($Context.Timeout - $watch.Elapsed.TotalSeconds) * 1000)
         if (-not $proc.WaitForExit($remaining)) { throw 'Codex turn timed out' }
-        if($setupToolFailed){$failure=New-KanalSetupFailure;if($successfulItems){$failure.Data['UnsafeRetry']=$true};throw $failure}
         $valid=$complete -and $session -and $answer -and (Test-KanalHandoff (ConvertFrom-KanalHandoffJson $answer))
+        $Record|Add-Member -NotePropertyName WorkerExit -NotePropertyValue (Get-KanalWorkerExit $proc.ExitCode (Resolve-KanalEngine $Record.Engine 'codex')) -Force
+        if($Record.WorkerExit.Kind -eq 'signal'){$failure=New-Object Exception 'Worker interrupted by signal';$failure.Data['KanalSignal']=$true;throw $failure}
         if (-not $valid) {
             [void]$stderrTask.Wait(1000)
             $tail=$(if($stderrTask.IsCompleted){Protect-KanalText $Context $stderrTask.Result}else{''})
@@ -237,6 +271,10 @@ function Invoke-KanalProcess($Context, $Record) {
             if($setupFailed -or $tail -match 'setup refresh had errors'){$failure=New-KanalSetupFailure;if($successfulItems){$failure.Data['UnsafeRetry']=$true};throw $failure}
             throw "Codex failed or returned an incomplete turn (exit $($proc.ExitCode)); raw diagnostics withheld"
         }
+        [void]$stderrTask.Wait(1000)
+        $warningTail=$(if($stderrTask.IsCompleted){Protect-KanalText $Context $stderrTask.Result}else{''})
+        if($warningTail.Length -gt 8192){$warningTail=$warningTail.Substring($warningTail.Length-8192)}
+        if($Record.Error -or $warningTail){$Record|Add-Member -NotePropertyName Warnings -NotePropertyValue (@($Record.Warnings)+@(($Record.Error+"`n"+$warningTail).Trim())) -Force;$Record.Error=''}
         return @{ SessionId = $session; Answer = (Protect-KanalText $Context (ConvertFrom-KanalHandoffJson $answer)) }
     } catch {
         $original=$_.Exception
@@ -334,9 +372,12 @@ function Complete-KanalTurn($Context, $Record) {
         $Record.Status = $(if ($Record.HandoffValid) { 'completed' } else { 'invalid-handoff' })
         $Record.Summary = ($Record.Answer -replace '\s+', ' ').Trim()
         if ($Record.Summary.Length -gt 240) { $Record.Summary = $Record.Summary.Substring(0,240) }
-    } catch { $Record.Status = 'failed'; $Record.Error = Protect-KanalText $Context ($Record.Error+"`n"+$_.Exception.Message+"`n"+$Record.StderrTail).Trim();if($Record.Error.Length -gt 16384){$Record.Error=$Record.Error.Substring($Record.Error.Length-16384)} }
+    } catch { $Record.Status = $(if($_.Exception.Data['KanalSignal']){'interrupted'}else{'failed'}); $Record.Error = Protect-KanalText $Context ($Record.Error+"`n"+$_.Exception.Message+"`n"+$Record.StderrTail).Trim();if($Record.Error.Length -gt 16384){$Record.Error=$Record.Error.Substring($Record.Error.Length-16384)} }
     finally {
         if($claim){$claim.Dispose()}
+        $checkpointDir=Join-Path $Context.State $Record.Id
+        New-Item -ItemType Directory -Force $checkpointDir|Out-Null
+        [IO.File]::WriteAllText((Join-Path $checkpointDir 'notes.md'),(Protect-KanalText $Context $Record.Answer),(New-Object Text.UTF8Encoding $false))
         $Record.Prompt = ''; $Record.DurationSeconds = [math]::Round($watch.Elapsed.TotalSeconds,2)
         $Record.Finished = [datetime]::UtcNow.ToString('o'); Save-KanalRecord $Context $Record
     }
@@ -371,6 +412,7 @@ function Submit-KanalTurn {
         if ($Id) {
             $null = Read-KanalRecord $Context $Id
             $record = @(Get-KanalRecords $Context | Where-Object { $_.Id -eq $Id })[0]
+            if($record.EngineStatus -eq 'unknown' -or $record.BackendStatus -eq 'unknown' -or ($record.Engine -and -not (Resolve-KanalEngine $record.Engine)) -or ($record.Backend -and -not (Resolve-KanalBackend $record.Backend))){throw 'Unknown engine/backend; resume refused'}
             if($record.OwnerSession -and $record.OwnerSession -cne (Get-KanalOwnerSession)){throw 'Channel owner session mismatch'}
             if ($record.Status -in @('queued','running')) { throw 'Worker already has an active turn' }
             if (-not $record.SessionId) { throw 'Worker has no resumable session' }
@@ -384,7 +426,7 @@ function Submit-KanalTurn {
             $roleInfo = Resolve-KanalRole $Context $Rol
             $Id = 'CK-' + [guid]::NewGuid().ToString('N')
             $turnLock = Open-KanalLock (Join-Path $Context.State ($Id + '.lock'))
-            $record = [pscustomobject]@{ Owner = 'beyin-codex-kanal-v1'; Id = $Id; Project = $projectPath; Role = $roleInfo.Name;
+            $record = [pscustomobject]@{ Owner = 'beyin-codex-kanal-v1'; Engine='codex';Backend='exec'; Id = $Id; Project = $projectPath; Role = $roleInfo.Name;
                 RoleModel = $roleInfo.Model; Sandbox = $roleInfo.Sandbox;
                 WindowsSandbox = $(if($Context.WindowsSandbox){$Context.WindowsSandbox}else{'elevated'});
                 RoleText = (Protect-KanalText $Context $roleInfo.Text); Created = [datetime]::UtcNow.ToString('o');
@@ -403,6 +445,8 @@ function Submit-KanalTurn {
         $record|Add-Member -NotePropertyName BriefStats -NotePropertyValue @{Characters=$compiled.Characters;EstimatedTokens=
             $compiled.EstimatedTokens;Injected=$compiled.Injected} -Force
         $record.Prompt=$carry+$record.Prompt
+        $checkpointDir=Join-Path $Context.State $record.Id;New-Item -ItemType Directory -Force $checkpointDir|Out-Null
+        [IO.File]::WriteAllText((Join-Path $checkpointDir 'plan.md'),(Protect-KanalText $Context $record.Prompt),(New-Object Text.UTF8Encoding $false))
         $scope=[regex]::Match($record.Prompt,'(?ms)^Write scope:\s*(.*?)^Boundaries:').Groups[1].Value
         if(-not $record.PSObject.Properties['TaskKey']){$record | Add-Member -NotePropertyName TaskKey -NotePropertyValue (Get-KanalHash ($record.Project+'|'+$scope+'|'+$clean))}
         if(@(Get-KanalRecords $Context | Where-Object {$_.Id -ne $record.Id -and $_.TaskKey -eq $record.TaskKey -and $_.Status -in @('queued','running')}).Count){throw 'Task already claimed by an active worker'}

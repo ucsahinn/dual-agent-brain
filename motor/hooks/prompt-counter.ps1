@@ -220,6 +220,7 @@ try {
                     $kimden = [string]$h.from.agent
                     if ($h.from.PSObject.Properties['worker'] -and $h.from.worker) { $kimden += '/' + [string]$h.from.worker }
                     $satir = "- $($h.id) [$tur] ($kimden): $soru"
+                    if ($h.occurrences -gt 1) { $satir += " [x$($h.occurrences)]" }
                     if ($h.next) { $satir += " | sonraki: $($h.next)" }
                     if ($gosterilenId.Count -gt 0 -and ($hsb.Length + $satir.Length) -gt 560) { [void]$hsb.Append("(+$($pcYeni.Count - $gosterilenId.Count) tane daha: beyin aktar) "); break }
                     if (-not (Request-BeyinTeslimHakki -Paths $p -SessionKey $pcKey -Id ([string]$h.id))) { continue }

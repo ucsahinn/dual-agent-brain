@@ -292,6 +292,66 @@ skill'i iki ajanda da kurulu oldugu icin dogru komutu kendisi calistirir.
 
 ## 5. Komut referansi
 
+### Oturum gecmisi, raporlar ve durumlar
+
+`beyin gecmis -Proje C:\projem -Is TASK-1 -Json` kalici acilis, devam ve
+kapanis zincirini listeler. Motor kendi eklemeli gunlugunu
+`motor/scripts/.state/session-history/events.jsonl` altinda tutar; kanal
+gunlukleri varsa onlar ve arsivleri de salt okunur birlestirilir. Eski
+oturumlar icin olay uydurulmaz.
+
+Kanal hostu, PowerShell kanal ureticisi ve sef MCP ortak gunluk/rapor
+katmanina yazar. Dagitici disindaki cagrilar ve arka planda tamamlanan turlar
+da kaydedilir. Kalici gecis kimlikleri tekrar yazimi tekillestirir; her
+dogrulanmis tur icin tek rapor uretilir. Kayit hatasi `EvidenceError` ile
+gorunur; okunur durum komutlari kayit uretmez.
+
+Takimda `plan` sonrasi kosu ve isci klasorlerinde `plan.md` ve `notes.md`
+olusur. Var olan notlar korunur; oturum acilisinda yalniz bu dosyalarin
+isaretcisi yuklenir. `collect`, mevcut isci raporlarini projenin
+`.beyin/raporlar/` kokune aktarip `index.md` uretir. Manuel rapor icin:
+
+```powershell
+beyin rapor kaydet -Proje C:\projem -Is TASK-1 -Kaynak C:\projem\sonuc.md
+beyin rapor liste -Proje C:\projem -Json
+```
+
+Kok disindaki kaynaklar ve baglanti/junction rapor yollari reddedilir.
+`rapor liste`, `gecmis` ve `merkez` kayitlari degistirmez. Kanal iscileri
+merkezde takim iscileriyle ayni tabloda; rol, proje, son olay, onay sayisi,
+gecen sure ve etkin jetonla gorunur. Genel sekmesi kuyrugu ve sprintleri de
+ozetler. Sprint bilgisi olmayan kartlar "sprint yok" olarak gosterilir.
+
+Uretici ayni olayi yeniden gonderirken `beyin aktar "bitti" -Kime claude
+-Olay TASK-1-completed` kullanabilir: ayni kaynak/isci/olay/durum/hedef tek
+kayitta sayilir. Farkli adres veya durum ayri olaydir. Bildirimler mevcut
+tur/arac sinirinda bir blokta teslim edilir. Kayit makbuzu `KAYDEDILDI`,
+baglam teslimi `GOSTERILDI`, `beyin aktar -Gor <id>` veya yanitla okuma
+`OKUNDU`, kapatma `KAPANDI` asamasidir. Goruntuleme okuma sayilmaz.
+PowerShell acilis/tur ve JavaScript PreToolUse yollarinin hepsi ayni
+JSONL semasinda gosterim makbuzu uretir. Ortak atomik teslim isareti ayni
+oturumda farkli yollardan cift gosterimi engeller.
+
+`beyin aktar -Kayit <id> -Durum working` yalniz alicinin durumunu gunceller.
+Desteklenen A2A durumlari: submitted, working, input-required, completed,
+failed, canceled. Son uc durum terminaldir; gec gelen bildirim kapali isi
+yeniden acamaz. Eski acik/tamam kayitlari submitted/completed olarak okunur.
+
+`beyin ipucu-denetle -AgentChef C:\agentchef -Json`, belgelerde ve ekrana
+basilan ipuclarinda kullanilan komut/bayraklari kaynak dagitici ve secilen
+`team-run.mjs` ile statik karsilastirir. Komut calistirmaz, onay uretmez.
+AgentChef koku verilmezse takim bayraklari icin dogrulanamadi uyarisi verir.
+
+Retrieval baslik sinirlarina gore parcali kelime indeksini kullanir.
+`beyin geri-getirme-olc -Fusion rrf60 -Json` vektor ve kelime siralarinin
+birlesimini ayni dondurulmus holdout ile olcer. Varsayilan hibrittir; RRF
+kapalidir. `beyin ayar BEYIN_GETIRME_RRF 1` RRF60'i acar;
+`beyin ayar BEYIN_GETIRME_RRF 0` hibrite doner. Tek kosuluk ortam
+degiskeni de ayni degerleri kabul eder. Ayar onceligi ortam > dosya > 0.
+2026-10-28'de 32 vakada hibrit ve RRF60 rank-1 sonucu ayni: 0,969;
+RRF gecikmeyi artirdigi icin varsayilana alinmadi. Yeni bir
+degisiklik rank-1'i dusururse o degisiklik varsayilana alinmaz veya geri alinir.
+
 Asagidaki liste `kurulum\beyin.ps1` icindeki `Yaz-Yardim` fonksiyonunun tamamidir.
 "Yazar mi?" sutunu **varsayilan** davranisi gosterir.
 
@@ -305,7 +365,7 @@ Asagidaki liste `kurulum\beyin.ps1` icindeki `Yaz-Yardim` fonksiyonunun tamamidi
 | `makbuz [gun] [betik]` | Motor kosu makbuzlari: ne yazildi, kac bayt, kac butce. Varsayilan 1 gun. `makbuz 7 flush` gibi ikinci parca betik adidir. | Hayir |
 | `maliyet [gun]` | Iki ajanin jeton kullanimi ve **API esdegeri** maliyet (2026-10-06): gun, proje ve oturum dokumu; oturum basi sabit yuk (ilk cagrinin baglami); 200K baglami asan oturumlar ("tazelenmeliydi"). Claude transkriptindeki kullanim alanlarini mesaj kimligiyle tekil sayar, Codex'in kumulatif sayacindan fark alir. Artimli: ilk kosu son 35 gunu tarar (birkac dakika), sonrakiler saniyeler. Fiyatlar `motor\scripts\fiyat.json` (tarihli; 90 gunden eskiyse doktor uyarir). Abonelikte gercek fatura bu degildir; Codex/OpenAI icin fiyat girilmedigi icin yalniz jeton gosterilir. Taninmayan satir 'OLCEMEDIM' diye ayri sayilir. Gece 04:10'da `maliyet-tara` gorevi artimli tarar. Flush her gunluk bloga oturumun o anki toplamini tek satir yazar. `-Json`, `-YalnizTara`. | Hayir (`.state\maliyet` haric) |
 | `skill-aday [gun]` | Tekrar eden yordamsal bilgiden **skill adayi** listesi (2026-10-06): son 30 gunde 3+ farkli oturuma ve 2+ farkli gune enjekte edilmis, liste iceren (3+ numarali adim, 4+ madde ya da 'Adimlar' basligi) kavram notlari. Cikti `86-compiled/skill-adaylari.md` (turetilmis). Skill otomatik acilmaz: listeden secip `ai-skill-create` ile taslagi ac. Pazar 05:30 gece gorevi. `-KuruCalisma` yazmaz. | Evet (`86-compiled/skill-adaylari.md`) |
-| `kullanim [gun]` | Enjekte edilen kavram notlari sonradan Read/Grep ile ACILDI mi, yoksa yalniz cevapta mi anildi? Retrieval makbuzlarini ayni oturumun Claude transkriptiyle eslestirir; Codex oturumlari 'transkript yok' sayilir. Varsayilan 7 gun; `-Json`. Rapor `.state/kullanim-son.json`. | Hayir (makbuz haric) |
+| `kullanim [gun]` | Enjekte edilen kavram notlari kullanici/asistan duz metninde anildi mi? Arac girdisi/ciktisi, reasoning ve sistem metni okunmaz; `acildi` alani eski raporlarla uyum icin korunur, yeni olcum arac kullanimini kanitlamaz. Retrieval makbuzlarini Claude transkriptiyle eslestirir; Codex oturumlari 'transkript yok' sayilir. Varsayilan 7 gun; `-Json`. Rapor `.state/kullanim-son.json`. | Yalniz `.state` ve makbuz |
 | `geri-getirme-olc` | Geri getirme regresyon kapisi: kavram notlarindan uretilen sorgularla vektor (bge-m3) ve kelime yolunun rank-1 / ilk-2 / bos donus oranlari. `-Dondur` fixture'i (`motor/scripts/fixtures/geri-getirme-holdout.json`, SHA-256'li) yeniden uretir - bilerek yapilir; `-Esik 0.8` altinda cikis 5. Doktor tam taramada son sonucu gosterir. | Yalniz `.state` ve -Dondur ile fixture |
 | `canli [dk]` | Su an ne oluyor: aktif oturumlar, kuyruk, calisan is, butce, niyet. Varsayilan pencere 30 dakika. | Hayir |
 | `merkez [-Sekme]` | **Tum sistemin canli izleme ekrani** (1.4.0; 1.5.0 sekmeli): liderler (Claude/Codex oturumlari), takim kosulari ve iscileri, onay bekleyen satirlar, pano, aktarimlar, kaynak, maliyet, bugun/dun ve teshis. Dort sekme (Genel, Ajanlar, Kosular, Olaylar), ajan ayrintisi, `c` ile secili satirin komutunu panoya kopyalama; 1.6.0: `?` yardim, `f` filtre, `g` ilk soruna atla, istege bagli ses (`BEYIN_MERKEZ_SES`, `BEYIN_MERKEZ_SESSIZ`). `-Sekme` yeni Windows Terminal sekmesinde acar. Ayrinti: 13.4. | Hayir |
@@ -878,7 +938,7 @@ beyin : The term 'beyin' is not recognized as the name of a cmdlet, function, ..
    powershell -NoProfile -ExecutionPolicy Bypass -File <vault>\kurulum\kur.ps1
    ```
 
-   Ayrica kurulumun dogrulama tablosundaki `beyin komutu` satiri, `beyin.cmd`
+   Ayrica kurulumun dogrulama tablosundaki "beyin komutu" satiri, `beyin.cmd`
    dosyasinin varligina degil **kayit defterindeki PATH girdisine** bakar - yani
    gercekten kalici olarak kurulup kurulmadigini soyler.
 3. **PATH girdisini kendin kontrol et:**

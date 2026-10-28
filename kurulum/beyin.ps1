@@ -102,6 +102,10 @@ TANI
   derin            Tam kontrol + canli 'claude -p' duman testi (gunluk butceden 1 harcar)
   makbuz [gun] [betik]  Motor kosu makbuzlari: ne yazildi, kac bayt, kac butce (varsayilan 1 gun)
   canli [dk]       Su an ne oluyor: aktif oturumlar, kuyruk, calisan is, butce, niyet (yazmaz)
+  gecmis           Kalici oturum zinciri (acilis/devam/kapanis); -Proje <tam yol>, -Is <anahtar>, -Json (yazmaz)
+  rapor liste      Projenin .beyin/raporlar indeksini goster; -Proje <tam yol>, -Json
+  rapor kaydet     Proje icindeki -Kaynak <md> raporunu tek koke kaydet; -Is <anahtar>, -Proje <tam yol>
+  ipucu-denetle    Belge/ipucu komut ve bayraklarini statik kontrol et; -AgentChef <kok>, -Json (yazmaz)
   merkez [-Sekme]  Tum sistemin canli izleme ekrani: liderler, takim kosulari, isciler, pano, aktarim, kaynak (yazmaz; -Sekme yeni WT sekmesinde acar)
   kullanim [gun]   Enjekte edilen kavram notu sonradan ACILDI mi? (retrieval makbuzu x Claude transkripti; -Json)
   skill-aday [gun] Tekrar eden yordamsal kavram notlarindan skill adayi listesi (86-compiled/skill-adaylari.md;
@@ -131,6 +135,8 @@ BAKIM
   aktar [metin]    Ajanlar arasi aktarim: -Kime claude|codex ile soru/handoff kaydet (hedef ajanin yeni
                    oturumunda ve oturum icinde bir kez [Hafiza: Aktarim] blogu); -Tur soru|devir; argumansiz liste;
                    -Tamam <id> kapatir; -Hepsi kapalilar; -Isci TASK-x yalniz o takim iscisine (sema v3)
+                   -Olay <anahtar> ayni olay tekrarlarini birlestirir; -Gor <id> OKUNDU makbuzu yazar
+                   -Kayit <id> -Durum submitted|working|input-required|completed|failed|canceled (yalniz alici)
   topla [gun]      Pencereden dusmus oturumlari topla (varsayilan kuru calisma, 3 gun)
   topla-uygula     Ayni, ama gercekten isle
   derle            Gunluk loglardan kavram notu uret
@@ -197,6 +203,28 @@ function Cagir([string]$Betik, $Args2) {
     # (ayar dalinda -BosDeger). Bkz. A4 duzeltmesi.
     $psArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $yol)
     foreach ($a in @($Args2)) { if ($null -ne $a) { $psArgs += [string]$a } }
+    $channelPaths = $null; $channelBefore = @{}; $channelAction = ''; $channelEngine = ''; $channelTargetId = ''; $channelProject = ''
+    if ($Betik -in @('codex-kanal.ps1','claude-kanal.ps1') -and @($Args2).Count -and [string]$Args2[0] -in @('ac','gonder','sor','devam','kapat')) {
+        try {
+            . (Join-Path $vault 'motor/hooks/lib.ps1')
+            $channelVault = $vault
+            for ($i=0; $i -lt @($Args2).Count - 1; $i++) {
+                if ($Args2[$i] -eq '-Vault') { $channelVault = [string]$Args2[$i+1] }
+                if ($Args2[$i] -eq '-Proje') { $channelProject = [string]$Args2[$i+1] }
+            }
+            if (@($Args2).Count -gt 1 -and [string]$Args2[1] -cmatch '\ACK-[a-f0-9]{32}\z') { $channelTargetId = [string]$Args2[1] }
+            $channelPaths = Get-BeyinPaths -Vault $channelVault
+            $channelBefore = Get-BeyinChannelSnapshot -Paths $channelPaths
+            $channelAction = [string]$Args2[0]
+            $channelEngine = $(if ($Betik -eq 'claude-kanal.ps1') { 'claude' } else { 'codex' })
+        } catch { Write-Warning 'channel history preflight failed; channel command will keep its original behavior' }
+    }
+    function Finish-ChannelHistory {
+        if ($channelPaths) {
+            try { Sync-BeyinChannelHistory -Paths $channelPaths -Before $channelBefore -Engine $channelEngine -Action $channelAction -TargetId $channelTargetId -Project $channelProject }
+            catch { Write-Warning 'channel command completed but history/report synchronization failed' }
+        }
+    }
     # YONLENDIRILMIS CIKTI = UTF-8 (2026-10-07): cikti bir ajana/boruya gidiyorsa alt betik
     # kendi gizli konsoluyla baslatilir ve UTF-8 yazar (lib.ps1: BEYIN_STDOUT_UTF8); baytlar
     # burada DOKUNULMADAN iletilir. Eskiden konsol kod sayfasiyla (IBM437/857) yeniden
@@ -230,10 +258,13 @@ function Cagir([string]$Betik, $Args2) {
         $t2 = $pr.StandardError.BaseStream.CopyToAsync($hedefErr)
         $pr.WaitForExit()
         try { [void]$t1.Wait(10000); [void]$t2.Wait(10000); $hedefOut.Flush(); $hedefErr.Flush() } catch { }
+        Finish-ChannelHistory
         exit $pr.ExitCode
     }
     & powershell @psArgs
-    exit $LASTEXITCODE
+    $childCode = $LASTEXITCODE
+    Finish-ChannelHistory
+    exit $childCode
 }
 
 # ---------------------------------------------------------------------------
@@ -669,6 +700,20 @@ switch ($KomutN) {
         if ($metin -and -not $metinVar) { $nArgs = @('-Metin', $metin) + $nArgs }
         Cagir 'niyet.ps1' $nArgs
     }
+    'ipucu-denetle' {
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault','-agentchef') -Bayrak @('-json') -Slot 0
+        Cagir 'ipucu-denetle.ps1' @($a.Gecen)
+    }
+    'gecmis' {
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault','-proje','-is') -Bayrak @('-json') -Slot 0
+        Cagir 'gecmis.ps1' @($a.Gecen)
+    }
+    'rapor' {
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault','-proje','-is','-kaynak','-komut') -Bayrak @('-json') -Slot 1
+        $rArgs = @($a.Gecen)
+        if (@($a.Konum).Count) { $rArgs += @('-Komut', [string]$a.Konum[0]) }
+        Cagir 'rapor.ps1' $rArgs
+    }
     { $_ -in @('aktar', 'handoff') } {
         # beyin aktar dinle -Kime claude|codex [-Proje x] : canli uyandirma (Monitor araci). "dinle" metin SAYILMAZ:
         # eskiden bu cagri "dinle" metinli bir aktarim GONDERIRDI.
@@ -681,7 +726,7 @@ switch ($KomutN) {
         # beyin aktar "soru" -Kime claude|codex [-Kanit ..] [-Kapsam ..] [-Risk ..] [-Sonraki ..] [-Proje x]
         # beyin aktar [-Hepsi]  |  beyin aktar -Tamam <id>
         # niyet rotasiyla ayni kural: adli degerler disindaki TUM konumsal parcalar metindir.
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur', '-yanit', '-bekle', '-sure', '-hedef', '-isci', '-oturum') -Bayrak @('-hepsi', '-vebekle') -SinirsizSlot
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur', '-yanit', '-bekle', '-sure', '-hedef', '-isci', '-oturum', '-gor', '-durum', '-kayit', '-olay') -Bayrak @('-hepsi', '-vebekle') -SinirsizSlot
         $hArgs = @($a.Gecen)
         $hMetin = ((@($a.Konum)) -join ' ').Trim()
         $hMetinVar = $false

@@ -573,6 +573,52 @@ function Get-MerkezKosuKapasite($Kosu) {
     }
     return @{ Metin = ($p -join ' · '); Uyari = $uyari }
 }
+function Get-MerkezEffectiveTokens {
+    param($Usage)
+    if (-not $Usage) { return 0.0 }
+    $inCount = [math]::Max(0, [double]$Usage.input_tokens)
+    $outCount = [math]::Max(0, [double]$Usage.output_tokens)
+    $cachedCount = [math]::Min($inCount, [math]::Max(0, [double]$Usage.cached_input_tokens))
+    return ($inCount - $cachedCount + $outCount + $cachedCount * 0.1)
+}
+
+function Get-MerkezKanalIsciler {
+    param([hashtable]$Paths)
+    foreach ($engine in @('codex','claude')) {
+        $root = Join-Path $Paths.ScrState ($engine + '-kanal')
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $root -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+            try {
+                $r = (Read-MerkezPaylasimli $file.FullName) | ConvertFrom-Json
+                if (-not $r.Id -or -not $r.Project -or -not $r.Status) { continue }
+                $agent = $engine; if ($r.Engine) { $agent = [string]$r.Engine } elseif ($r.Backend -eq 'claude-stream') { $agent = 'claude' }
+                $status = switch ([string]$r.Status) {
+                    running { 'calisiyor' }; queued { 'bekliyor' }; ready { 'bosta' }
+                    completed { 'bitti' }; closed { 'kapali' }; 'limit-waiting' { 'duraklatildi' }
+                    default { 'engelli' }
+                }
+                $start = $null; $end = $null
+                if ($r.Started) { $start = [datetime]$r.Started }
+                if ($r.Finished) { $end = [datetime]$r.Finished }
+                $event = [string]$r.LastEvent
+                $evPath = Join-Path (Join-Path $root $file.BaseName) 'events.jsonl'
+                if (Test-Path -LiteralPath $evPath) {
+                    $last = @(Read-MerkezSonSatirlar $evPath 8192 | Where-Object { $_.Trim() } | Select-Object -Last 1)
+                    if ($last.Count) { try { $ev = $last[0] | ConvertFrom-Json; $event = "$($ev.at) $($ev.type)" } catch { } }
+                }
+                $approvals = @($r.PendingApprovals | Where-Object { $_ }).Count
+                if ($approvals) { $status = 'bekliyor' }
+                $effectiveUsage = 0.0; if ($r.Budget) { $effectiveUsage = [double]$r.Budget.effectiveTokens }
+                $queue = ''; if ($r.LimitQueue) { $queue = [string]$r.LimitQueue.status }
+                @{ Tur='isci'; Kanal=$engine; Ajan=$agent; Ad=[string]$r.Id; Rol=[string]$r.Role; Kanat=(Get-MerkezProjeAd ([string]$r.Project)); Cwd=[string]$r.Project; Kosu=''
+                   Durum=$status; Kaynak='kanal'; Bayat=$false; NabizSn=[math]::Max(0, ((Get-Date) - $file.LastWriteTime).TotalSeconds)
+                   Balon=(Protect-MerkezSatir "$event$(if ($approvals) { " | onay $approvals" })$(if ($queue) { " | kuyruk $queue" })" 150)
+                   SonOlay=$event; Onay=$approvals; Kuyruk=$queue; Basladi=$start; Bitti=$end; Jeton=$effectiveUsage; Pid=$r.Pid; Dosya=0; Commit=$false }
+            } catch { }
+        }
+    }
+}
+
 function Get-MerkezAnlik {
     param([hashtable]$Paths, [int]$SonKosuSaat = 6, [switch]$Hizli, [hashtable]$Onbellek, [string]$AyrintiAnahtar = '', [string]$ClaudeKok = '')
     # -AyrintiAnahtar 'Tur:Kosu:Ad': yalniz o ajanin ayrintisi (son adimlar, jeton, bekleme) hesaplanir; hizli turda da (onbellekli).
@@ -616,7 +662,7 @@ function Get-MerkezAnlik {
         $sahipsiz = [bool](([string]$k.status -eq 'running') -and @($k.workers | Where-Object { $_.status -in @('queued', 'spawning', 'running') }).Count -and (Test-MerkezGozetmenDurdu $k $Onbellek $simdi))
         $sonraki = Get-MerkezKosuSonraki $k $sahipsiz
         $ws = @($k.workers | Where-Object { $null -ne $_ })
-        $jeton = 0L; foreach ($w in $ws) { if ($w.usage) { try { $jeton += [int64]$w.usage.input_tokens + [int64]$w.usage.output_tokens } catch { } } }
+        $jeton = 0.0; foreach ($w in $ws) { if ($w.usage) { try { $jeton += Get-MerkezEffectiveTokens $w.usage } catch { } } }
         $ozet = Get-MerkezKosuOzet $k $sahipsiz $simdi
         $kosuOge = @{ Kapasite = (Get-MerkezKosuKapasite $k); RunId = [string]$k.runId; Repo = [string]$k.repoName; Durum = [string]$k.status; Asama = (Get-MerkezKosuAsama $k); Sonraki = $sonraki; Ozet = $ozet
             Isci = $ws.Count; Biten = @($ws | Where-Object { $_.status -in @('finished', 'collected', 'integrated') }).Count
@@ -638,7 +684,7 @@ function Get-MerkezAnlik {
             $son = $null; if ($w.finishedAt) { try { $son = [datetime]$w.finishedAt } catch { } }
             $a.Ajanlar.Add(@{ Tur = 'isci'; Ajan = 'codex'; Ad = [string]$w.taskId; Rol = [string]$w.role; Kanat = [string]$k.repoName; Kosu = [string]$k.runId
                 Durum = $d.Durum; Kaynak = $d.Kaynak; Bayat = $d.Bayat; NabizSn = $nabiz; Balon = $balon; Basladi = $basla; Bitti = $son
-                Jeton = $(if ($w.usage) { try { [int64]$w.usage.input_tokens + [int64]$w.usage.output_tokens } catch { 0 } } else { 0 }); Verdict = [string]$w.verdict; Pid = $w.pid
+                Jeton = (Get-MerkezEffectiveTokens $w.usage); Verdict = [string]$w.verdict; Pid = $w.pid
                 Dosya = @($w.changedPaths | Where-Object { $_ }).Count; Commit = [bool]$w.commit })
             if ($d.Durum -eq 'duraklatildi') { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "$($w.taskId) kota sınırında · beyin takim resume --run $($k.runId) --wait" }) }
             elseif ($d.Bayat -and $d.Kaynak -eq 'surec') { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = "surec:$($w.taskId)"; Metin = "$($w.taskId) işçi süreci yok (koşu hâlâ çalışıyor görünüyor) · beyin takim resume --run $($k.runId)" }) }
@@ -759,7 +805,7 @@ function Get-MerkezAnlik {
     if ($Onbellek.ContainsKey('Kaynak') -and ($Hizli -or $tazeKay)) { $a.Kaynak = $Onbellek.Kaynak } else {
         $Onbellek['ts:Kaynak'] = $simdi
         $taze = [bool]$Onbellek.KaynakTaze; $Onbellek.KaynakTaze = $false
-        $yeniK = $null; try { $yeniK = Get-BeyinKaynakOzeti -Paths $Paths -OnbellekDk $(if ($taze) { 0 } else { 1 }) } catch { $yeniK = $null }   # panel en cok 1 dk eski olcum gosterir; r yeniden olcer
+        $yeniK = $null; try { $yeniK = Get-BeyinKaynakOzeti -Paths $Paths -SaltOkunur -OnbellekDk $(if ($taze) { 0 } else { 1 }) } catch { $yeniK = $null }   # read-only monitor never refreshes disk caches
         # yuk altinda olcum ara sira bos doner (CIM zaman asimi): 10 dk'ya kadar son iyi olcum kalir, yoksa bellek alarmi
         # bir kaybolup bir gelir ve her geliste yeniden bildirim/nabiz tetiklenirdi
         if ((-not $yeniK -or -not $yeniK.Ok) -and $Onbellek.Kaynak -and $Onbellek.Kaynak.Ok -and $Onbellek.ContainsKey('ts:KaynakIyi') -and ($simdi - $Onbellek['ts:KaynakIyi']).TotalMinutes -lt 10) { $yeniK = $Onbellek.Kaynak }
@@ -791,6 +837,15 @@ function Get-MerkezAnlik {
     $kanatOf = @{}; foreach ($ag in $a.Ajanlar) { if ($ag.Tur -eq 'lider' -and $ag.Ad) { $kanatOf[[string]$ag.Ad] = [string]$ag.Kanat } }
     foreach ($ol in $a.Olaylar) { $ol.Kanat = $(if ($ol.Anahtar -and $kanatOf.ContainsKey($ol.Anahtar)) { $kanatOf[$ol.Anahtar] } else { '' }) }
 
+    # Channel state is read directly: calling its CLI here could refresh/write state.
+    $channelSeen = @{}
+    foreach ($ag in @(Get-MerkezKanalIsciler -Paths $Paths)) {
+        if ($channelSeen.ContainsKey($ag.Ad)) { continue }; $channelSeen[$ag.Ad] = $true
+        $a.Ajanlar.Add($ag)
+        if ($ag.Onay) { $a.Onaylar.Add(@{ Satir="beyin $($ag.Ajan) durum $($ag.Ad)"; Neden="$($ag.Ad): $($ag.Onay) kanal onayi bekliyor" }) }
+    }
+    $a.Kuyruk = @($a.Ajanlar | Where-Object { $_.Durum -eq 'bekliyor' -or $_.Kuyruk } | ForEach-Object { @{ Ad=$_.Ad; Proje=$_.Kanat; Durum=$_.Durum; Kuyruk=$_.Kuyruk } })
+    $a.Sprint = @($kartlar | Group-Object -Property { if ($_.sprint) { [string]$_.sprint } else { 'sprint yok' } } | ForEach-Object { @{ Ad=$_.Name; Acik=$_.Count } })
     # --- sayaclar ---
     foreach ($ag in $a.Ajanlar) { $s = [string]$ag.Durum; if ($a.Sayac.ContainsKey($s)) { $a.Sayac[$s]++ } else { $a.Sayac[$s] = 1 } }
     # --- Bugun seridi (yavas kaynaklar; yalniz tam turda, onbellekli) ---

@@ -11,7 +11,7 @@ export class ClaudeRpc extends EventEmitter {
   const child=spawn(this.cfg.command,args,{cwd:this.cfg.cwd,env:childEnv,windowsHide:true,shell:false,stdio:['pipe','pipe','pipe']});this.process=child;
   child.stderr.on('data',()=>{});child.stdin.on('error',()=>{});
   child.on('error',()=>{if(this.process===child){this.active=null;this.approvals.clear();this.rejectControls();this.emit('closed');}});
-  child.on('exit',()=>{if(this.process===child&&!this.closing){this.resume=true;this.process=null;this.active=null;this.approvals.clear();this.rejectControls();this.emit('closed');}});
+  child.on('exit',(code,signal)=>{if(this.process===child&&!this.closing){this.resume=true;this.process=null;this.active=null;this.approvals.clear();this.rejectControls();this.emit('closed',{code,signal});}});
   readline.createInterface({input:child.stdout}).on('line',line=>{if(this.process!==child||line.length>1048576)return;let m;try{m=JSON.parse(line);}catch{this.emit('protocolWarning','invalid-json');return;}this.receive(m);});
  }
  rejectControls(){for(const control of this.controls.values()){clearTimeout(control.timer);control.reject(new Error('Claude control connection closed'));}this.controls.clear();}

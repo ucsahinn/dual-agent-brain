@@ -10,7 +10,8 @@ export class AppServerRpc extends EventEmitter {
     if(transport){this.transport=transport;transport.on('message',line=>this.receive(line));transport.on('close',()=>this.ended());transport.on('error',()=>this.ended());return;}
     this.process=spawn(command,args,{cwd,env,windowsHide:true,shell:false,stdio:['pipe','pipe','pipe']});
     this.process.stderr.on('data',chunk=>{this.stderrTail=(this.stderrTail+chunk.toString('utf8')).slice(-16384);});
-    this.process.on('error',()=>this.ended());this.process.on('exit',()=>this.ended());
+    // close follows stdout drain; exit may precede the final successful tool item.
+    this.process.on('error',()=>this.ended());this.process.on('close',(code,signal)=>this.ended({code,signal}));
     this.process.stdin.on('error',()=>this.ended());
     const rl=readline.createInterface({input:this.process.stdout});
     rl.on('line',line=>this.receive(line));
@@ -42,7 +43,7 @@ export class AppServerRpc extends EventEmitter {
     const result=await this.call('initialize',{clientInfo:{name:'beyin_kanal',version:'2.0.0'},capabilities:{experimentalApi:true}});
     this.write({method:'initialized',params:{}});return result;
   }
-  ended(){if(this.closed)return;this.closed=true;for(const w of this.pending.values()){clearTimeout(w.timer);w.reject(new Error('App-server exited'));}this.pending.clear();this.emit('closed');}
+  ended(detail){if(this.closed)return;this.closed=true;for(const w of this.pending.values()){clearTimeout(w.timer);w.reject(new Error('App-server exited'));}this.pending.clear();this.emit('closed',detail);}
   async close(){
     if(this.transport){this.transport.close();this.ended();return;}
     if(!this.process)return;

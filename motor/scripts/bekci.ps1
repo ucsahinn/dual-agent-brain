@@ -122,6 +122,12 @@ if ($hygYol -and $nodeExe) {
     } catch { }
 }
 $rapor.codexMcp = $(if ($hyg) { $hyg } else { [ordered]@{ durum = 'ATLANDI'; neden = $(if (-not $nodeExe) { 'node yok' } elseif (-not $kok) { 'AgentChef bulunamadi (kur ya da: beyin ayar BEYIN_AGENTCHEF_KOK <klasor>)' } elseif (-not $hygYol) { "codex-process-hygiene.mjs bulunamadi ($kok\plugins\{agentchef,agentchef-workflows}\scripts)" } else { 'cikti okunamadi' }) } })
+$rapor.nodeRepl = $null
+try {
+    $rapor.nodeRepl = Get-BeyinNodeReplReport
+    if ($rapor.nodeRepl.OrphanCount) { $rapor.uyarilar += "node_repl.exe: $($rapor.nodeRepl.OrphanCount) yetim aday (ebeveyn yok veya PID yeniden kullanilmis); yalniz rapor" }
+    if ($rapor.nodeRepl.Excess) { $rapor.uyarilar += "node_repl.exe: $($rapor.nodeRepl.Count) surec, esik $($rapor.nodeRepl.Limit); yalniz rapor" }
+} catch { $rapor.uyarilar += 'node_repl.exe sayimi alinamadi' }
 
 # 5) Disk - yalniz rapor (kullanici karari: simdilik silme yok)
 function Boyut($yol, $filtre) {
@@ -165,6 +171,7 @@ if ($takimD -and @($takimD.Acik).Count) {
 "YETIM DOKTOR ($($yetimler.Count))"
 if ($yd.Count) { $yd | ForEach-Object { [pscustomobject]$_ } | Format-Table pid, ebeveyn, ebeveynYasiyor, wsMB, baslangic -AutoSize | Out-String -Width 160 } else { '  (doktor sureci yok)' }
 "CODEX / MCP"
+if ($rapor.nodeRepl) { "  node_repl.exe: $($rapor.nodeRepl.Count), yetim aday $($rapor.nodeRepl.OrphanCount), asiri $($rapor.nodeRepl.Excess) (yalniz rapor)" }
 if ($hyg) {
     "  codex sureci: $($hyg.codexSurec) · claude sureci: $($hyg.claudeSurec) · MCP ornek: $($hyg.mcpOrnek) (yetim aday $($hyg.mcpYetimAday)) · MCP yardimci surec: $($hyg.mcpYardimciSurec) · MCP RAM: $($hyg.mcpRamMB) MB"
     $hyg.sunucular | Sort-Object { -[int]$_.ramMB } | Select-Object -First 8 | Format-Table -AutoSize | Out-String -Width 160

@@ -62,6 +62,17 @@ Describe 'ajan tespiti ve vault ici hedef suzgeci (2026-10-08)' {
 }
 
 Describe 'beyin aktar CLI (2026-10-07)' {
+    It 'only the recipient can close a handoff through Tamam' {
+        $tv = New-AktarVault
+        try {
+            $sent = Invoke-Aktar $tv codex @('recipient close fixture','-Kime','claude')
+            $id = Id-Bul $sent.Metin
+            $denied = Invoke-Aktar $tv codex @('-Tamam',$id)
+            $denied.Kod | Should Be 2
+            $allowed = Invoke-Aktar $tv claude @('-Tamam',$id)
+            $allowed.Kod | Should Be 0
+        } finally { Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue }
+    }
     It 'bos metin + gonderim bayragi sessizce liste basmaz: HATA, exit 2' {
         $tv = New-AktarVault
         try { $r = Invoke-Aktar $tv 'claude' @('-Kime', 'codex') } finally { Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue }
@@ -135,8 +146,9 @@ Describe 'beyin aktar dinle (2026-10-19): canli uyandirma - yeni aktarim 5 sn ic
         New-Item -ItemType Directory -Force -Path (Join-Path $fx 'motor\hooks'), (Join-Path $fx 'motor\scripts') | Out-Null
         Copy-Item (Join-Path $kaynak 'motor\hooks\lib.ps1') (Join-Path $fx 'motor\hooks')
         Copy-Item (Join-Path $PSScriptRoot 'aktar.ps1'), (Join-Path $PSScriptRoot 'aktar-dinle.ps1') (Join-Path $fx 'motor\scripts')
-        $cikti = Join-Path $fx 'dinle.out'; $proc = $null
+        $cikti = Join-Path $fx 'dinle.out'; $proc = $null; $previousAgent = $env:BEYIN_AGENT
         try {
+            $env:BEYIN_AGENT = 'claude'
             $proc = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $fx 'motor\scripts\aktar-dinle.ps1'), '-Vault', $fx, '-Kime', 'claude', '-Sure', '40') -RedirectStandardOutput $cikti -WindowStyle Hidden -PassThru
             $sw = [Diagnostics.Stopwatch]::StartNew()
             while ($sw.Elapsed.TotalSeconds -lt 15 -and -not ((Test-Path $cikti) -and (Get-Content $cikti -Raw -Encoding UTF8) -match 'dinleniyor')) { Start-Sleep -Milliseconds 100 }
@@ -155,6 +167,7 @@ Describe 'beyin aktar dinle (2026-10-19): canli uyandirma - yeni aktarim 5 sn ic
             $out.IndexOf([char]27) | Should Be -1
             $out | Should Not Match 'GIZLI-SON'
         } finally {
+            $env:BEYIN_AGENT = $previousAgent
             if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
             Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue
         }

@@ -1,4 +1,4 @@
-. (Join-Path $PSScriptRoot 'lib.ps1')
+﻿. (Join-Path $PSScriptRoot 'lib.ps1')
 Describe 'Single-shot devir closure is independent of the host shell identity' {
     foreach ($hostAgent in @('claude','codex')) {
         It "closes the owned Codex devir and refreshes its view from a $hostAgent host" {

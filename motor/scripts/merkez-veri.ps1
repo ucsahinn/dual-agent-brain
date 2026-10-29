@@ -15,6 +15,7 @@
 # Kullanim (dot-source):  . merkez-veri.ps1 ; $a = Get-MerkezAnlik -Paths $p
 
 $script:MerkezCalismaSn = 120      # bu kadar saniye icinde nabiz -> calisiyor
+. (Join-Path $PSScriptRoot 'codex-kanal/gorunum.ps1')
 $script:MerkezKapanmaSn = 7200     # bu kadar saniyedir sessiz lider kapali sayilir (pid yoksa)
 $script:MerkezGosterKapaliSn = 1800 # kapanan lider bu kadar sure sonuk satirla gorunur
 $script:MerkezIsciSessizSn = 600   # calisan isciden 10 dk olay gelmediyse bayat
@@ -584,6 +585,7 @@ function Get-MerkezEffectiveTokens {
 
 function Get-MerkezKanalIsciler {
     param([hashtable]$Paths)
+    $seen=@{}
     foreach ($engine in @('codex','claude')) {
         $root = Join-Path $Paths.ScrState ($engine + '-kanal')
         if (-not (Test-Path -LiteralPath $root)) { continue }
@@ -591,6 +593,8 @@ function Get-MerkezKanalIsciler {
             try {
                 $r = (Read-MerkezPaylasimli $file.FullName) | ConvertFrom-Json
                 if (-not $r.Id -or -not $r.Project -or -not $r.Status) { continue }
+                if ($seen.ContainsKey([string]$r.Id) -or -not (Test-KanalHistoryVisible $r 24 -Vault $Paths.Vault)) { continue }
+                $seen[[string]$r.Id]=$true
                 $agent = $engine; if ($r.Engine) { $agent = [string]$r.Engine } elseif ($r.Backend -eq 'claude-stream') { $agent = 'claude' }
                 $status = switch ([string]$r.Status) {
                     running { 'calisiyor' }; queued { 'bekliyor' }; ready { 'bosta' }

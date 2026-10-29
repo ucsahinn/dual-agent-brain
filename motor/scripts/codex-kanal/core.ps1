@@ -1,5 +1,6 @@
 # Channel-owned exec sessions only. JSONL stays in memory; durable data is redacted.
 . (Join-Path $PSScriptRoot 'surec.ps1')
+. (Join-Path $PSScriptRoot 'gorunum.ps1')
 . (Join-Path $PSScriptRoot 'teslim.ps1')
 . (Join-Path $PSScriptRoot 'profil.ps1')
 . (Join-Path $PSScriptRoot 'ikili.ps1')
@@ -152,7 +153,7 @@ function Save-KanalRecord($Context, $Record) {
     else { [IO.File]::Move($tmp, $path) }
     Sync-BeyinChannelRecordEvidence -Paths (Get-BeyinPaths -Vault $Context.Vault) -Record $Record
 }
-function Get-KanalRecords($Context) {
+function Get-KanalRecords($Context, [switch]$Hepsi, [int]$RecentHours = 0) {
     if (-not (Test-Path -LiteralPath $Context.State)) { return }
     foreach ($file in Get-ChildItem -LiteralPath $Context.State -Filter 'CK-*.json' -File) {
         $r = Read-KanalRecord $Context $file.BaseName
@@ -164,7 +165,7 @@ function Get-KanalRecords($Context) {
                 $r.DurationSeconds = $(if($r.Started){[math]::Round(([datetime]::UtcNow - [datetime]::Parse($r.Started).ToUniversalTime()).TotalSeconds,2)}else{0})
             }
         }
-        $r
+        if ($Hepsi -or ($RecentHours -eq 0 -and -not $r.ArchivedAt) -or ($RecentHours -gt 0 -and (Test-KanalHistoryVisible $r $RecentHours -Vault $Context.Vault))) { Get-KanalRecoveredRecord $Context $r }
     }
 }
 function Open-KanalLock([string]$Path) {

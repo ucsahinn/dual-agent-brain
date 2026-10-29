@@ -1,4 +1,4 @@
-# Read-only UI compatibility. The AgentChef engine remains the approval authority.
+﻿# Read-only UI compatibility. The AgentChef engine remains the approval authority.
 function Get-TakimUyumSurum {
     $roots=@($env:BEYIN_AGENTCHEF_KOK,$env:AGENTCHEF_ROOT)
     if(Get-Command Get-BeyinAyar -ErrorAction SilentlyContinue){$roots=@((Get-BeyinAyar 'BEYIN_AGENTCHEF_KOK' ''))+$roots}

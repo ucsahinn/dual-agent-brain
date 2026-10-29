@@ -203,3 +203,7 @@ Her anlamli oturum iz birakir: ya bir not, ya bir karar, ya guncellenmis bir dos
   iscisidir. Sef MCP sunucusu (`motor/mcp/beyin-sef-mcp`) ayni araclari MCP olarak verir.
   Is bolumu ve kapilar: `80-memory/rules.md`, karar: `60-decisions/ADR-013`.
   Ayrinti: `kurulum/KILAVUZ.md`.
+- Motor 1.8.0 (2026-10-28): `beyin gecmis` kalici oturum zincirini (acilis/devam/kapanis)
+  gosterir; `beyin rapor liste|kaydet` projenin `.beyin/raporlar` tek kokunu yonetir;
+  `beyin ipucu-denetle` belge ve ipuclarindaki komut/bayraklari kurulu CLI'ya karsi
+  statik denetler (yazmaz).

@@ -1,4 +1,4 @@
-# Isolated regression fixtures for the wave 3/4 motor contract (PS 5.1/Pester 3).
+﻿# Isolated regression fixtures for the wave 3/4 motor contract (PS 5.1/Pester 3).
 . (Join-Path $PSScriptRoot 'lib.ps1')
 
 Describe 'R9: transcript memory accepts only conversational plain text' {

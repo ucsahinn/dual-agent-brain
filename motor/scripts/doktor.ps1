@@ -25,7 +25,10 @@ param(
     # -Ozet 20 sn (BEYIN_DOKTOR_SURE ile degistirilebilir), tam tarama sinirsiz.
     # Butce dolunca kalan AGIR kontroller 'ATLANDI' olarak raporlanir; tam
     # tarama onlari her zaman kosar.
-    [int]$SureSiniri = -1
+    [int]$SureSiniri = -1,
+    # Ayni vault icin baska doktor calisiyorsa en fazla bu kadar bekle.
+    # 0 eski aninda-cikis davranisidir; varsayilan acilis yarisi icin 30 sn.
+    [ValidateRange(0, 300)][int]$BeklemeSiniri = 30
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -86,7 +89,8 @@ $rows = New-Object System.Collections.Generic.List[object]
 # her birinin altinda 972 ayri 'git show' cocugu (arsivdeki her not icin bir
 # tane; bkz. 'git gecmisi'). Baslatan ajanin arac zaman asimi ebeveyni
 # oldurunce Windows alt PowerShell'i oldurmuyor -> yetim. Uc kapi:
-#   1. ayni vault icin tek doktor sureci (named mutex; bekleme yok, cikis 3)
+#   1. ayni vault icin tek doktor sureci (named mutex; varsayilan 30 sn bekleme,
+#      sure dolarsa cikis 3)
 #   2. agir kontroller icin sure butcesi (-Ozet 20 sn; dolunca ATLANDI)
 #   3. ebeveyn surec olduyse cik (her Add-Row'da ucuz kontrol; cikis 4)
 # ----------------------------------------------------------------------------
@@ -114,9 +118,9 @@ function Butce-Var {
 $mtxAd = 'Global\BeyinDoktor-' + (([BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($Vault.ToLowerInvariant()))) -replace '-', '').Substring(0, 12))
 $script:DoktorMutex = New-Object System.Threading.Mutex($false, $mtxAd)
 $mtxAlindi = $false
-try { $mtxAlindi = $script:DoktorMutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $mtxAlindi = $true }
+try { $mtxAlindi = $script:DoktorMutex.WaitOne([TimeSpan]::FromSeconds($BeklemeSiniri)) } catch [System.Threading.AbandonedMutexException] { $mtxAlindi = $true }
 if (-not $mtxAlindi) {
-    Write-Host "DOKTOR ZATEN CALISIYOR: bu vault icin baska bir doktor sureci aktif. Bekleme yok, cikiliyor (kod 3)." -ForegroundColor Yellow
+    Write-Host ('DOKTOR ZATEN CALISIYOR: bu vault icin baska bir doktor sureci aktif. {0} sn bekleme doldu, cikiliyor (kod 3).' -f $BeklemeSiniri) -ForegroundColor Yellow
     Write-Host "  Yetim kaldigini dusunuyorsan: Get-Process powershell | Where-Object { `$_.CommandLine -like '*doktor.ps1*' }"
     exit 3
 }

@@ -1,4 +1,4 @@
-# Pester 3.4+; no live model calls. The process fixture checks arguments and stdin.
+﻿# Pester 3.4+; no live model calls. The process fixture checks arguments and stdin.
 $root = $PSScriptRoot
 . (Join-Path (Split-Path $root -Parent) 'hooks/lib.ps1')
 . (Join-Path $root 'codex-kanal/core.ps1')

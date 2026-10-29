@@ -1,15 +1,16 @@
-# beyin codex gonder -Proje <dir> [-Rol agentchef:code-mapper] [-BrifDosya <file> | -Metin <text>] [-Arkaplan]
+﻿# beyin codex gonder -Proje <dir> [-Rol agentchef:code-mapper] [-BrifDosya <file> | -Metin <text>] [-Arkaplan]
 # beyin codex devam <CK-id> -Metin <text>; liste; durum <CK-id>. Only owned exec sessions.
 [CmdletBinding(PositionalBinding=$false)]
 param(
-    [Parameter(Position=0)][ValidateSet('gonder','devam','liste','durum','isci','kapat','yetim','ac','sor','steer','interrupt','onay','sunucu','sema','tui','tetikle','limitler')][string]$Komut = 'liste',
+    [Parameter(Position=0)][ValidateSet('gonder','devam','liste','durum','isci','kapat','yetim','ac','sor','steer','interrupt','onay','sunucu','sema','tui','tetikle','limitler','temizle')][string]$Komut = 'liste',
     [Parameter(Position=1)][string]$Id = '', [string]$Proje = '', [string]$Rol = '',
     [string]$BrifDosya = '', [string]$Metin = '', [switch]$Arkaplan,
     [string]$Vault = '', [string]$EtatRacine = '', [ValidateSet('exec','app-server')][string]$Motor='app-server',
     [string]$Istek='',[ValidateSet('accept','decline','cancel')][string]$Karar='decline',[switch]$Uret,
     [ValidateSet('codex','claude')][string]$Engine='codex',[string[]]$YazmaKapsami=@(),[long]$JetonButce=2000000,
     [ValidateSet('elevated','unelevated')][string]$WindowsSandbox='elevated',
-    [string]$CodexHome='', [string]$CodexProfil='', [string]$ProfilDosya='', [switch]$LimitteProfilDegistir
+    [string]$CodexHome='', [string]$CodexProfil='', [string]$ProfilDosya='', [switch]$LimitteProfilDegistir,
+    [switch]$Hepsi, [ValidateRange(1,87600)][int]$SonSaat=24, [switch]$Uygula
 )
 $ErrorActionPreference = 'Stop'
 try {
@@ -51,9 +52,10 @@ try {
         }
         'kapat' { Close-KanalWorker $ctx $Id | ConvertTo-Json -Depth 10 }
         'yetim' { ConvertTo-Json -InputObject @(Get-KanalOrphans $ctx) -Depth 10 }
-        'liste' { ConvertTo-Json -InputObject @(Get-KanalRecords $ctx | Select-Object Id,SessionId,Project,Role,Created,Started,Finished,Status,Summary,DurationSeconds,Turn,Error,Notification) -Depth 10 }
+        'temizle' { if(Test-Path -LiteralPath $ctx.State){ConvertTo-Json -InputObject @(Archive-KanalRecords $ctx -RecentHours $SonSaat -Apply:$Uygula) -Depth 10}else{'[]'} }
+        'liste' { ConvertTo-Json -InputObject @(Get-KanalRecords $ctx -Hepsi:$Hepsi -RecentHours $SonSaat | Select-Object Id,SessionId,Project,Role,Created,Started,Finished,Status,ArchivedAt,Summary,DurationSeconds,Turn,Error,Notification) -Depth 10 }
         'durum' {
-            $r = @(Get-KanalRecords $ctx | Where-Object { $_.Id -eq $Id })
+            $r = @(Get-KanalRecords $ctx -Hepsi | Where-Object { $_.Id -eq $Id })
             if (-not $r.Count) { $null = Read-KanalRecord $ctx $Id }
             $r | Select-Object * -ExcludeProperty Prompt,RoleText | ConvertTo-Json -Depth 10
         }

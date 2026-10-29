@@ -606,21 +606,23 @@ function Write-BeyinText {
 
 function Add-BeyinText {
     param([string]$Path, [string]$Text)
-    # ESZAMANLI EKLEME (2026-10-05, kod incelemesi): AppendAllText dosyayi
-    # FileShare.Read ile acar; ayni saniyede 6-8 SessionStart engine.log'a
-    # yazarken ikincisi IOException aliyor ve Write-BeyinLog'un catch'i
-    # yutuyordu - tani satirlari tam yogun anda kayboluyordu. Paylasimli
-    # (ReadWrite) acilis + 4 deneme; yine olmazsa hata cagirana cikar.
+    # FileShare.ReadWrite lets independent handles seek to the same EOF and
+    # overwrite successful appends. Hold the file's exclusive writer lease
+    # through flush/disposal; readers remain allowed. Retry only acquisition,
+    # never a partially completed write (which could duplicate a record).
     $bytes = $script:BeyinUtf8NoBom.GetBytes($Text)
-    $sonHata = $null
-    for ($d = 0; $d -lt 4; $d++) {
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    $fs = $null
+    while ($null -eq $fs) {
         try {
-            $fs = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
-            try { $fs.Write($bytes, 0, $bytes.Length) } finally { $fs.Dispose() }
-            return
-        } catch { $sonHata = $_; Start-Sleep -Milliseconds (40 * ($d + 1)) }
+            $fs = [IO.File]::Open($Path, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        } catch [IO.IOException] {
+            $native = $_.Exception.HResult -band 0xffff
+            if ($native -notin @(32, 33) -or $deadline.Elapsed.TotalSeconds -ge 30) { throw }
+            Start-Sleep -Milliseconds 20
+        }
     }
-    throw $sonHata
+    try { $fs.Write($bytes, 0, $bytes.Length); $fs.Flush($true) } finally { $fs.Dispose() }
 }
 
 # ============================================================================
@@ -2753,7 +2755,7 @@ function Get-BeyinKelimeler {
         if ($w.Length -lt $MinUzunluk) { continue }
         $set[$w] = $true
     }
-    return @($set.Keys)
+    return @($set.psbase.Keys)
 }
 
 function Get-BeyinConceptIndex {
@@ -4849,6 +4851,25 @@ function Get-BeyinHandoffListe {
     return @($liste | Sort-Object -Property ts)
 }
 
+function Get-BeyinHandoffBayat {
+    # Selection only. Labels are not paths; do not guess a real project's location.
+    param([hashtable]$Paths, [ValidateRange(1,36500)][int]$Gun=3, [datetime]$Simdi=[datetime]::UtcNow)
+    foreach ($h in @(Get-BeyinHandoffListe -Paths $Paths)) {
+        if ($h.status -ne 'acik') { continue }
+        $reasons=@()
+        try { if ([datetime]::Parse($h.ts).ToUniversalTime() -lt $Simdi.ToUniversalTime().AddDays(-$Gun)) { $reasons+="yas > $Gun gun" } } catch { }
+        $target=''
+        foreach ($value in @($h.toProjectPath,$h.toProject)) {
+            if ($value -and [IO.Path]::IsPathRooted([string]$value)) { $target=[string]$value;break }
+        }
+        # Legacy smoke records stored only the Temp directory's leaf name.
+        if (-not $target -and $h.toProject -match '^beyin-smoke[A-Za-z0-9_.-]*$') { $target=Join-Path ([IO.Path]::GetTempPath()) ([string]$h.toProject) }
+        if (-not $target -and -not $h.toProject -and $h.from.project -match '^beyin-(?:[A-Za-z0-9]+-)*smoke[A-Za-z0-9_.-]*$') { $target=Join-Path ([IO.Path]::GetTempPath()) ([string]$h.from.project) }
+        if ($target -and -not (Test-Path -LiteralPath $target -PathType Container)) { $reasons+='hedef klasoru yok' }
+        if ($reasons.Count) { [pscustomobject]@{Id=[string]$h.id;To=[string]$h.to;Reason=($reasons -join '; ');Target=$target} }
+    }
+}
+
 function Get-BeyinHandoffAcik {
     # Hedef ajana (ve istenirse projeye) gore acik aktarimlar.
     # -KonumProje: oturumun BULUNDUGU projenin adi (vault icinde de verilir). -Hedef'li bir mesaj
@@ -4994,6 +5015,13 @@ function Add-BeyinHandoffCore {
     if ($FromWorker -and $FromWorker -cnotmatch '^TASK-\d+$') { $FromWorker = '' }
     # Kisa alanlar: yalniz guvenli karakterler, sinirli uzunluk (gorunumde ve baglamda basilir).
     $temiz = { param([string]$T, [int]$Max) $t = ([string]$T -replace '[^\p{L}\p{Nd} ._@*:()-]', '').Trim(); if ($t.Length -gt $Max) { $t = $t.Substring(0, $Max) }; $t }
+    $hedefYol=''
+    if ($HedefProje -and [IO.Path]::IsPathRooted($HedefProje)) {
+        $protectedPath=Protect-BeyinSecrets -Text $HedefProje -Vault $Paths.Vault
+        if ($protectedPath.Failed -or $protectedPath.Redactions) { $r.Kod='HEDEF_GECERSIZ';$r.Hata='hedef yolu guvenli kaydedilemiyor';return $r }
+        $hedefYol=[IO.Path]::GetFullPath($HedefProje)
+        $HedefProje=Split-Path $hedefYol -Leaf
+    }
     $Proje = & $temiz $Proje 64; $HedefProje = & $temiz $HedefProje 64; $Ref = & $temiz $Ref 120
     $Coordinator = & $temiz $Coordinator 64; $FromAgent = & $temiz $FromAgent 16; $FromSession = & $temiz $FromSession 64
     $ToSession = & $temiz $ToSession 64
@@ -5035,7 +5063,7 @@ function Add-BeyinHandoffCore {
     $kayit = [ordered]@{
         v = $surum; id = $id; ts = (Get-Date).ToString('o', $inv)
         from = [ordered]@{ agent = $FromAgent; session = $FromSession; project = $Proje; worker = $FromWorker }
-        to = $Kime; toProject = $HedefProje; toWorker = $ToWorker; toSession = $ToSession
+        to = $Kime; toProject = $HedefProje; toProjectPath = $hedefYol; toWorker = $ToWorker; toSession = $ToSession
         kind = $(if ($Kind) { $Kind } else { 'soru' }); ref = $Ref; coordinator = $Coordinator
         question = $alanlar.question; evidence = $alanlar.evidence; scope = $alanlar.scope; risk = $alanlar.risk; next = $alanlar.next
         status = 'acik'; a2aStatus = $A2aStatus; occurrences = 1; doneBy = ''; doneTs = ''
@@ -5071,7 +5099,10 @@ function Set-BeyinHandoffState {
         if ($current -in @('completed','failed','canceled') -or $State -eq 'submitted') { return $false }
         $h | Add-Member -NotePropertyName a2aStatus -NotePropertyValue $State -Force
         if ($State -in @('completed','failed','canceled')) {
-            $h.status = 'tamam'; $h.doneBy = $(if ($DoneBy) { $DoneBy } else { $Agent }); $h.doneTs = Get-BeyinIsoNow
+            $h.status = 'tamam'
+            # Older channel notices omit completion metadata on the JSON object.
+            $h | Add-Member -NotePropertyName doneBy -NotePropertyValue $(if ($DoneBy) { $DoneBy } else { $Agent }) -Force
+            $h | Add-Member -NotePropertyName doneTs -NotePropertyValue (Get-BeyinIsoNow) -Force
         } else { $h.status = 'acik' }
         $ok = [bool](Set-BeyinHandoff -Paths $Paths -Kayit $h).Ok
         if ($ok) { Write-BeyinMakbuz -Paths $Paths -Script 'aktar' -Outcome $(if ($h.status -eq 'tamam') { 'KAPANDI' } else { 'DURUM' }) -Agent $Agent -Note "$Id $State" }
@@ -5266,7 +5297,9 @@ function Sync-BeyinPanoBrifing {
             if ($h.status -ne 'tamam' -and $h.PSObject.Properties['kind'] -and $h.kind -eq 'brifing') {
                 $parca = ([string]$h.ref) -split '@'
                 if ($parca.Count -ge 2 -and $kartDurum.ContainsKey($parca[0]) -and $kartDurum[$parca[0]] -ne $parca[1]) {
-                    $h.status = 'tamam'; $h.doneBy = 'pano (kart ilerledi)'; $h.doneTs = (Get-Date).ToString('o', $inv)
+                    $h.status = 'tamam'
+                    $h | Add-Member -NotePropertyName doneBy -NotePropertyValue 'pano (kart ilerledi)' -Force
+                    $h | Add-Member -NotePropertyName doneTs -NotePropertyValue (Get-Date).ToString('o', $inv) -Force
                     if ((Set-BeyinHandoff -Paths $Paths -Kayit $h).Ok) { $r.Kapanan++ }
                 }
             }

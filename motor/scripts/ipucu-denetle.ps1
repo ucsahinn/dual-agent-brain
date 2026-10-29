@@ -1,4 +1,4 @@
-# Static, read-only command contract check; never execute a hint or the external CLI.
+﻿# Static, read-only command contract check; never execute a hint or the external CLI.
 param([string]$Vault = '', [string]$AgentChef = '', [switch]$Json)
 
 function Test-BeyinHintConsistency {

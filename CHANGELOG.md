@@ -21,6 +21,48 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.8.1 - 2026-10-29 - Saglik turu: butun komutlar denetlendi
+
+35 komutun tamami tek tek calistirildi ve olculdu; bulunan her sorun duzeltildi.
+
+- `beyin durum` ve `beyin doktor` baska bir doktor calisirken artik hemen
+  "ZATEN CALISIYOR (kod 3)" deyip cikmaz; 30 saniyeye kadar bekler, ilki bitince
+  sonucu verir. Sure `-BeklemeSiniri <sn>` ile degisir; dolarsa yine kod 3.
+- Yardim ekrani her komutu gosterir: `beyin codex`, `beyin claude`,
+  `maliyet-tara` eksikti. Bir test, dagiticidaki her komutun yardimda yer
+  aldigini artik her kosuda denetler. KILAVUZ'a `beyin codex` ve `beyin claude`
+  bolumleri eklendi.
+- `beyin copcu` 236 sn'den yaklasik 60 sn'ye, `beyin denetle` 120 sn'den
+  yaklasik 39 sn'ye indi. Aday listesi ve rapor icerigi birebir ayni; silme
+  kapilarinin hicbiri gevsemedi.
+- `beyin codex liste` / `beyin claude liste` varsayilan olarak acik ve son 24
+  saatte kapanmis isci kayitlarini gosterir (`-SonSaat`, tumu icin `-Hepsi`).
+  Eski kayitlar silinmez; `durum <id>` ile okunur. merkez Ajanlar sekmesi ayni
+  kurali kullanir, eski `turn-error` satirlari ve yinelenen satirlar gitti.
+- `beyin aktar -Bayat <gun>`: gun esigini asan ya da hedef klasoru artik
+  bulunmayan acik aktarimlari gerekceleriyle listeler; `-Uygula` kapatir.
+- Duzeltme: `beyin aktar -Tamam` kanal bildirimlerinde her zaman
+  "aktarim kapatilamadi" veriyordu (kayitta `doneBy`/`doneTs` alani yoktu).
+- Duzeltme: kanal, yuk altinda yeni Codex'in surum yoklamasi 5 sn'de
+  bitmeyince sessizce eski bir Codex kopyasina (or. 0.147.0) dusuyordu ve
+  model gpt-6 ailesinden gpt-5.6'ya iniyordu. Yoklama 15 sn ve bir tekrar alir;
+  dogrulanamayan bir aday varken otomatik secim acik hatayla durur.
+- Duzeltme: ayni projede `beyin codex ac` ile acilan iki isci ayni gorev
+  anahtarini paylastigi icin ikinci iscinin isi "Task already claimed"
+  hatasiyla reddediliyordu. `ac` ciktisi artik JSON'dan once uyari satiri basmaz.
+- Duzeltme: paralel yazmada gunluk satiri kaybolabiliyordu (6 surec x 50 satirda
+  293/300). Dosya acikken artik tek yazici var; 10 ardisik kosuda 300/300.
+- Duzeltme: "keys" sozcugu kelime cikariminda Hashtable.Keys ozelligiyle
+  cakisiyor ve `True` olarak sayiliyordu.
+- Duzeltme: kanal testleri tamamlandi bildirimlerini gecici test vault'u yerine
+  gercek vault'un aktarim kutusuna yaziyordu.
+- Duzeltme: kanal baglantisi tur sirasinda kopup ayni tur sonradan tamamlaninca
+  kayit "failed" kaliyor ve iscinin cevabi kayboluyordu. Artik dogrulanmis gec
+  tamamlanma kayda ve cevaba islenir; once "failed" bildirimi gittiyse bir kez
+  "completed" bildirimiyle duzeltilir. Yeni kayitlar kapanis kaynagini, cikis
+  kodunu ve PID'i tasir.
+- Betik kodlamasi: butun betikler UTF-8 BOM + CRLF.
+
 ## 1.8.0 - 2026-10-28 - Durust kanal durumu, canli gorunum ve tutarlilik denetimi
 
 - `beyin codex` durumu turun gercek sonucundan gelir: arada toparlanan arac

@@ -45,7 +45,7 @@ function Open-KanalBridge($Context,[string]$Project,[string]$Role='', [switch]$S
         Save-KanalRecord $Context $record
         $launch=$(if($Context.BridgeLaunch){$Context.BridgeLaunch}else{Resolve-KanalLaunch $Context $engine})
         if(-not $Context.BridgeLaunch -and $engine -eq 'codex'){Set-KanalCodexRecord $Context $record $launch;Save-KanalRecord $Context $record}
-        if(-not $Context.BridgeLaunch -and $engine -eq 'codex'){$record|Add-Member -NotePropertyName Schema -NotePropertyValue (Get-KanalSchemaStatus $Context) -Force;if($record.Schema.Changed -or -not $record.Schema.Generated){Write-Warning $record.Schema.Notice};Save-KanalRecord $Context $record}
+        if(-not $Context.BridgeLaunch -and $engine -eq 'codex'){$record|Add-Member -NotePropertyName Schema -NotePropertyValue (Get-KanalSchemaStatus $Context) -Force;if($record.Schema.Changed -or -not $record.Schema.Generated){$record|Add-Member -NotePropertyName Warnings -NotePropertyValue @($record.Schema.Notice) -Force};Save-KanalRecord $Context $record}
         $arguments=@($launch.args)
         $dietFile=''
         if(-not $Context.BridgeLaunch -and $engine -eq 'codex'){$profile=New-KanalMcpProfile $Context $record.Role $directory;$dietFile=$profile.Path;$record|Add-Member -NotePropertyName McpDiet -NotePropertyValue @{Enabled=$profile.Enabled;Disabled=$profile.Disabled} -Force;$arguments+=@('-c','approval_policy="on-request"','-c','approvals_reviewer="auto_review"');$arguments+=@($profile.Arguments);$arguments+=@('app-server','--listen','stdio://');Save-KanalRecord $Context $record}
@@ -116,6 +116,22 @@ function Run-KanalBridgeHost($Context,[string]$Id) {
         $process.WaitForExit() # This is the persistent host; each client probe has its own deadline.
     }finally{Close-KanalPowerShell $process}
 }
+function Get-KanalClaimScope($Record,[string]$Text) {
+    $scope=[regex]::Match($Text,'(?ms)^Write scope:\s*(.*?)^Boundaries:').Groups[1].Value.Trim()
+    $generic="Only changes explicitly requested in the user's words within the project. If no file changes are requested, read-only."
+    if ($scope -eq $generic) { $scope='' }
+    if ($Record.ExplicitWriteScopes) { $scope=@($Record.WriteScopes) -join "`n" }
+    return $scope
+}
+function Get-KanalClaimKey($Record,[string]$Text) {
+    $scope=Get-KanalClaimScope $Record $Text
+    $project=([string]$Record.Project).Replace('\','/').TrimEnd('/').ToLowerInvariant()
+    if ($scope) {
+        $normalized=(@($scope -split '\r?\n' | ForEach-Object { $_.Trim().Replace('\','/').TrimEnd('/').ToLowerInvariant() } | Where-Object {$_} | Sort-Object -Unique)) -join "`n"
+        return Get-KanalHash ($project+'|scope|'+$normalized)
+    }
+    return Get-KanalHash ($project+'|message|'+$Text.Replace("`r`n","`n").Trim())
+}
 function Send-KanalBridge($Context,[string]$Id,[string]$Method,[string]$Text='', [string]$RequestId='',[string]$Decision='', [switch]$Background) {
     $r=Read-KanalRecord $Context $Id
     if($r.OwnerSession -cne (Get-KanalOwnerSession)){throw 'Channel owner session mismatch'}
@@ -127,14 +143,16 @@ function Send-KanalBridge($Context,[string]$Id,[string]$Method,[string]$Text='',
     if($Method -eq 'sor'){
         $gate=Open-KanalLock (Join-Path $Context.State 'admission.lock')
         try{
-            $scope=[regex]::Match($Text,'(?ms)^Write scope:\s*(.*?)^Boundaries:').Groups[1].Value
-            $key=$(if($scope){Get-KanalHash ($r.Project+'|'+$scope)}elseif($r.TaskKey){$r.TaskKey}else{Get-KanalHash ($r.Project+'|'+$Text)})
-            if(@(Get-KanalRecords $Context|Where-Object {$_.Id -ne $Id -and $_.TaskKey -eq $key -and $_.Status -in @('queued','running')}).Count){throw 'Task already claimed by another worker'}
+            $key=Get-KanalClaimKey $r $Text
+            if(@(Get-KanalRecords $Context|Where-Object {$_.Id -ne $Id -and $_.ClaimKey -eq $key -and $_.Status -in @('queued','running')}).Count){throw 'Task already claimed by another worker'}
             $claims=Join-Path $Context.State 'task-claims';New-Item -ItemType Directory -Force $claims|Out-Null
             $claimPath=Join-Path $claims ($key+'.json')
             if(Test-Path -LiteralPath $claimPath){$previous=[IO.File]::ReadAllText($claimPath)|ConvertFrom-Json;if($previous.Id -ne $Id){$claimOwner=Read-KanalRecord $Context $previous.Id;$done=Join-Path (Join-Path $Context.State $previous.Id) ('claim-done-'+$previous.Request);if(-not (Test-Path -LiteralPath $done) -and $claimOwner.Status -notin @('closed','failed','stalled','disconnected') -and (Test-KanalProcessIdentity $claimOwner.Pid $claimOwner.ProcessStart)){throw 'Task already claimed by another worker'}}}
             [IO.File]::WriteAllText($claimPath,(@{Id=$Id;Request=$request}|ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding $false))
-            $message.taskKey=$key
+            # Claim identity is per request; unscoped follow-ups may continue the
+            # same conversation without reusing its task key for admission.
+            $message.claimKey=$key
+            $message.taskKey=$(if (-not (Get-KanalClaimScope $r $Text) -and $r.TaskKey) { $r.TaskKey } else { $key })
             $message.claimRequest=$request
         }finally{$gate.Dispose()}
     }

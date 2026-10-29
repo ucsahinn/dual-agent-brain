@@ -25,6 +25,27 @@ Describe 'One deterministic Codex resolver' {
   $a=Resolve-KanalCodex $ctx;$a.Path|Should Be $new;$a.Version|Should Be '0.162.1';$a.Conflict|Should Be $true;$a.Candidates.Count|Should Be 2
   (Resolve-KanalLaunch $ctx).Path|Should Be $new
  }
+ It 'selects a slow current launcher whose version probe exceeds five seconds' {
+  $cli=Join-Path (Split-Path $new -Parent) 'node_modules/@openai/codex/bin/codex.js'
+  $source=[IO.File]::ReadAllText($cli).Replace("console.log('codex-cli 0.162.1');", "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,5500);console.log('codex-cli 0.162.1');")
+  [IO.File]::WriteAllText($cli,$source)
+  $a=Resolve-KanalCodex $ctx
+  $a.Version|Should Be '0.162.1'
+  $a.Path|Should Be $new
+ }
+ It 'refuses an automatic downgrade when another candidate cannot be version validated' {
+  $ctx.FailVersionProbe=$new
+  Mock Get-KanalCodexVersion {throw 'probe timed out'} -ParameterFilter {$Context.ContainsKey('FailVersionProbe') -and $Launch.Path -eq $Context.FailVersionProbe}
+  {Resolve-KanalCodex $ctx}|Should Throw 'could not be version-validated'
+  $ctx.ResolvedCodex|Should BeNullOrEmpty
+ }
+ It 'retries a timed out version probe once using a fresh owned process' {
+  $cli=Join-Path (Split-Path $new -Parent) 'node_modules/@openai/codex/bin/codex.js'
+  $delay="if(!fs.existsSync(__filename+'.attempt')){fs.writeFileSync(__filename+'.attempt','1');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,3500);}"
+  [IO.File]::WriteAllText($cli,[IO.File]::ReadAllText($cli).Replace("console.log('codex-cli 0.162.1');",$delay+"console.log('codex-cli 0.162.1');"))
+  $ctx.VersionTimeoutMs=3000
+  (Resolve-KanalCodex $ctx).Version|Should Be '0.162.1'
+ }
  It 'honors the explicit Beyin setting even when it pins the older installation' {
   $ctx.Remove('CodexSetting');$script:explicitOld=$old
   Mock Get-BeyinAyar {param($Ad,$Varsayilan) if($Ad -eq 'BEYIN_CODEX_YOLU'){return $script:explicitOld};return $Varsayilan}

@@ -359,11 +359,12 @@ Asagidaki liste `kurulum\beyin.ps1` icindeki `Yaz-Yardim` fonksiyonunun tamamidi
 
 | Komut | Ne yapar / ne zaman | Yazar mi? |
 | --- | --- | --- |
-| `durum` (`ozet`, `status`) | Kisa saglik ozeti. En sik kullanilan komut. Model cagirmaz. Tum kontroller kosar, cikti tabloya degil ozete dokulur. | Hayir |
-| `doktor` (`doctor`, `tam`) | Tam kontrol tablosu. Bir sey ters gittiginde ilk basvuru. Kontrol sayisi surumle degisir; `TANI` satiri o kosudaki gercek sayiyi basar. | Hayir |
+| `durum` (`ozet`, `status`) | Kisa saglik ozeti. En sik kullanilan komut. Model cagirmaz. Tum kontroller kosar, cikti tabloya degil ozete dokulur. Ayni vault'ta doktor calisiyorsa varsayilan 30 sn bekler; `-BeklemeSiniri <sn>` ile degisir, sure dolarsa cikis 3. | Hayir |
+| `doktor` (`doctor`, `tam`) | Tam kontrol tablosu. Bir sey ters gittiginde ilk basvuru. Kontrol sayisi surumle degisir; `TANI` satiri o kosudaki gercek sayiyi basar. Ayni mutex bekleme sozlesmesini kullanir. | Hayir |
 | `derin` (`deep`) | Tam kontrol + canli model duman testi (`claude -p`, claude yoksa `codex exec`) + varsa `brain-cli` sema/denetim kontrolu. Bir model arka ucu varsa **gunluk butceden 1 harcar**; hicbiri yoksa duman testi atlanir. | Hayir |
 | `makbuz [gun] [betik]` | Motor kosu makbuzlari: ne yazildi, kac bayt, kac butce. Varsayilan 1 gun. `makbuz 7 flush` gibi ikinci parca betik adidir. | Hayir |
 | `maliyet [gun]` | Iki ajanin jeton kullanimi ve **API esdegeri** maliyet (2026-10-06): gun, proje ve oturum dokumu; oturum basi sabit yuk (ilk cagrinin baglami); 200K baglami asan oturumlar ("tazelenmeliydi"). Claude transkriptindeki kullanim alanlarini mesaj kimligiyle tekil sayar, Codex'in kumulatif sayacindan fark alir. Artimli: ilk kosu son 35 gunu tarar (birkac dakika), sonrakiler saniyeler. Fiyatlar `motor\scripts\fiyat.json` (tarihli; 90 gunden eskiyse doktor uyarir). Abonelikte gercek fatura bu degildir; Codex/OpenAI icin fiyat girilmedigi icin yalniz jeton gosterilir. Taninmayan satir 'OLCEMEDIM' diye ayri sayilir. Gece 04:10'da `maliyet-tara` gorevi artimli tarar. Flush her gunluk bloga oturumun o anki toplamini tek satir yazar. `-Json`, `-YalnizTara`. | Hayir (`.state\maliyet` haric) |
+| `maliyet-tara` | Zamanlayicinin artimli maliyet taramasi icin kanonik kisayol; `maliyet -YalnizTara` ile ayni rotayi kullanir. Normal elle kullanimda `maliyet` tercih edilir. | Yalniz `.state\maliyet` |
 | `skill-aday [gun]` | Tekrar eden yordamsal bilgiden **skill adayi** listesi (2026-10-06): son 30 gunde 3+ farkli oturuma ve 2+ farkli gune enjekte edilmis, liste iceren (3+ numarali adim, 4+ madde ya da 'Adimlar' basligi) kavram notlari. Cikti `86-compiled/skill-adaylari.md` (turetilmis). Skill otomatik acilmaz: listeden secip `ai-skill-create` ile taslagi ac. Pazar 05:30 gece gorevi. `-KuruCalisma` yazmaz. | Evet (`86-compiled/skill-adaylari.md`) |
 | `kullanim [gun]` | Enjekte edilen kavram notlari kullanici/asistan duz metninde anildi mi? Arac girdisi/ciktisi, reasoning ve sistem metni okunmaz; `acildi` alani eski raporlarla uyum icin korunur, yeni olcum arac kullanimini kanitlamaz. Retrieval makbuzlarini Claude transkriptiyle eslestirir; Codex oturumlari 'transkript yok' sayilir. Varsayilan 7 gun; `-Json`. Rapor `.state/kullanim-son.json`. | Yalniz `.state` ve makbuz |
 | `geri-getirme-olc` | Geri getirme regresyon kapisi: kavram notlarindan uretilen sorgularla vektor (bge-m3) ve kelime yolunun rank-1 / ilk-2 / bos donus oranlari. `-Dondur` fixture'i (`motor/scripts/fixtures/geri-getirme-holdout.json`, SHA-256'li) yeniden uretir - bilerek yapilir; `-Esik 0.8` altinda cikis 5. Doktor tam taramada son sonucu gosterir. | Yalniz `.state` ve -Dondur ile fixture |
@@ -482,6 +483,8 @@ Ayrinti icin bkz. [7. bolum](#7-ayarlar).
 
 ### 5.7 Canli isci kanallari (1.7.0)
 
+#### `beyin codex`
+
 Codex kanali varsayilan olarak kalici app-server kullanir. Ayni sahip
 oturumdan acilan isciye birden cok tur gonderilir:
 
@@ -515,6 +518,8 @@ Gecici setup-refresh hatasi en fazla uc denemeyle, 10-40 sn rastgele
 gecikmeyle yeniden denenir; basarili yan etkiden sonra tekrar yoktur.
 Farkli Codex kurulumlari varsa en yeni surum secilir; `BEYIN_CODEX_YOLU`
 acik yol onceligidir. Kullanici config.toml dosyasi degistirilmez.
+
+#### `beyin claude`
 
 Claude icin `beyin claude ac -Proje <dizin>`, `beyin claude sor <CK>
 -Metin <gorev>`, `beyin claude durum <CK>`, `beyin claude liste` ve

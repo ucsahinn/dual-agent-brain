@@ -22,15 +22,18 @@ function ConvertTo-KanalCodexLaunch([string]$Path){
 function Get-KanalCodexVersion($Context,$Launch){
     $arguments=@($Launch.args)+@('--version');$quoted=@($arguments|ForEach-Object {Quote-KanalLiteral $_}) -join ','
     $code='& '+(Quote-KanalLiteral $Launch.command)+' @('+ $quoted +'); exit $LASTEXITCODE'
-    $p=Start-KanalPowerShell $code $Context.Vault
+    $timeout=$(if($Context.VersionTimeoutMs){[int]$Context.VersionTimeoutMs}else{15000})
+    for($attempt=0;$attempt -lt 2;$attempt++){
+    $p=$null
     try{
+        $p=Start-KanalPowerShell $code $Context.Vault
         $out=$p.StandardOutput.ReadToEndAsync();$err=$p.StandardError.ReadToEndAsync();$p.StandardInput.Close()
-        $timeout=$(if($Context.VersionTimeoutMs){[int]$Context.VersionTimeoutMs}else{5000})
         if(-not $p.WaitForExit($timeout) -or $p.ExitCode -ne 0){throw 'Codex version probe failed or timed out'}
         $m=[regex]::Match($out.Result.Trim(),'(?m)^codex(?:-cli)?\s+(\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)(?:\+[A-Za-z0-9.-]+)?\s*$')
         if(-not $m.Success){throw 'Codex version response was not recognized'}
         return $m.Groups[1].Value
-    }finally{Close-KanalPowerShell $p}
+    }catch{if($attempt -eq 1){throw}}finally{Close-KanalPowerShell $p}
+    }
 }
 function Compare-KanalCodexVersion([string]$Left,[string]$Right){
     $l=$Left -split '-',2;$r=$Right -split '-',2;$base=([version]$l[0]).CompareTo([version]$r[0]);if($base){return $base}
@@ -56,6 +59,8 @@ function Resolve-KanalCodex($Context){
         $candidates+=$item
     }
     if($override){if(-not $chosen){throw 'Explicit BEYIN_CODEX_YOLU was not found'};$best=$chosen}
+    $unavailable=@($candidates|Where-Object {$_.Probe -eq 'unavailable'})
+    if(-not $override -and $unavailable.Count){throw ('Codex candidate could not be version-validated; newest version cannot be determined. Retry or explicitly choose BEYIN_CODEX_YOLU. Candidates: '+(($unavailable|ForEach-Object Path) -join ', '))}
     if(-not $best){throw 'No version-validated Codex installation found'}
     $versions=@($candidates|Where-Object {$_.Probe -eq 'ok'}|ForEach-Object Version|Sort-Object -Unique)
     $best.Candidates=$candidates;$best.Conflict=($versions.Count -gt 1);$best.Selection=$(if($override){'BEYIN_CODEX_YOLU'}else{'newest-version'})

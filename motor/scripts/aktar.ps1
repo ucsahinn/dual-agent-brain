@@ -38,6 +38,8 @@ param(
     [string]$Tur = 'soru',
     [string]$Tamam = '',
     [switch]$Hepsi,
+    [ValidateRange(1,36500)][int]$Bayat=3,
+    [switch]$Uygula,
     # SORU-CEVAP (2026-10-07): -Yanit <id> yanit yazar; -Bekle <id> yanit bekler; -VeBekle gonder+bekle.
     [string]$Yanit = '',
     [string]$Bekle = '',
@@ -125,6 +127,24 @@ function Bekle-Yanit([string]$SoruId, [int]$Saniye) {
 # fonksiyonun yazdigi satirlar o zaman cikis degerine karisir ve ekrana hic basilmaz (olculdu).
 $script:BekleKod = 0
 
+if ($PSBoundParameters.ContainsKey('Bayat')) {
+    if ($Metin -or $Tamam -or $Yanit -or $Bekle -or $VeBekle -or $Gor -or $Durum -or $Hepsi -or $Kime -or $Isci -or $Oturum -or $Kayit -or $Olay) { Hata '-Bayat yalniz [-Uygula] ile kullanilir.' }
+    $candidates=@(Get-BeyinHandoffBayat -Paths $p -Gun $Bayat)
+    Yaz "Bayat aktarim: $($candidates.Count) aday; $(if($Uygula){'UYGULA'}else{'KURU MOD - kayit degismez'})"
+    $failures=0
+    foreach ($candidate in $candidates) {
+        $result='aday'
+        if ($Uygula) {
+            # Explicit maintenance mode acts for the stored recipient, retaining the
+            # ordinary Tamam command's recipient-only authorization contract.
+            if (Close-BeyinHandoff -Paths $p -Id $candidate.Id -Agent $candidate.To -DoneBy "$ajan (bayat: $($candidate.Reason))") { $result='kapandi' } else { $result='KAPATILAMADI';$failures++ }
+        }
+        Yaz "$($candidate.Id) -> $($candidate.To) | $result | $($candidate.Reason)$(if($candidate.Target){' | '+$candidate.Target})"
+    }
+    if ($failures) { exit 3 }
+    exit 0
+}
+if ($Uygula) { Hata '-Uygula icin -Bayat <gun> gerekli.' }
 if ($Gor) {
     $h = Read-BeyinHandoff -Paths $p -Id $Gor -Agent $ajan
     if (-not $h) { Hata "aktarim bulunamadi: $Gor" }

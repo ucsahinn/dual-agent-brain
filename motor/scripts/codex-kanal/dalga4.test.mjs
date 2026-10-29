@@ -31,6 +31,9 @@ test('recovered tool error yields one completed notification, warnings and check
  assert.equal(r.Status,'completed');assert.equal(r.Attempts,1);assert.equal(r.Error,'');assert.ok(r.Warnings.some(w=>w.includes('setup refresh')));
  const notices=fs.readdirSync(path.join(root,'notices')).map(n=>fs.readFileSync(path.join(root,'notices',n),'utf8'));
  assert.equal(notices.length,1);assert.match(notices[0],/completed/);assert.doesNotMatch(notices[0],/failed/);
+ const notice=JSON.parse(notices[0]);
+ assert.equal(notice.status,'acik');assert.equal(notice.a2aStatus,'submitted');
+ assert.equal(notice.doneBy,'');assert.equal(notice.doneTs,'');
  assert.equal(r.RoleModel,'catalog-model');assert.equal(r.ModelList.length,2);assert.equal(r.BillingMode,'subscription');assert.equal(r.Budget.cost,null);
  assert.ok(fs.existsSync(path.join(h.directory,'plan.md')));assert.ok(fs.existsSync(path.join(h.directory,'notes.md')));
  assert.equal(JSON.parse(fs.readFileSync(path.join(h.directory,'checkpoint.json'))).threadId,r.SessionId);

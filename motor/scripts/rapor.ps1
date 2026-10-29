@@ -1,4 +1,4 @@
-param([string]$Vault = '', [string]$Proje = '', [string]$Komut = 'liste', [string]$Is = '', [string]$Kaynak = '', [switch]$Json)
+﻿param([string]$Vault = '', [string]$Proje = '', [string]$Komut = 'liste', [string]$Is = '', [string]$Kaynak = '', [switch]$Json)
 $ErrorActionPreference = 'Stop'
 if (-not $Vault) { $Vault = $(if ($env:BEYIN_VAULT) { $env:BEYIN_VAULT } else { Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }) }
 . (Join-Path $Vault 'motor/hooks/lib.ps1')

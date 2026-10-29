@@ -1,4 +1,4 @@
-# Local verification only. Does not install, publish, or change user settings.
+﻿# Local verification only. Does not install, publish, or change user settings.
 [CmdletBinding()]
 param(
     [ValidateSet('Pester','Node','All')][string]$Suite = 'All',

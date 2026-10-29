@@ -1,4 +1,4 @@
-. (Join-Path $PSScriptRoot 'takim-uyum.ps1')
+﻿. (Join-Path $PSScriptRoot 'takim-uyum.ps1')
 . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
 Describe 'AgentChef 1.9 compatibility hints' {
  It 'recognizes lead-review commands in the worker panel command label' {

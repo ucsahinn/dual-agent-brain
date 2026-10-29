@@ -1,4 +1,4 @@
-# Fixed producer entry point. Reads only a channel-owned record below this vault.
+﻿# Fixed producer entry point. Reads only a channel-owned record below this vault.
 param([Parameter(Mandatory=$true)][string]$Vault,
       [Parameter(Mandatory=$true)][ValidateSet('codex','claude')][string]$Engine,
       [Parameter(Mandatory=$true)][ValidatePattern('\ACK-[a-f0-9]{32}\z')][string]$Id)

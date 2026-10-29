@@ -43,19 +43,55 @@ Describe 'doktor.ps1 yetim ve sure kapilari' {
         $sw.Elapsed.TotalSeconds | Should BeLessThan 90
     }
 
-    It 'ayni vault icin ikinci doktor beklemeden 3 ile cikar (named mutex)' -Skip:$baskaDoktor {
-        $ilk = Start-Process $powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$doktor`" -Vault `"$vault`" -Ozet -SureSiniri 0" -PassThru -WindowStyle Hidden
+    It 'ikinci doktor belirtilen mutex bekleme suresi dolunca 3 ile cikar' {
+        $fixture = Join-Path $TestDrive ('mutex-timeout-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force (Join-Path $fixture 'motor/hooks') | Out-Null
+        Copy-Item (Join-Path $vault 'motor/hooks/lib.ps1') (Join-Path $fixture 'motor/hooks/lib.ps1')
+        $name = 'Global\BeyinDoktor-' + (([BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($fixture.ToLowerInvariant()))) -replace '-', '').Substring(0, 12))
+        $mutex = New-Object Threading.Mutex($false, $name)
+        $held = $mutex.WaitOne(0)
         try {
-            Start-Sleep -Seconds 4
+            $held | Should Be $true
             $sw = [Diagnostics.Stopwatch]::StartNew()
-            $r = Invoke-Doktor @('-Ozet')
+            $output = & $powershell -NoProfile -ExecutionPolicy Bypass -File $doktor -Vault $fixture -Ozet -SureSiniri 1 -BeklemeSiniri 1 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
             $sw.Stop()
-            $r.Exit | Should Be 3
-            $r.Out | Should Match 'ZATEN CALISIYOR'
-            $sw.Elapsed.TotalSeconds | Should BeLessThan 10
+            $exitCode | Should Be 3
+            $output | Should Match 'ZATEN CALISIYOR.*1 sn bekleme doldu'
+            $sw.Elapsed.TotalSeconds | Should BeGreaterThan 0.9
+            $sw.Elapsed.TotalSeconds | Should BeLessThan 30
         } finally {
-            $ilk | Wait-Process -Timeout 180 -ErrorAction SilentlyContinue
-            if (-not $ilk.HasExited) { Stop-Process -Id $ilk.Id -Force -ErrorAction SilentlyContinue }
+            if ($held) { $mutex.ReleaseMutex() }
+            $mutex.Dispose()
+        }
+    }
+
+    It 'bekleyen doktor mutex birakilinca raporunu tamamlar' {
+        $fixture = Join-Path $TestDrive ('mutex-release-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force (Join-Path $fixture 'motor/hooks') | Out-Null
+        Copy-Item (Join-Path $vault 'motor/hooks/lib.ps1') (Join-Path $fixture 'motor/hooks/lib.ps1')
+        $name = 'Global\BeyinDoktor-' + (([BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($fixture.ToLowerInvariant()))) -replace '-', '').Substring(0, 12))
+        $mutex = New-Object Threading.Mutex($false, $name)
+        $held = $mutex.WaitOne(0)
+        $child = $null
+        try {
+            $held | Should Be $true
+            $outFile = Join-Path $fixture 'out.txt'; $errFile = Join-Path $fixture 'err.txt'
+            $child = Start-Process $powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$doktor`" -Vault `"$fixture`" -Ozet -SureSiniri 1 -BeklemeSiniri 10" -PassThru -WindowStyle Hidden -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+            # Retain the process handle before it exits; PS 5.1 Start-Process
+            # can otherwise return null ExitCode after the process is reaped.
+            $null = $child.Handle
+            $child.WaitForExit(2000) | Should Be $false
+            $mutex.ReleaseMutex(); $held = $false
+            $child.WaitForExit(60000) | Should Be $true
+            $child.ExitCode | Should Be 0
+            $output = [IO.File]::ReadAllText($outFile)
+            $output | Should Not Match 'ZATEN CALISIYOR'
+            $output | Should Match 'Beyin'
+        } finally {
+            if ($held) { $mutex.ReleaseMutex() }
+            $mutex.Dispose()
+            if ($child) { if (-not $child.HasExited) { Stop-Process -Id $child.Id -Force }; $child.Dispose() }
         }
     }
 

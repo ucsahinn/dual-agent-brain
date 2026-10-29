@@ -153,7 +153,7 @@ Describe 'merkez tek kare boyut ve enjeksiyon regresyonu' {
         $motor = Join-Path $root 'motor'; $scripts = Join-Path $motor 'scripts'; $hooks = Join-Path $motor 'hooks'
         New-Item -ItemType Directory -Force -Path $scripts,$hooks | Out-Null
         try {
-            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
+            New-Item -ItemType Directory -Force (Join-Path $scripts 'codex-kanal') | Out-Null; Copy-Item (Join-Path $PSScriptRoot 'codex-kanal/gorunum.ps1') (Join-Path $scripts 'codex-kanal/gorunum.ps1'); Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
             Copy-Item (Join-Path $PSScriptRoot 'takim-uyum.ps1') $scripts
             Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
             foreach ($width in @(90,120,170)) {
@@ -277,7 +277,7 @@ Describe 'merkez sabit veriyle kenar durumlari (onay, hatali kosu, engelli kart)
         $scripts = Join-Path $root 'motor\scripts'; $hooks = Join-Path $root 'motor\hooks'; $runs = Join-Path $scripts '.state\team-runs'
         New-Item -ItemType Directory -Force -Path $scripts, $hooks, $runs | Out-Null
         try {
-            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
+            New-Item -ItemType Directory -Force (Join-Path $scripts 'codex-kanal') | Out-Null; Copy-Item (Join-Path $PSScriptRoot 'codex-kanal/gorunum.ps1') (Join-Path $scripts 'codex-kanal/gorunum.ps1'); Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
             Copy-Item (Join-Path $PSScriptRoot 'takim-uyum.ps1') $scripts
             Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
             Copy-Item (Join-Path $PSScriptRoot 'takim-uyum.ps1') $scripts
@@ -577,7 +577,7 @@ Describe 'merkez 1.5.1: QA kenar durumlari' {
             $root = Join-Path ([IO.Path]::GetTempPath()) ('merkez-qa-' + [guid]::NewGuid().ToString('N'))
             $scripts = Join-Path $root 'motor\scripts'; $hooks = Join-Path $root 'motor\hooks'
             New-Item -ItemType Directory -Force -Path $scripts, $hooks, (Join-Path $scripts '.state\team-runs'), (Join-Path $scripts '.state\makbuz') | Out-Null
-            Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
+            New-Item -ItemType Directory -Force (Join-Path $scripts 'codex-kanal') | Out-Null; Copy-Item (Join-Path $PSScriptRoot 'codex-kanal/gorunum.ps1') (Join-Path $scripts 'codex-kanal/gorunum.ps1'); Copy-Item (Join-Path $PSScriptRoot 'merkez*.ps1') $scripts; Copy-Item (Join-Path $PSScriptRoot 'beyin-ciz.ps1') $scripts
             Copy-Item (Join-Path $PSScriptRoot 'takim-uyum.ps1') $scripts
             Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') $hooks
             return $root

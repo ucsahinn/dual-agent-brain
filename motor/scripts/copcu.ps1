@@ -60,6 +60,7 @@ $vaultOk = $false
 try { $vaultOk = [bool]($Vault -and (Test-Path -LiteralPath $Vault -PathType Container) -and (Test-Path -LiteralPath (Join-Path $Vault 'motor\hooks\lib.ps1') -PathType Leaf)) } catch { }
 if (-not $vaultOk) { Write-Output "HATA: vault degil (motor\hooks\lib.ps1 yok): '$Vault'  - konumsal arguman -Vault'a baglanir; kok icin -Kok <dizin> kullan"; exit 2 }
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
+. (Join-Path $PSScriptRoot 'copcu-perf.ps1')
 $p = Get-BeyinPaths -Vault $Vault
 $inv = [Globalization.CultureInfo]::InvariantCulture
 $simdi = Get-Date
@@ -175,84 +176,27 @@ function Izlenen-Var([string]$Repo, [string]$Rel) {
     return ((-not $lf.Ok) -or (([string]$lf.Out).Length -gt 0))
 }
 function Olc-Dizin([string]$Yol) {
-    # Bayt + dosya sayisi + en yeni mtime. Reparse alt dizinlere INMEZ (disari sayilmasin).
-    $bayt = [long]0; $n = 0; $son = [datetime]::MinValue
-    $yigin = New-Object System.Collections.Generic.Stack[string]
-    $yigin.Push($Yol)
-    while ($yigin.Count -gt 0) {
-        $d = $yigin.Pop()
-        try {
-            foreach ($f in [IO.Directory]::EnumerateFiles($d)) {
-                try { $fi = New-Object IO.FileInfo($f); $bayt += $fi.Length; $n++; if ($fi.LastWriteTime -gt $son) { $son = $fi.LastWriteTime } } catch { }
-            }
-            foreach ($sd in [IO.Directory]::EnumerateDirectories($d)) {
-                if (Reparse-Mi $sd) { continue }
-                $yigin.Push($sd)
-            }
-        } catch { }
-    }
-    return @{ Bayt = $bayt; Dosya = $n; Son = $son }
+    # Identical traversal in compiled code; no per-file PowerShell allocation.
+    return (Get-CopcuOlcum $Yol)
 }
 function Bul-AllowAltDizin([string]$Yol) {
-    # Yok sayilan bir dizinin icinde allowlist adli alt dizinleri arar (derinlik sinirsiz).
-    $bulunan = New-Object System.Collections.Generic.List[string]
-    # NEDEN: kokun kendisi junction ise icine inmek repo DISINA cikmaktir (olculdu: data -> ..\outside).
-    if (Reparse-Mi $Yol) { return $bulunan }
-    $yigin = New-Object System.Collections.Generic.Stack[string]
-    $yigin.Push($Yol)
-    while ($yigin.Count -gt 0) {
-        $d = $yigin.Pop()
-        try {
-            foreach ($sd in [IO.Directory]::EnumerateDirectories($d)) {
-                $ad = Split-Path -Leaf $sd
-                if ($ATLA_INIS -contains $ad.ToLowerInvariant()) { continue }
-                if (Reparse-Mi $sd) { continue }
-                # NEDEN: '?? vendor/' altinda BASKA bir git reposu olabilir (vendor\nested\.git); onun
-                # COMMIT'LI output/ klasoru dis repoya gore 'untracked' gorunuyordu (scratch repoda
-                # yeniden uretildi). .git iceren dizin (dosya ya da klasor: worktree'de .git bir
-                # DOSYADIR) ic ice repodur - icine INILMEZ, kendisi de aday olmaz.
-                if (Test-Path -LiteralPath (Join-Path $sd '.git')) { continue }
-                if (Allow-Mi $ad) { $bulunan.Add($sd); continue }   # allow dizinin icine daha inmeye gerek yok
-                $yigin.Push($sd)
-            }
-        } catch { }
-    }
-    return $bulunan
+    # Same allowlist, reparse and nested-repository boundaries; compiled traversal.
+    return (Get-CopcuAllowAltDizin -Yol $Yol -Allow $ALLOW -Prefix $ALLOW_PREFIX -Atla $ATLA_INIS)
 }
 
 # --- 1) Repolari bul (derinlik sinirsiz; node_modules/.git icine inilmez) --------
 $repolar = New-Object System.Collections.Generic.List[string]
-foreach ($k in $Kok) {
-    if (-not (Test-Path -LiteralPath $k)) { continue }
-    $yigin = New-Object System.Collections.Generic.Stack[string]
-    $yigin.Push((Resolve-Path -LiteralPath $k).Path)
-    while ($yigin.Count -gt 0) {
-        $d = $yigin.Pop()
-        if (Yasak-Mi $d) { continue }
-        if (Test-Path -LiteralPath (Join-Path $d '.git')) {
-            # GERCEK repo mu? (~\Desktop\.git bos bir klasor olarak duruyordu - olculdu; git onu
-            # tanimiyor ama Test-Path evet diyor ve tum masaustu tek 'repo' sanilip atlaniyordu.)
-            $gd = ''
-            try { $gd = (& git -C $d rev-parse --git-dir 2>$null | Select-Object -First 1) } catch { }
-            if ($gd) { $repolar.Add($d); continue }   # ic ice repo aranmaz
-        }
-        try {
-            foreach ($sd in [IO.Directory]::EnumerateDirectories($d)) {
-                $ad = (Split-Path -Leaf $sd).ToLowerInvariant()
-                if ($ad -in @('node_modules', '.git', '$recycle.bin', 'system volume information')) { continue }
-                if (Reparse-Mi $sd) { continue }
-                $yigin.Push($sd)
-            }
-        } catch { }
-    }
+foreach ($d in (Get-CopcuRepolar -Kok $Kok -Yasak $YASAK_KOKLER)) {
+    $repolar.Add($d)
 }
 
 # --- 2) Her repo: git status --ignored=matching -> adaylar ---------------------
 $adaylar = New-Object System.Collections.Generic.List[object]
 $worktreeler = New-Object System.Collections.Generic.List[object]
 $gorulen = @{}
+$gitDurumlari = Get-CopcuGitDurumlari -Repolar $repolar.ToArray()
 foreach ($repo in $repolar) {
-    $g = Git-Calistir @('-C', $repo, 'status', '--porcelain', '--ignored=matching', '-z')
+    $g = $gitDurumlari[$repo]
     if (-not $g.Ok -or -not $g.Out) { continue }   # git hatasi ya da bos: bu repoda aday yok
     $cikti = [string]$g.Out
     $repoAd = Split-Path -Leaf $repo

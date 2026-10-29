@@ -1,4 +1,4 @@
-$runner=Join-Path $PSScriptRoot 'test-motor.ps1'
+﻿$runner=Join-Path $PSScriptRoot 'test-motor.ps1'
 Describe 'Motor test harness: coverage, invocation mode and honest exit status' {
     It 'records a passing fixture and mode in both combined and per-file runs' {
         $file=Join-Path $TestDrive 'pass.Tests.ps1'

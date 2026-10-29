@@ -135,6 +135,10 @@ only in `CLAUDE.md`.
   incrementally). `beyin skill-aday` lists skill candidates from recurring procedural
   notes (86-compiled/skill-adaylari.md; a human or Claude creates the skill with
   ai-skill-create).
+  Engine 1.7-1.8 (2026-10-27/28): `beyin codex` / `beyin claude` are the live worker
+  channels (ADR-013); `beyin gecmis` shows the durable session chain; `beyin rapor
+  liste|kaydet` manages a project's single `.beyin/raporlar` root; `beyin ipucu-denetle`
+  statically checks documented commands and flags against the installed CLI (read-only).
   Moving a board card to `done` requires HUMAN APPROVAL: the user types a line that is
   only `onayla TASK-x` in the chat; agent messages and the phrase inside a sentence do
   not count. The `**Devir:**` section of a flush summary is shown once at the same

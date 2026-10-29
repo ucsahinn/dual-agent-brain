@@ -97,7 +97,8 @@ beyin - Beyin ikinci beyin yoneticisi
 TANI
   durum            Kisa saglik ozeti (8-12 satir, model cagirmaz)   << en sik kullanilan
                    Agir kontroller 20 sn butcesine tabidir (-SureSiniri <sn>, 0 = sinirsiz);
-                   ayni vault icin ikinci doktor baslamaz (cikis 3), ebeveyni olen doktor cikar (cikis 4)
+                   ayni vault icin ikinci doktor 30 sn bekler (-BeklemeSiniri <sn>); sure dolarsa cikis 3,
+                   ebeveyni olen doktor cikar (cikis 4)
   doktor           Tam kontrol tablosu (sayi surumle degisir; TANI satiri gercek sayiyi basar)
   derin            Tam kontrol + canli 'claude -p' duman testi (gunluk butceden 1 harcar)
   makbuz [gun] [betik]  Motor kosu makbuzlari: ne yazildi, kac bayt, kac butce (varsayilan 1 gun)
@@ -112,6 +113,7 @@ TANI
                    3+ oturum, 2+ gun, liste iceren not; skill'i ai-skill-create ile insan/Claude acar; -KuruCalisma)
   maliyet [gun]    Iki ajanin jeton kullanimi + API esdegeri maliyet: gun/proje/oturum, oturum basi sabit yuk,
                    200K baglami asan oturumlar (artimli tarama; model cagirmaz; -Json, -YalnizTara)
+  maliyet-tara     Zamanlayicinin kullandigi artimli maliyet taramasi (-YalnizTara kisayolu)
   geri-getirme-olc Geri getirme holdout olcumu: vektor/kelime rank-1, bos donus; -Dondur fixture uretir, -Esik 0.8
   aktar dinle      Canli uyandirma: yeni aktarim gelince tek satir basar (Claude Code Monitor araciyla baslat:
                    beyin aktar dinle -Kime claude [-Proje x]); tam metni basmaz, hicbir sey yazmaz
@@ -128,6 +130,8 @@ BAKIM
                    resolve-handoff | handoff-check | attach-report | show   (AgentChef 1.3.3: sema v4, blocked/cancelled)
                    onayla TASK-x : insan onayi (yalniz etkilesimli terminal; sohbetten tek satir 'onayla TASK-x').
                    'done' gecisi onay ister (ayar BEYIN_PANO_ONAY); review/blocked gecisi koordinatore tek brifing yazar
+  codex <komut>    Sahipli kalici Codex isci kanali: ac | sor | devam | durum | liste | kapat | tui | sema | limitler
+  claude <komut>   Sahipli kalici Claude stream-json kanali: ac | sor | durum | liste | kapat
   takim <komut>    Takim kosusu (AgentChef team-run.mjs sarmalayicisi; sef = Claude oturumu, isciler = Codex):
                    plan | start | status | collect | integrate | verify | merge | pause | resume | abort | cleanup | doctor
                    durum [id] | baslat <id> | birlestir <id> (terminal onayi) | durdur <id> (abort) | maliyet <id>
@@ -135,6 +139,7 @@ BAKIM
   aktar [metin]    Ajanlar arasi aktarim: -Kime claude|codex ile soru/handoff kaydet (hedef ajanin yeni
                    oturumunda ve oturum icinde bir kez [Hafiza: Aktarim] blogu); -Tur soru|devir; argumansiz liste;
                    -Tamam <id> kapatir; -Hepsi kapalilar; -Isci TASK-x yalniz o takim iscisine (sema v3)
+                   -Bayat <gun> eski/acik adaylari kuru listeler; -Uygula ile kapatir
                    -Olay <anahtar> ayni olay tekrarlarini birlestirir; -Gor <id> OKUNDU makbuzu yazar
                    -Kayit <id> -Durum submitted|working|input-required|completed|failed|canceled (yalniz alici)
   topla [gun]      Pencereden dusmus oturumlari topla (varsayilan kuru calisma, 3 gun)
@@ -166,6 +171,7 @@ TASIMA / KURULUM
   kaldir           Motoru kaldir - VAULT'A DOKUNMAZ (-KuruCalisma, -Yedekleri)
   yayinla          Motoru + kurulumu GitHub deposuna gonder
   nerede           Cozulen vault yolunu ve kurulum durumunu goster
+  yardim           Bu kanonik komut listesini goster (help, -h, --help, /?)
 
 DUZELTME
   yol-temizle      Makine bolgesindeki mutlak kullanici yollarini kisalt
@@ -510,15 +516,15 @@ $PA = @($Parca.ToArray())
 switch ($KomutN) {
 
     { $_ -in @('durum', 'ozet', 'status') } {
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri') -Bayrak @('-derin', '-ozet') -Slot 0 -Ekle @('-ozet')
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri', '-beklemesiniri') -Bayrak @('-derin', '-ozet') -Slot 0 -Ekle @('-ozet')
         Cagir 'doktor.ps1' @($a.Gecen)
     }
     { $_ -in @('doktor', 'doctor', 'tam') } {
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri') -Bayrak @('-derin', '-ozet') -Slot 0
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri', '-beklemesiniri') -Bayrak @('-derin', '-ozet') -Slot 0
         Cagir 'doktor.ps1' @($a.Gecen)
     }
     { $_ -in @('derin', 'deep') } {
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri') -Bayrak @('-derin', '-ozet') -Slot 0 -Ekle @('-derin')
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-suresiniri', '-beklemesiniri') -Bayrak @('-derin', '-ozet') -Slot 0 -Ekle @('-derin')
         Cagir 'doktor.ps1' @($a.Gecen)
     }
     { $_ -in @('merkez', 'center') } {
@@ -726,7 +732,7 @@ switch ($KomutN) {
         # beyin aktar "soru" -Kime claude|codex [-Kanit ..] [-Kapsam ..] [-Risk ..] [-Sonraki ..] [-Proje x]
         # beyin aktar [-Hepsi]  |  beyin aktar -Tamam <id>
         # niyet rotasiyla ayni kural: adli degerler disindaki TUM konumsal parcalar metindir.
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur', '-yanit', '-bekle', '-sure', '-hedef', '-isci', '-oturum', '-gor', '-durum', '-kayit', '-olay') -Bayrak @('-hepsi', '-vebekle') -SinirsizSlot
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur', '-yanit', '-bekle', '-sure', '-hedef', '-isci', '-oturum', '-gor', '-durum', '-kayit', '-olay', '-bayat') -Bayrak @('-hepsi', '-vebekle', '-uygula') -SinirsizSlot
         $hArgs = @($a.Gecen)
         $hMetin = ((@($a.Konum)) -join ' ').Trim()
         $hMetinVar = $false

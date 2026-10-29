@@ -13,12 +13,32 @@ function New-KopruFixtureContext([string]$Name,[string]$Engine='codex') {
     $context.State=Join-Path $fixture ('motor/scripts/.state/'+$Engine+'-kanal')
     $context.Entry=Join-Path $repo ('motor/scripts/'+$Engine+'-kanal.ps1')
     $context.Timeout=20
+    $context.SetupLockOptions=@{holdMs=100;waitMs=3000;name=('Local\Beyin-fixture-'+[guid]::NewGuid().ToString('N'))}
     return $context
 }
 Describe 'Persistent channel with a fake app-server process' {
     BeforeEach {
         # Any read of the user's runtime state is a test isolation failure.
         Mock Get-KanalRecords { throw 'Unrelated real-vault state was scanned' } -ParameterFilter { $Context.Vault -eq $repo }
+    }
+    It 'keeps schema notices inside JSON rather than the warning stream' {
+        Mock Get-KanalCapacity { @{onerilen=8} };Mock Get-KanalTeamCount { 0 }
+        $ctx=New-KopruFixtureContext 'schema-json'
+        $script:SchemaFixture=Join-Path $PSScriptRoot 'fixtures/app-server.mjs'
+        Mock Resolve-KanalLaunch { @{command=(Get-Command node.exe).Source;args=@($script:SchemaFixture)} }
+        Mock Set-KanalCodexRecord {}
+        Mock Get-KanalSchemaStatus { @{Changed=$true;Generated=$false;Notice='Schema checks the exact selected executable fixture'} }
+        Mock New-KanalMcpProfile { @{Path='';Enabled=@();Disabled=@();Arguments=@()} }
+        Mock Get-KanalProfiles { @() }
+        $r=$null
+        try {
+            $output=@(Open-KanalBridge $ctx $TestDrive 3>&1)
+            $output.Count | Should Be 1
+            $r=$output[0]
+            $json=$output | ConvertTo-Json -Depth 12
+            $decoded=$json | ConvertFrom-Json
+            $decoded.Warnings[0] | Should Match 'Schema checks'
+        } finally {if($r -and $r.Id){try{Close-KanalWorker $ctx $r.Id|Out-Null}catch{}}}
     }
     It 'admits a fixture worker without reading unrelated real-vault channel states' {
         Mock Get-KanalCapacity { @{onerilen=8} };Mock Get-KanalTeamCount { 0 }
@@ -38,6 +58,29 @@ Describe 'Persistent channel with a fake app-server process' {
             $null=Send-KanalBridge $ctx $a.Id 'sor' 'wait' -Background
             {Send-KanalBridge $ctx $b.Id 'sor' 'wait' -Background}|Should Throw 'Task already claimed'
         }finally{foreach($r in @($a,$b)){try{Close-KanalWorker $ctx $r.Id|Out-Null}catch{}}}
+    }
+    It 'derives each plain-text claim from its message despite an old shared TaskKey' {
+        Mock Get-KanalCapacity { @{onerilen=8} };Mock Get-KanalTeamCount { 0 }
+        $ctx=New-KopruFixtureContext 'distinct-claims'
+        $ctx.BridgeLaunch=@{command=(Get-Command node.exe).Source;args=@((Join-Path $PSScriptRoot 'fixtures/app-server.mjs'))}
+        $a=$null;$b=$null
+        try {
+            $a=Open-KanalBridge $ctx $TestDrive;$b=Open-KanalBridge $ctx $TestDrive
+            foreach($r in @($a,$b)){$r|Add-Member TaskKey (Get-KanalHash 'old empty prompt');Save-KanalRecord $ctx $r}
+            $null=Send-KanalBridge $ctx $a.Id 'sor' 'wait' -Background
+            (Send-KanalBridge $ctx $b.Id 'sor' 'different task').Status | Should Be completed
+        } finally {foreach($r in @($a,$b)){if($r){try{Close-KanalWorker $ctx $r.Id|Out-Null}catch{}}}}
+    }
+    It 'blocks different messages that request the same write scope' {
+        Mock Get-KanalCapacity { @{onerilen=8} };Mock Get-KanalTeamCount { 0 }
+        $ctx=New-KopruFixtureContext 'scope-claims'
+        $ctx.BridgeLaunch=@{command=(Get-Command node.exe).Source;args=@((Join-Path $PSScriptRoot 'fixtures/app-server.mjs'))}
+        $a=$null;$b=$null
+        try {
+            $a=Open-KanalBridge $ctx $TestDrive;$b=Open-KanalBridge $ctx $TestDrive
+            $null=Send-KanalBridge $ctx $a.Id 'sor' "Goal: hold-claim`nWrite scope: src/a`nBoundaries: local" -Background
+            {Send-KanalBridge $ctx $b.Id 'sor' "Goal: other`nWrite scope: SRC\A`nBoundaries: local" -Background}|Should Throw 'Task already claimed'
+        } finally {foreach($r in @($a,$b)){if($r){try{Close-KanalWorker $ctx $r.Id|Out-Null}catch{}}}}
     }
     It 'routes the Claude wrapper through one owned persistent stream process' {
         Mock Get-KanalCapacity { @{onerilen=8} };Mock Get-KanalTeamCount { 0 }
@@ -66,6 +109,7 @@ Describe 'Persistent channel with a fake app-server process' {
         try{
             $r.Status | Should Be 'ready'
             $a=Send-KanalBridge $ctx $r.Id 'sor' 'first'
+            (Read-KanalRecord $ctx $r.Id).ClaimKey | Should BeNullOrEmpty
             $b=Send-KanalBridge $ctx $r.Id 'sor' 'second'
             $a.Status | Should Be 'completed';$b.Turn | Should Be 2
             $b.SessionId | Should Be $a.SessionId

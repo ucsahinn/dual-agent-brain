@@ -133,17 +133,56 @@ Describe 'prompt-counter: durum kalicilik, tekrar bastirma, sentetik tur' {
 }
 
 Describe 'lib: eszamanli ekleme, oturum durumu, ek soyucu, sir desenleri' {
+    It 'Add-BeyinText waits for an active writer instead of dropping the append' {
+        $f = Join-Path $TestDrive 'busy-append.log'
+        $ready = Join-Path $TestDrive 'append-ready'
+        $handle = [IO.File]::Open($f, 'Append', 'Write', 'Read')
+        $job = Start-Job -ScriptBlock {
+            param($lib, $f, $ready)
+            $ErrorActionPreference = 'Stop'
+            . $lib
+            [IO.File]::WriteAllText($ready, 'ready')
+            Add-BeyinText -Path $f -Text "retained`n"
+        } -ArgumentList $lib, $f, $ready
+        try {
+            $deadline = (Get-Date).AddSeconds(30)
+            while (-not (Test-Path $ready) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 50 }
+            (Test-Path $ready) | Should Be $true
+            Start-Sleep -Milliseconds 1500
+            $handle.Dispose(); $handle = $null
+            $job | Wait-Job -Timeout 35 | Out-Null
+            $errors = @()
+            $job | Receive-Job -ErrorAction SilentlyContinue -ErrorVariable errors | Out-Null
+            $job.State | Should Be 'Completed'
+            $errors.Count | Should Be 0
+            [IO.File]::ReadAllText($f) | Should Be "retained`n"
+        } finally {
+            if ($handle) { $handle.Dispose() }
+            $job | Remove-Job -Force
+        }
+    }
     It 'Add-BeyinText 6 paralel surecten 50 satir -> 300 satir, hicbiri dusmez' {
         $f = Join-Path $env:TEMP ("kanca-test-append-" + [guid]::NewGuid().ToString('N') + '.log')
         $libW = $lib
         $jobs = 1..6 | ForEach-Object {
             Start-Job -ScriptBlock { param($lib, $f, $n) . $lib; for ($i = 0; $i -lt 50; $i++) { Add-BeyinText -Path $f -Text "p$n-$i`n" } } -ArgumentList $libW, $f, $_
         }
-        $jobs | Wait-Job -Timeout 120 | Out-Null
-        $jobs | Remove-Job -Force
-        $n = @(Get-Content -LiteralPath $f).Count
-        Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
-        $n | Should Be 300
+        try {
+            $jobs | Wait-Job -Timeout 120 | Out-Null
+            @($jobs | Where-Object State -ne 'Completed').Count | Should Be 0
+            $jobErrors = @()
+            $jobs | Receive-Job -ErrorVariable jobErrors -ErrorAction SilentlyContinue | Out-Null
+            $jobErrors.Count | Should Be 0
+            $lines = @(Get-Content -LiteralPath $f)
+            $lines.Count | Should Be 300
+            @($lines | Sort-Object -Unique).Count | Should Be 300
+            foreach ($worker in 1..6) {
+                foreach ($line in 0..49) { ($lines -ccontains "p$worker-$line") | Should Be $true }
+            }
+        } finally {
+            $jobs | Remove-Job -Force
+            Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+        }
     }
     It 'Update-BeyinSessionState: firlatan Degistir degisikligi IKI kez uygulamaz' {
         $sid = "kanca-test-upd-$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"

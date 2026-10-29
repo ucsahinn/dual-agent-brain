@@ -1,4 +1,4 @@
-. (Join-Path $PSScriptRoot 'lib.ps1')
+﻿. (Join-Path $PSScriptRoot 'lib.ps1')
 Describe 'Followup: opt-in RRF and producer-owned history' {
     It 'defaults to hybrid and enables RRF only through the registered setting' {
         $old=$env:BEYIN_GETIRME_RRF

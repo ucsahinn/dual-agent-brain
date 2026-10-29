@@ -57,6 +57,13 @@ export class ChannelHost {
   this.prices={};if(config.pricesFile){try{this.prices=JSON.parse(fs.readFileSync(config.pricesFile,'utf8').replace(/^\uFEFF/,''));}catch{}}
  }
  warning(message){this.record.Warnings=[...(this.record.Warnings||[]),redact(message,this.secretValues).slice(-8192)].slice(-100);}
+ detachTurn(error,status){
+  const active=this.active;this.active=null;this.record.ActiveTurn='';
+  if(!active)return;
+  clearTimeout(active.timer);
+  if(active.id&&this.record.Engine==='codex'){this.lateTurn=active;this.record.PendingTurn={Id:active.id,Turn:this.record.Turn,Attempt:this.record.Attempts};}
+  if(status)active.resolve({...this.record,Status:status,setupFailure:false});else active.reject(error);
+ }
  budget(){return channelBudget(this.record.Usage,this.cfg.tokenBudget||2000000,this.record.RoleModel||'',this.prices,this.record.BillingMode||'unknown',this.record.RateLimits);}
  checkpoint(text){
   if(text!==undefined)fs.writeFileSync(path.join(this.directory,'plan.md'),redact(text,this.secretValues),{mode:0o600});
@@ -110,6 +117,9 @@ export class ChannelHost {
   this.record.SetupLock.ReleasedAt=new Date().toISOString();this.record.SetupLock.ReleaseReason=reason;this.save();
  }
  save(){
+  if(['failed','closed','stalled','disconnected','interrupted'].includes(this.record.Status)&&this.record.ActiveTurn){
+   this.record.PendingTurn??={Id:this.record.ActiveTurn,Turn:this.record.Turn,Attempt:this.record.Attempts};this.record.ActiveTurn='';
+  }
   this.record.LastEvent=new Date(this.lastEvent).toISOString();atomicJson(this.file,this.record,this.secretValues);
   // Old launch plans predate vault; infer it only from the canonical state layout.
   const vault=this.cfg.vault||(/[/\\]motor[/\\]scripts[/\\]\.state[/\\](codex|claude)-kanal$/i.test(this.cfg.state)?path.resolve(this.cfg.state,'../../../..'):null);
@@ -146,8 +156,19 @@ export class ChannelHost {
    if(profile)this.record.ProfileName=profile.name;
   }
   this.rpc.on('notification',m=>this.notification(m));
+  this.rpc.on('protocolWarning',message=>{this.warning(message);this.event('protocol-warning',{message});});
   this.rpc.on('request',m=>this.approval(m));
-  this.rpc.on('closed',detail=>{if(this.restarting)return;this.record.WorkerExit=workerExit(detail?.code,detail?.signal,this.record.Engine);if(this.active){clearTimeout(this.active.timer);this.active.reject(new Error('App-server exited'));this.active=null;}if(!this.stopping){this.record.Status=this.record.WorkerExit.kind==='signal'?'interrupted':'disconnected';this.checkpoint();this.event('disconnected');}});
+  this.rpc.on('closed',detail=>{
+   if(this.restarting)return;
+   const resolved=!this.active&&!this.record.PendingTurn&&['completed','invalid-handoff'].includes(this.record.Status);
+   this.record.WorkerExit=workerExit(detail?.code,detail?.signal,this.record.Engine);
+   this.record.ConnectionClosure={Source:detail?.source||'backend-close',Code:detail?.code??null,Signal:detail?.signal??null,Pid:this.rpc.process?.pid??null};
+   this.detachTurn(new Error('App-server exited'));
+   if(!this.stopping){
+    if(!resolved)this.record.Status=this.record.WorkerExit.kind==='signal'?'interrupted':'disconnected';
+    this.checkpoint();this.event(resolved?'backend-closed':'disconnected',this.record.ConnectionClosure);
+   }
+  });
   await this.rpc.initialize();
   await this.discover();
   if(this.cfg.engine==='claude'&&this.rpc.model)this.record.RoleModel=this.rpc.model;
@@ -167,6 +188,11 @@ export class ChannelHost {
  notification(message){
   const p=message.params||{};
   if(p.threadId&&p.threadId!==this.record.SessionId)return;
+  const turnId=p.turnId||p.turn?.id;
+  // Reconcile only the same attempt. Never let an old turn overwrite a newer one.
+  const late=!this.active&&this.lateTurn&&this.record.PendingTurn?.Turn===this.record.Turn&&this.record.PendingTurn?.Attempt===this.record.Attempts&&turnId===this.lateTurn.id;
+  if(late)this.active=this.lateTurn;
+  if(this.active?.id&&turnId&&turnId!==this.active.id)return;
   if(['item/started','item/completed','item.started','item.completed'].includes(message.method)&&['commandExecution','command_execution','agentMessage','agent_message'].includes(p.item?.type))this.leaveSetup('first-command-or-agent');
   const isItem=['item/completed','item.completed'].includes(message.method),exitCode=p.item?.exitCode??p.item?.exit_code;
   const toolFailed=isItem&&(p.item?.status==='failed'||(exitCode!=null&&exitCode!==0));
@@ -193,8 +219,8 @@ export class ChannelHost {
   if(message.method==='turn/completed'&&this.active){
    if(this.active.id&&p.turn.id!==this.active.id)return;
    clearTimeout(this.active.timer);
-   const active=this.active;this.active=null;this.record.ActiveTurn='';this.record.Answer=redact(active.answer||'',this.secretValues);
-   try{if(this.record.Answer.trim().startsWith('{'))this.record.Answer=toHandoff(JSON.parse(this.record.Answer));}catch{this.record.Answer='';}
+   const active=this.active;this.active=null;this.lateTurn=null;delete this.record.PendingTurn;this.record.ActiveTurn='';this.record.Answer=redact(active.answer||'',this.secretValues);
+   try{if(this.record.Answer.trim().startsWith('{'))this.record.Answer=toHandoff(JSON.parse(this.record.Answer));}catch{this.warning('Invalid handoff JSON; original answer preserved');}
    this.record.HandoffValid=validHandoff(this.record.Answer);this.record.HandoffCheck='local-six-fields';
    if(this.record.HandoffValid&&this.cfg.checker){
     const handoffFile=path.join(this.directory,'handoff.md');fs.writeFileSync(handoffFile,this.record.Answer,{mode:0o600});
@@ -215,16 +241,20 @@ export class ChannelHost {
    const eventKey='turn-'+this.record.Turn+'-attempt-'+this.record.Attempts+'-'+this.record.Status;
    this.ledger.add(eventKey,this.record.Status,this.record.Turn);
    this.checkpoint();this.save();active.resolve({...this.record,setupFailure:active.setupFailure,successfulItems:active.successfulItems});
+   if(late)this.notify(this.record.Status);
   }
+  if(late&&this.active)this.active=null;
  }
- async runTurn(text,taskKey){
+ async runTurn(text,taskKey,claimKey){
   if(this.turnBusy||this.stopping)throw new Error('Worker unavailable for another turn');this.turnBusy=true;
+  if(claimKey)this.record.ClaimKey=claimKey;
   try{const result=await this.performTurn(text,taskKey);this.notify(result.Status);return result;}
-  catch(error){if(!['interrupted','disconnected','budget-blocked'].includes(this.record.Status)){this.record.Status='failed';this.record.Error=redact(error.message,this.secretValues);this.checkpoint();this.save();this.notify('failed');}throw error;}
-  finally{this.leaveSetup('turn-ended');this.turnBusy=false;}
+  catch(error){if(!['closed','stalled','interrupted','disconnected','budget-blocked'].includes(this.record.Status)){this.record.Status='failed';this.record.Error=redact(error.message,this.secretValues);this.record.ActiveTurn='';this.checkpoint();this.save();this.notify('failed');}throw error;}
+  finally{delete this.record.ClaimKey;this.save();this.leaveSetup('turn-ended');this.turnBusy=false;}
  }
  async performTurn(text,taskKey){
   if(this.active)throw new Error('Worker has an active turn');
+  if(this.record.PendingTurn&&!this.rpc.closed)throw new Error('Previous turn outcome pending; inspect status before sending another turn');
   if(!text?.trim())throw new Error('Prompt is empty');
   if(!this.record.ExplicitWriteScopes)this.record.WriteScopes=briefWriteScopes(text);
   if(this.rpc.closed&&this.record.Engine==='codex'){this.record.ResumeCheckpoint=true;this.restarting=true;try{await this.start();}finally{this.restarting=false;}}
@@ -256,30 +286,34 @@ export class ChannelHost {
   }
   if(taskKey)this.record.TaskKey=taskKey;
   this.record.Turn=(this.record.Turn||0)+1;this.record.RetryCount=0;this.record.Attempts=0;
+  this.lateTurn=null;delete this.record.PendingTurn;this.record.ActiveTurn='';
   this.supervisor.reset();this.ledger.add('turn-'+this.record.Turn+'-start','running',this.record.Turn);
   this.record.PromptHash=createHash('sha256').update(text.replace(/\r\n/g,'\n').trimEnd()).digest('hex');
   let modelRetried=false,setupRetries=0;
   for(let attempt=0;attempt<4;attempt++){
    await this.enterSetup();
    this.record.Attempts++;this.attemptEffects=0;this.attemptSetupFailure=false;this.attemptModelMissing=false;this.record.Status='running';this.record.Answer='';this.record.Error='';this.record.StderrTail='';this.rpc.stderrTail='';this.record.Started=new Date().toISOString();this.record.Delivery={Status:'alindi-cevapsiz',PromptHash:this.record.PromptHash};this.checkpoint(text);this.save();
-   const finished=new Promise((resolve,reject)=>{this.active={resolve,reject,answer:'',id:null,setupFailure:false,successfulItems:0};this.active.timer=setTimeout(()=>{const active=this.active;this.active=null;this.record.Error='Worker turn timeout';this.save();active?.reject(new Error('Worker turn timeout'));void this.close('failed');},this.cfg.turnTimeout||45*60000);});
+   const finished=new Promise((resolve,reject)=>{this.active={resolve,reject,answer:'',id:null,setupFailure:false,successfulItems:0};this.active.timer=setTimeout(()=>{this.record.Error='Worker turn timeout';this.detachTurn(new Error('Worker turn timeout'));this.save();void this.close('failed');},this.cfg.turnTimeout||45*60000);});
    finished.catch(()=>{});
-   try{await this.rpc.call('turn/start',{threadId:this.record.SessionId,input:[{type:'text',text}],outputSchema:handoffSchema,...(this.record.RoleModel?{model:this.record.RoleModel}:{})});}catch(e){const a=this.active;this.active=null;clearTimeout(a?.timer);a?.reject(e);}
+   try{const response=await this.rpc.call('turn/start',{threadId:this.record.SessionId,input:[{type:'text',text}],outputSchema:handoffSchema,...(this.record.RoleModel?{model:this.record.RoleModel}:{})});if(this.active&&!this.active.id&&response.turn?.id){this.active.id=response.turn.id;this.record.ActiveTurn=response.turn.id;this.save();}}catch(e){this.detachTurn(e);}
    let result;try{result=await finished;}catch(e){
+    if(this.record.Status==='completed'&&!this.record.PendingTurn)return {...this.record};
     if(this.cfg.engine==='claude')throw e;
-    const tail=redact(this.rpc.stderrTail||'',this.secretValues).slice(-8192);this.record.Status='failed';this.record.StderrTail=tail;this.record.Error=(this.record.Error+'\n'+redact(e.message,this.secretValues)+'\n'+tail).trim().slice(-16384);this.save();
+    const tail=redact(this.rpc.stderrTail||'',this.secretValues).slice(-8192);if(!this.stopping)this.record.Status='failed';this.record.ActiveTurn='';this.record.StderrTail=tail;this.record.Error=(this.record.Error+'\n'+redact(e.message,this.secretValues)+'\n'+tail).trim().slice(-16384);this.save();
     if(this.record.WorkerExit?.kind==='signal')this.record.Status='interrupted';
     result={...this.record,setupFailure:this.attemptSetupFailure||/setup refresh had errors/i.test(this.record.Error),successfulItems:this.attemptEffects||0};
    }
    this.leaveSetup('attempt-ended');
    if(result.Status!=='completed'){
     await new Promise(resolve=>setTimeout(resolve,20));
+    if(this.record.Status==='completed')return {...this.record};
     const tail=redact(this.rpc.stderrTail||'',this.secretValues).slice(-8192);this.record.StderrTail=tail;
     if(tail){this.record.Error=(this.record.Error+'\n'+tail).trim().slice(-16384);result.Error=this.record.Error;result.StderrTail=tail;}
     if(/setup refresh had errors/i.test(tail))result.setupFailure=true;this.save();
    }
+   if(this.record.Status==='completed')return {...this.record};
    // Only diagnostics from error/tool events enter Error, never agent prose.
-   if(result.Status==='completed'||result.Status==='interrupted'||result.successfulItems||this.cfg.engine==='claude')return result;
+   if(result.Status==='completed'||result.Status==='interrupted'||result.successfulItems||this.record.PendingTurn||this.stopping||this.cfg.engine==='claude')return result;
    const modelMissing=this.attemptModelMissing;
    if(modelMissing&&!modelRetried){
     const from=this.record.RoleModel||'unknown';
@@ -303,7 +337,7 @@ export class ChannelHost {
   if(request.owner!==this.cfg.owner)throw new Error('Channel owner mismatch');
   switch(request.method){
    case 'durum':return {...this.record};
-   case 'sor':{const result=this.turnQueue.then(()=>this.runTurn(request.text,request.taskKey));this.turnQueue=result.catch(()=>{});return result;}
+   case 'sor':{const result=this.turnQueue.then(()=>this.runTurn(request.text,request.taskKey,request.claimKey));this.turnQueue=result.catch(()=>{});return result;}
    case 'steer':if(!this.active?.id)throw new Error('No active turn');return this.rpc.call('turn/steer',{threadId:this.record.SessionId,expectedTurnId:this.active.id,input:[{type:'text',text:request.text}]});
    case 'interrupt':if(!this.active?.id)throw new Error('No active turn');return this.rpc.call('turn/interrupt',{threadId:this.record.SessionId,turnId:this.active.id});
    case 'onay':{
@@ -328,26 +362,33 @@ export class ChannelHost {
    const response=path.join(this.directory,'responses',name);
    this.dispatch(request).then(result=>atomicJson(response,{ok:true,result},this.secretValues)).catch(()=>atomicJson(response,{ok:false,error:'Channel request failed; read worker status'},this.secretValues)).finally(()=>{
     // Unique completion marker avoids compare/unlink races with the next owner.
-    if(/^[a-f0-9]{64}$/.test(request.taskKey||'')&&/^[a-f0-9-]{36}$/.test(request.claimRequest||'')){fs.writeFileSync(path.join(this.directory,'claim-done-'+request.claimRequest),'done',{mode:0o600});}
+    if(/^[a-f0-9]{64}$/.test(request.claimKey||request.taskKey||'')&&/^[a-f0-9-]{36}$/.test(request.claimRequest||'')){fs.writeFileSync(path.join(this.directory,'claim-done-'+request.claimRequest),'done',{mode:0o600});}
     try{fs.unlinkSync(working);}catch{}
    });
   }
  }
  notify(status){
   if(!this.cfg.handoffDirectory)return;
+  // The record's canonical state owns notifications, even for stale launch plans.
+  // Standalone fixtures may use a destination inside their own state directory.
+  const state=path.resolve(this.cfg.state);
+  const vault=/[/\\]motor[/\\]scripts[/\\]\.state[/\\](codex|claude)-kanal$/i.test(state)?path.resolve(state,'../../../..'):null;
+  const handoffDirectory=vault?path.join(vault,'motor/scripts/.state/handoff'):path.resolve(this.cfg.handoffDirectory);
+  const relative=path.relative(state,handoffDirectory);
+  if(!vault&&(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))){this.warning('Notification destination outside channel state; delivery refused');return;}
   // Same local handoff JSON format; never touch the curated/derived Markdown views.
   const key=this.record.Id+'-'+this.record.Turn+'-'+status,marker=path.join(this.directory,'notified-'+key);
   try{const fd=fs.openSync(marker,'wx');fs.closeSync(fd);}catch{return;}
-  fs.mkdirSync(this.cfg.handoffDirectory,{recursive:true});const now=new Date();
+  fs.mkdirSync(handoffDirectory,{recursive:true});const now=new Date();
   const id=now.toISOString().replace(/[-:]/g,'').slice(0,15)+'-'+randomUUID().replaceAll('-','').slice(0,4);
-  atomicJson(path.join(this.cfg.handoffDirectory,id+'.json'),{v:2,id,ts:now.toISOString(),from:{agent:'codex',project:path.basename(this.record.Project)},to:'claude',kind:'bilgi',status:'acik',question:'Kanal '+this.record.Id+' '+status+'; beyin codex durum '+this.record.Id});
+  atomicJson(path.join(handoffDirectory,id+'.json'),{v:2,id,ts:now.toISOString(),from:{agent:'codex',project:path.basename(this.record.Project)},to:'claude',kind:'bilgi',status:'acik',a2aStatus:'submitted',doneBy:'',doneTs:'',question:'Kanal '+this.record.Id+' '+status+'; beyin codex durum '+this.record.Id});
  }
  async supervise(now=Date.now()){
   const action=this.supervisor.tick(this.lastEvent,now,Boolean(this.active),Boolean(this.record.BudgetBlocked));
   if(action==='nudge'&&this.active?.id){this.ledger.add('turn-'+this.record.Turn+'-nudge','nudged',this.record.Turn);this.notify('nudged');await this.rpc.call('turn/steer',{threadId:this.record.SessionId,expectedTurnId:this.active.id,input:[{type:'text',text:'Report current progress or the exact blocker; preserve the original scope.'}]});}
   if(action==='stall'){
    this.ledger.add('turn-'+this.record.Turn+'-stalled','stalled',this.record.Turn);this.notify('stalled');
-   const active=this.active;this.active=null;if(active){clearTimeout(active.timer);active.resolve({...this.record,Status:'stalled',setupFailure:false});}await this.close('stalled');
+   this.detachTurn(new Error('Worker stalled'),'stalled');await this.close('stalled');
   }
   if(!this.active&&!this.turnBusy&&this.limitQueue.value?.status!=='planned'&&now-this.idleSince>=(this.cfg.idleMs||30*60000))await this.close('closed','idle');
  }
@@ -357,7 +398,7 @@ export class ChannelHost {
   this.autoResuming=true;try{const r=await this.runTurn(this.limitQueue.value.pendingPrompt||'The usage limit reset. Continue the same task within its original scope and return the six-field handoff.',this.limitQueue.value.taskKey||this.record.TaskKey);if(r.Status==='completed'){this.limitQueue.value.status='verified';delete this.limitQueue.value.pendingPrompt;}else if(r.Status!=='limit-waiting')this.limitQueue.failed(Date.now());}catch{this.limitQueue.failed(Date.now());}finally{this.autoResuming=false;this.record.LimitQueue=this.limitQueue.value;this.save();}
  }
  async run(){await this.start();while(!this.stopping){await this.pump();await this.supervise();if(!this.stopping)await this.resumeDue();await new Promise(resolve=>setTimeout(resolve,50));}}
- async close(status='closed',reason='owner'){if(this.stopping)return;this.stopping=true;this.leaveSetup('closed');if(this.shared)await this.shared.close();else await this.rpc?.close();this.record.Status=status;this.record.CloseReason=reason;this.ledger.add('terminal-'+status,status,this.record.Turn);this.event(status);if(this.cfg.dietFile&&path.dirname(path.resolve(this.cfg.dietFile))===path.resolve(this.directory)){try{fs.unlinkSync(this.cfg.dietFile);}catch{}}}
+ async close(status='closed',reason='owner'){if(this.stopping)return;this.stopping=true;this.record.Status=status;this.detachTurn(new Error('Channel closed'));this.leaveSetup('closed');if(this.shared)await this.shared.close();else await this.rpc?.close();this.record.ActiveTurn='';if(!['completed','invalid-handoff'].includes(this.record.Status))this.record.Status=status;this.record.CloseReason=reason;this.ledger.add('terminal-'+status,status,this.record.Turn);this.event(status,{outcome:this.record.Status});if(this.cfg.dietFile&&path.dirname(path.resolve(this.cfg.dietFile))===path.resolve(this.directory)){try{fs.unlinkSync(this.cfg.dietFile);}catch{}}}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const config=JSON.parse(fs.readFileSync(process.argv[2],'utf8').replace(/^\uFEFF/,''));

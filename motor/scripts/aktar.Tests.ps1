@@ -30,6 +30,34 @@ function Invoke-Aktar([string]$Tv, [string]$Ajan, [string[]]$Arg) {
 }
 function Id-Bul([string]$Metin) { return ([regex]::Match($Metin, '\d{8}T\d{6}-[a-f0-9]{4}')).Value }
 
+Describe 'stale handoff maintenance in a temporary vault' {
+    It 'previews age and missing targets, then closes with reasons without deleting history' {
+        . (Join-Path $vault 'motor/hooks/lib.ps1')
+        $tv=New-AktarVault;$tp=Get-BeyinPaths -Vault $tv
+        try {
+            $ids=@()
+            foreach($name in @('old','missing','fresh')){
+                $r=Add-BeyinHandoff -Paths $tp -Metin $name -Kime claude -FromAgent codex -GorunumYok
+                $ids+= $r.Id;$h=Get-BeyinHandoff $tp $r.Id
+                if($name -eq 'old'){$h.ts=[datetime]::UtcNow.AddDays(-4).ToString('o')}
+                if($name -eq 'missing'){$h|Add-Member -NotePropertyName toProjectPath -NotePropertyValue (Join-Path $tv 'missing-project') -Force}
+                $null=Set-BeyinHandoff $tp $h
+            }
+            $dry=Invoke-Aktar $tv codex @('-Bayat','3')
+            $dry.Kod | Should Be 0
+            $dry.Metin | Should Match 'yas';$dry.Metin | Should Match 'hedef klasoru yok'
+            @(Get-BeyinHandoffListe $tp).Count | Should Be 3
+            $apply=Invoke-Aktar $tv codex @('-Bayat','3','-Uygula')
+            $apply.Kod | Should Be 0
+            @(Get-BeyinHandoffListe $tp).Count | Should Be 1
+            @(Get-BeyinHandoffListe $tp -Hepsi).Count | Should Be 3
+            (Get-BeyinHandoff $tp $ids[0]).doneBy | Should Match 'bayat.*yas'
+            (Get-BeyinHandoff $tp $ids[1]).doneBy | Should Match 'hedef klasoru yok'
+            (Get-BeyinHandoff $tp $ids[2]).status | Should Be acik
+        } finally {Remove-Item -LiteralPath $tv -Recurse -Force}
+    }
+}
+
 Describe 'ajan tespiti ve vault ici hedef suzgeci (2026-10-08)' {
     It 'Codex kabugundan (CODEX_SESSION_ID, BEYIN_AGENT yok) gonderen codex etiketlenir; CLAUDECODE claude' {
         . (Join-Path $vault 'motor\hooks\lib.ps1')
@@ -62,6 +90,46 @@ Describe 'ajan tespiti ve vault ici hedef suzgeci (2026-10-08)' {
 }
 
 Describe 'beyin aktar CLI (2026-10-07)' {
+    It 'closes a sparse briefing when its board card advances' {
+        . (Join-Path $vault 'motor/hooks/lib.ps1')
+        $tv = New-AktarVault
+        $tp = Get-BeyinPaths -Vault $tv
+        try {
+            $id = '20261028T205426-3333'
+            $notice = [pscustomobject]@{ v=2; id=$id; ts='2026-10-28T20:54:26Z'; from=@{agent='pano';project='fixture'}; to='claude'; kind='brifing'; ref='TASK-1@review@fixture'; status='acik'; question='Review fixture' }
+            (Set-BeyinHandoff $tp $notice).Ok | Should Be $true
+            Write-BeyinText -Path $tp.Board -Text '{"tasks":[{"id":"TASK-1","status":"in_progress"}]}'
+            (Sync-BeyinPanoBrifing -Paths $tp).Kapanan | Should Be 1
+            $saved = Get-BeyinHandoff $tp $id
+            $saved.status | Should Be tamam
+            $saved.doneBy | Should Be 'pano (kart ilerledi)'
+            [string]::IsNullOrWhiteSpace($saved.doneTs) | Should Be $false
+        } finally { Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    It 'closes a legacy channel notice without optional state or receipt fields' {
+        . (Join-Path $vault 'motor/hooks/lib.ps1')
+        $tv = New-AktarVault
+        $tp = Get-BeyinPaths -Vault $tv
+        try {
+            $id = '20261028T205426-3332'
+            $notice = [pscustomobject]@{ v=2; id=$id; ts='2026-10-28T20:54:26Z'; from=@{agent='codex';project='fixture'}; to='claude'; kind='bilgi'; status='acik'; question='Kanal fixture completed' }
+            (Set-BeyinHandoff $tp $notice).Ok | Should Be $true
+            $denied = Invoke-Aktar $tv codex @('-Tamam',$id)
+            $denied.Kod | Should Be 2
+            $read = Read-BeyinHandoff -Paths $tp -Id $id -Agent claude
+            [string]::IsNullOrWhiteSpace($read.readTs) | Should Be $false
+            $closed = Invoke-Aktar $tv claude @('-Tamam',$id)
+            $closed.Kod | Should Be 0
+            $saved = Get-BeyinHandoff $tp $id
+            $saved.status | Should Be tamam
+            $saved.a2aStatus | Should Be completed
+            $saved.doneBy | Should Be claude
+            [string]::IsNullOrWhiteSpace($saved.doneTs) | Should Be $false
+            $again = Invoke-Aktar $tv claude @('-Tamam',$id)
+            $again.Kod | Should Be 0
+            (Get-BeyinHandoff $tp $id).doneTs | Should Be $saved.doneTs
+        } finally { Remove-Item -LiteralPath $tv -Recurse -Force -ErrorAction SilentlyContinue }
+    }
     It 'only the recipient can close a handoff through Tamam' {
         $tv = New-AktarVault
         try {

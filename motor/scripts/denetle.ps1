@@ -59,6 +59,7 @@ $vaultOk = $false
 try { $vaultOk = [bool]($Vault -and (Test-Path -LiteralPath $Vault -PathType Container) -and (Test-Path -LiteralPath (Join-Path $Vault 'motor\hooks\lib.ps1') -PathType Leaf)) } catch { }
 if (-not $vaultOk) { Write-Output "HATA: vault degil (motor\hooks\lib.ps1 yok): '$Vault'  - konumsal arguman -Vault'a baglanir; esik icin -MinCos <0.30-0.999>, liste tavani icin -EnFazla <n> kullan"; exit 2 }
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
+. (Join-Path $PSScriptRoot 'denetle-perf.ps1')
 $p = Get-BeyinPaths -Vault $Vault
 $inv = [Globalization.CultureInfo]::InvariantCulture
 $simdi = Get-Date
@@ -267,7 +268,7 @@ $kelDoldu = $false
 $yol = 'kelime'
 $yolNot = ''
 if ($vekHazir -and $vekN -ge 2) {
-    $vek = @(Get-BeyinVektorCiftleri -Paths $p -MinCos $MinCos -EnFazla $TaramaTavan)
+    $vek = @(Get-DenetimVektorCiftleri -Index $vi -MinCos $MinCos -EnFazla $TaramaTavan)
     $vekDoldu = [bool](@($vek).Count -ge $TaramaTavan)
     $ciftHam = @($vek | ForEach-Object {
         [pscustomobject]@{ a = ([string]$_.A).ToLowerInvariant(); b = ([string]$_.B).ToLowerInvariant(); cos = [double]$_.Cos; jaccard = $null; ortak = @(); yol = 'vektor'; skor = [double]$_.Cos }
@@ -382,7 +383,7 @@ foreach ($f in $secili) {
         $satir = [regex]::Replace($satir, '[^\s]*[\\\/][^\s]*', ' ')
         $satir = [regex]::Replace($satir, '[A-Za-z0-9_.-]+\.(?:ps1|md|json|js|mjs|ts|tsx|py|cs|gd|yml|yaml|txt|log|jsonl|html|css|sh|bat|cmd|exe|dll|png|csv)\b', ' ')
         if ($satir.Trim().Length -lt 12) { continue }
-        foreach ($t in @(Get-BeyinKelimeler -Text $satir)) {
+        foreach ($t in @(Get-DenetimKelimeler -Text $satir)) {
             $ham = [string]$t
             if (-not $ham) { continue }
             $tt = $katCache[$ham]
@@ -422,7 +423,7 @@ foreach ($it in $idx) {
 $govdeTerim = @{}
 foreach ($s in @($notGovde.Keys)) {
     $set = @{}
-    foreach ($t in @(Get-BeyinKelimeler -Text ([string]$notGovde[$s]))) {
+    foreach ($t in @(Get-DenetimKelimeler -Text ([string]$notGovde[$s]))) {
         $tt = Get-DenetimTerim ([string]$t)
         if ($tt) { $set[$tt] = $true }
     }

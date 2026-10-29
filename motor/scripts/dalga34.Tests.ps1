@@ -1,4 +1,4 @@
-. (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks/lib.ps1')
+﻿. (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks/lib.ps1')
 . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
 
 Describe 'Y9: channel workers in the same read-only monitor model' {

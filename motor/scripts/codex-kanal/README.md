@@ -1,5 +1,30 @@
 # Codex canli kanal
 
+## Canli gorunum ve gecmis
+
+`beyin codex liste` ve `beyin claude liste`, acik kayitlari ve son 24 saatte
+kapanan kayitlari gosterir. `-SonSaat <saat>` bu pencereyi degistirir;
+`-Hepsi` arsivlenmis kayitlar dahil tum gecmisi gosterir. Kimligi bilinen
+kayit her zaman `durum <CK-id>` ile okunabilir. Merkez Ajanlar sekmesi de
+24 saatlik gorunum kuralini kullanir ve ayni kanal kimligini bir kez gosterir.
+
+`beyin codex temizle [-SonSaat 24]` arsiv adaylarini kuru modda listeler.
+`-Uygula` yalniz eski terminal kayitlara `ArchivedAt` ekler; kayit veya
+isci dosyasi silmez/tasima yapmaz. Ayni komut Claude kanali icin de vardir.
+Calisan isci, canli host/root sureci veya canli sahip oturumu korunur.
+
+`aktar.ps1 -Bayat 3` uc gunden eski acik aktarimlari ve hedef klasoru
+artik olmayan kayitlari nedenleriyle listeler. Yeni mutlak `-Hedef` yollarinin
+tam adresi korunur; eski smoke kayitlarinin Temp yaprak adlari da taninir.
+Siradan proje etiketlerinden yol tahmin edilmez. Yalniz `-Uygula` kapatir;
+gecmis `aktar -Hepsi` ile gorunur kalir. Dagitici bu secenekleri aktarmalidir.
+
+`ac` sema uyarilari stdout'a ayri satir basmaz; JSON `Warnings` alanindadir.
+Her `sor` talebinin claim anahtari kendi metninden veya acik yazma kapsamindan
+turetilir. Otomatik genel brifing kapsam sayilmaz. Windows yol buyuk/kucuk
+harfi ve ayiraclari normalize edilir. Claim kimligi konusma devam kimliginden
+ayridir; kapsamsiz takip mesaji ayni isci oturumuna devam edebilir.
+
 ## V2 kaynak durumu (2026-10-27)
 
 ### Sef dumanindan sonra sandbox geri dususu

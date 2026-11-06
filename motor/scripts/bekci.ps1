@@ -6,19 +6,24 @@
 # yiyordu. Kullanici karari: bekci yalniz uyarir ve listeler, ASLA oldurmez;
 # kapatma komutunu panoya kopyalar, karar insanda kalir.
 #
-# Kullanim:
-#   beyin bekci              rapor (commit/RAM, bosta oturumlar, yetim doktor, Codex MCP, disk)
-#   beyin bekci -Json        ayni rapor JSON
-#   beyin bekci -BostaDk 60  bosta esigi (varsayilan BEYIN_BEKCI_BOSTA_DK, 120)
+# 2.0 (2026-10-31): KARAR LISTESI. Oturum dosyalari degil CANLI surecler listelenir; her biri icin bellek (surec agaci
+# commit toplami), son is (transkript), sessizlik ve GEREKCELI karar: GUVENLE KAPAT / BAK / DOKUNMA. Panoya YALNIZ
+# 'guvenle kapat' grubunun komutu gider. Bellegi kimin tuttugu (ajan agaclari, sahipsiz node, diger uygulamalar) ayri
+# gosterilir. Kapanmis oturum kayitlari ve bitmis kosularin olu iscileri artik satir satir listelenmez (tek sayi).
 #
-# Ayarlar: BEYIN_BEKCI_COMMIT, BEYIN_BEKCI_BOSTA_DK, BEYIN_AGENTCHEF_KOK (AgentChef
-# checkout'u; Codex MCP sayimi icin codex-process-hygiene.mjs oradan calistirilir -
-# once plugins\agentchef, sonra plugins\agentchef-workflows denenir; ikisi de yoksa ATLANDI).
+# Kullanim:
+#   beyin bekci              rapor
+#   beyin bekci -Json        ayni rapor JSON
+#   beyin bekci -BostaDk 60  'guvenle kapat' icin sessizlik esigi (varsayilan BEYIN_BEKCI_BOSTA_DK, 120)
+#   beyin bekci -Hepsi       DOKUNMA grubunu da satir satir goster
+#
+# Ayarlar: BEYIN_BEKCI_COMMIT, BEYIN_BEKCI_BOSTA_DK, BEYIN_AGENTCHEF_KOK (Codex MCP sayimi icin codex-process-hygiene.mjs).
 [CmdletBinding(PositionalBinding=$false)]
 param(
     [string]$Vault = '',
     [int]$BostaDk = 0,
     [switch]$Json,
+    [switch]$Hepsi,
     [switch]$PanoyaKopyalama   # Set-Clipboard yapma (test / basliksiz oturum)
 )
 
@@ -26,6 +31,8 @@ $ErrorActionPreference = 'SilentlyContinue'
 if (-not $Vault) { $Vault = $(if ($env:BEYIN_VAULT) { $env:BEYIN_VAULT } else { Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }) }
 if (-not (Test-Path -LiteralPath (Join-Path $Vault 'motor\hooks\lib.ps1'))) { Write-Output "HATA: vault degil: '$Vault'"; exit 2 }
 . (Join-Path $Vault 'motor\hooks\lib.ps1')
+foreach ($m in @('merkez-veri.ps1', 'merkez-balon.ps1', 'bekci-karar.ps1')) { $y = Join-Path $PSScriptRoot $m; if (Test-Path -LiteralPath $y) { . $y } }
+if (-not $Json) { try { if (-not [Console]::IsOutputRedirected) { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } } catch { } }
 $p = Get-BeyinPaths -Vault $Vault
 $inv = [Globalization.CultureInfo]::InvariantCulture
 $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -35,7 +42,7 @@ try { $commitEsik = [int](Get-BeyinAyar 'BEYIN_BEKCI_COMMIT' '85') } catch { }
 
 $rapor = [ordered]@{
     ts = (Get-Date).ToString('o', $inv); vault = $Vault; bostaDk = $BostaDk; commitEsik = $commitEsik
-    kaynak = $null; oturumlar = @(); yetimDoktor = @(); codexMcp = $null; disk = $null; kapatmaKomutlari = @(); pano = ''; uyarilar = @(); sureMs = 0
+    kaynak = $null; karar = $null; bellek = @(); oturumlar = @(); yetimDoktor = @(); codexMcp = $null; disk = $null; kapatmaKomutlari = @(); pano = ''; uyarilar = @(); sureMs = 0
 }
 
 # 1) Commit / RAM (taze olcum, onbellek yok)
@@ -43,53 +50,41 @@ $k = Get-BeyinKaynakOzeti -Paths $p -CommitEsik $commitEsik -BostaDk $BostaDk -O
 $rapor.kaynak = [ordered]@{ commitYuzde = $k.CommitYuzde; commitGB = $k.CommitGB; commitTavanGB = $k.CommitTavanGB; esikAsildi = ($k.CommitYuzde -ge $commitEsik); bosRamGB = $k.BosRamGB; onerilenAjan = $k.OnerilenAjan }
 if ($k.CommitYuzde -ge $commitEsik) { $rapor.uyarilar += "commit %$($k.CommitYuzde) esigi (%$commitEsik) asti" }
 
-# 2) Oturum dosyalari (son 14 gun): ajan, proje, son gorulme, pane, bosta mi
-$simdi = Get-Date
-$otr = New-Object System.Collections.Generic.List[object]
-foreach ($f in @(Get-ChildItem -LiteralPath $p.Sessions -Filter '*.json' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
-    if ($f.LastWriteTime -lt $simdi.AddDays(-14)) { continue }
-    try {
-        $o = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-        $dk = [int](($simdi - $f.LastWriteTime).TotalMinutes)
-        $proje = ''
-        try { $proje = Get-BeyinProjectLeaf -Path ([string]$o.cwd) -Paths $p } catch { }
-        $pane = $(if ($o.PSObject.Properties['herdrPane']) { [string]$o.herdrPane } else { '' })
-        # TAKIM ISCISI (2026-10-12): kosu/kart etiketi; kapatma komutu motorun abort'u (taskkill ASLA).
-        $tkRun = $(if ($o.PSObject.Properties['takimRun']) { [string]$o.takimRun } else { '' })
-        $tkKart = $(if ($o.PSObject.Properties['takimKart']) { [string]$o.takimKart } else { '' })
-        $otr.Add([ordered]@{
-            oturum = $f.BaseName.Substring(0, [Math]::Min(12, $f.BaseName.Length)); ajan = [string]$o.agent; proje = $proje
-            prompt = [int]$o.prompts; sonGorulmeDk = $dk; bosta = ($dk -ge $BostaDk); pane = $pane
-            takim = $(if ($tkRun) { "$tkRun/$tkKart" } else { '' })
-            kapat = $(if ($tkRun) { "beyin takim durdur $tkRun" } elseif ($pane) { "herdr pane close $pane" } else { '' })
-        })
-    } catch { }
+# 2) Canli ajan surecleri + karar
+$ad = Get-BekciAdaylar -Paths $p -EsikDk $BostaDk
+if ($ad.Hata) { $rapor.uyarilar += $ad.Hata }
+$kapat = @($ad.Adaylar | Where-Object { $_.Karar -eq 'kapat' })
+$bak = @($ad.Adaylar | Where-Object { $_.Karar -eq 'bak' })
+$dokunma = @($ad.Adaylar | Where-Object { $_.Karar -eq 'dokunma' })
+$kazancMB = [double](($kapat | Measure-Object -Property BellekMB -Sum).Sum)
+$rapor.karar = [ordered]@{ kapat = $kapat; bak = $bak; dokunma = $dokunma; kapanmisKayit = $ad.Kapanmis; kazancMB = [math]::Round($kazancMB) }
+$rapor.oturumlar = @($ad.Adaylar)   # geriye uyum: canli oturumlar
+if ($ad.Agac) {
+    $ajanPid = @{}; foreach ($x in $ad.Adaylar) { $ajanPid[[int]$x.Pid] = "$($x.Ajan)" }
+    $rapor.bellek = @(Get-BekciBellekGruplari $ad.Agac $ajanPid | Select-Object -First 10 | ForEach-Object { [pscustomobject]@{ grup = $_.Ad; mb = [math]::Round($_.MB); surec = $_.Surec } })
 }
-# [ordered] sozlugu dogrudan diziye koymak PS 5.1'de "Argument types do not match" ile
-# SESSIZCE dusuyor (olculdu: -Json ciktisinda oturumlar []); pscustomobject'e cevrilir.
-$rapor.oturumlar = @($otr | ForEach-Object { [pscustomobject]$_ })
-$bosta = @($otr | Where-Object { $_.bosta })
-# 2b) Takim kosulari (team-runs; motor yazar, burasi okur): acik kosu, calisan isci, bekleyen onay.
+
+# 2b) Takim: yalniz CANLI isci ve sef bekleyen kosu (olu isciler tek sayi)
 $takimD = $null
 try { $takimD = Get-BeyinTakimDurum -Paths $p } catch { }
-$rapor.takim = $(if ($takimD) { [ordered]@{ acikKosu = @($takimD.Acik).Count; calisanIsci = [int]$takimD.Isci; onayBekleyen = @($takimD.OnayBekleyen | ForEach-Object { "$($_.Tur) $($_.RunId)" }); satir = [string]$takimD.Satir } } else { $null })
-if ($bosta.Count -ge 5) { $rapor.uyarilar += "$($bosta.Count) oturum dosyasi $BostaDk+ dakikadir sessiz (son 14 gun; kapanmis olabilir)" }
+$takimCanli = New-Object System.Collections.Generic.List[string]; $takimOlu = 0
+if ($takimD) {
+    foreach ($kr in @($takimD.Acik)) { foreach ($w in @($kr.workers)) { if (-not $w) { continue }
+        $c = [bool]($w.pid -and (Get-Process -Id ([int]$w.pid) -ErrorAction SilentlyContinue))
+        if ($c) { $takimCanli.Add("$($kr.runId) $($w.taskId) [$($w.status)] pid $($w.pid)") } else { $takimOlu++ } } }
+}
+$rapor.takim = $(if ($takimD) { [ordered]@{ acikKosu = @($takimD.Acik).Count; calisanIsci = [int]$takimD.Isci; canliIsci = @($takimCanli); oluIsci = $takimOlu; onayBekleyen = @($takimD.OnayBekleyen | ForEach-Object { "$($_.Tur) $($_.RunId)" }); satir = [string]$takimD.Satir } } else { $null })
 
 # 3) Yetim doktor PowerShell'leri (ebeveyni olu)
 $yd = New-Object System.Collections.Generic.List[object]
-try {
-    $tum = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'pwsh.exe'" -ErrorAction Stop)
-    $canli = @{}
-    foreach ($pr in @(Get-Process -ErrorAction SilentlyContinue)) { $canli[[int]$pr.Id] = $true }
-    foreach ($pr in $tum) {
-        if ($pr.CommandLine -notlike '*doktor.ps1*') { continue }
-        if ($pr.ProcessId -eq $PID) { continue }
-        $ebeveynYasiyor = $canli.ContainsKey([int]$pr.ParentProcessId)
-        $ws = [math]::Round([double]$pr.WorkingSetSize / 1MB)
-        $yd.Add([ordered]@{ pid = [int]$pr.ProcessId; ebeveyn = [int]$pr.ParentProcessId; ebeveynYasiyor = $ebeveynYasiyor; wsMB = $ws
-                            baslangic = $(try { $pr.CreationDate.ToString('yyyy-MM-dd HH:mm', $inv) } catch { '' }); yetim = (-not $ebeveynYasiyor) })
+if ($ad.Agac) {
+    foreach ($pr in $ad.Agac.Surec.Values) {
+        if ($pr.Ad -notin @('powershell.exe', 'pwsh.exe') -or $pr.Komut -notlike '*doktor.ps1*' -or $pr.Komut -like '*Pester*' -or $pr.Pid -eq $PID) { continue }
+        $ebeveynYasiyor = $ad.Agac.Surec.ContainsKey($pr.Ebeveyn)
+        $yd.Add([ordered]@{ pid = $pr.Pid; ebeveyn = $pr.Ebeveyn; ebeveynYasiyor = $ebeveynYasiyor; wsMB = [math]::Round($pr.WsMB)
+                            baslangic = $(try { $pr.Olusma.ToString('yyyy-MM-dd HH:mm', $inv) } catch { '' }); yetim = (-not $ebeveynYasiyor) })
     }
-} catch { $rapor.uyarilar += "surec listesi alinamadi: $($_.Exception.Message)" }
+}
 $rapor.yetimDoktor = @($yd | ForEach-Object { [pscustomobject]$_ })
 $yetimler = @($yd | Where-Object { $_.yetim })
 if ($yetimler.Count -gt 0) {
@@ -141,48 +136,82 @@ $rapor.disk = [ordered]@{
     not = 'yalniz rapor; arsiv/silme karari kullanicida'
 }
 
-# 6) Pano: kapatma komutlari (yalniz kopyalanir, CALISTIRILMAZ)
-$panoMetin = @($rapor.kapatmaKomutlari + @($bosta | Where-Object { $_.kapat } | ForEach-Object { $_.kapat })) -join "`r`n"
-if ($panoMetin -and -not $PanoyaKopyalama) {
+# 6) Pano: YALNIZ 'guvenle kapat' grubu + yetim doktor (kopyalanir, CALISTIRILMAZ)
+$kapatPid = @($kapat | Where-Object { $_.Kapat -like 'taskkill*' } | ForEach-Object { $_.Pid })
+if ($kapatPid.Count) { $rapor.kapatmaKomutlari = @(('taskkill ' + (($kapatPid | ForEach-Object { "/PID $_" }) -join ' ') + ' /T /F')) + @($rapor.kapatmaKomutlari) }
+foreach ($x in @($kapat | Where-Object { $_.Kapat -notlike 'taskkill*' })) { $rapor.kapatmaKomutlari += $x.Kapat }
+$panoMetin = @($rapor.kapatmaKomutlari) -join "`r`n"
+if ($panoMetin -and -not $PanoyaKopyalama -and -not $Json) {
     try { Set-Clipboard -Value $panoMetin; $rapor.pano = 'kopyalandi' } catch { $rapor.pano = "kopyalanamadi: $($_.Exception.Message)" }
-} elseif ($panoMetin) { $rapor.pano = 'atlandi (-PanoyaKopyalama)' } else { $rapor.pano = 'kopyalanacak komut yok' }
+} elseif ($panoMetin) { $rapor.pano = 'kopyalanmadi' } else { $rapor.pano = 'kopyalanacak komut yok' }
 $rapor.sureMs = [int]$sw.ElapsedMilliseconds
-Write-BeyinMakbuz -Paths $p -Script 'bekci' -Outcome 'BEKCI_RAPOR' -DurationMs $rapor.sureMs -Note "commit=%$($k.CommitYuzde) bosta=$($bosta.Count) yetimDoktor=$($yetimler.Count) mcpYetim=$(if ($hyg) { $hyg.mcpYetimAday } else { '-' })"
+Write-BeyinMakbuz -Paths $p -Script 'bekci' -Outcome 'BEKCI_RAPOR' -DurationMs $rapor.sureMs -Note "commit=%$($k.CommitYuzde) kapat=$($kapat.Count) bak=$($bak.Count) dokunma=$($dokunma.Count) kazanc=$([math]::Round($kazancMB))MB yetimDoktor=$($yetimler.Count)"
 
-if ($Json) { $rapor | ConvertTo-Json -Depth 5; exit 0 }
+# son karar ozeti: merkez bellek teshisinde "N oturum guvenle kapatilabilir" der (30 dk tazelikte)
+try { Write-BeyinText -Path (Join-Path $p.ScrState 'bekci-son.json') -Text (ConvertTo-Json -Compress -InputObject ([ordered]@{ ts = (Get-Date).ToString('o', $inv); kapat = $kapat.Count; bak = $bak.Count; dokunma = $dokunma.Count; kazancMB = [math]::Round($kazancMB) })) } catch { }
+if ($Json) { $rapor | ConvertTo-Json -Depth 6; exit 0 }
 
-"BEKCI  $((Get-Date).ToString('yyyy-MM-dd HH:mm', $inv))  |  vault: $(Split-Path $Vault -Leaf)  |  yalniz GOSTERIR, hicbir sureci kapatmaz"
+# ---------- ekran ----------
+$e = [char]27; $renkli = -not [Console]::IsOutputRedirected
+function Renk([string]$kod, [string]$m) { if ($renkli) { return "$e[${kod}m$m$e[0m" }; return $m }
+function Kirmizi($m) { Renk '91' $m }; function Sari($m) { Renk '93' $m }; function Yesil($m) { Renk '92' $m }; function Soluk($m) { Renk '90' $m }; function Kalin($m) { Renk '1' $m }
+function Kes([string]$m, [int]$n) { if ($m.Length -le $n) { return $m }; return $m.Substring(0, [Math]::Max(1, $n - 1)) + '…' }
+function AdayYaz($x, [bool]$ayrinti) {
+    $basl = "{0,-6} {1,-18} {2,9}  {3,7} sessiz" -f $x.Ajan, (Kes ([string]$x.Proje) 18), (Format-BekciMB $x.BellekMB), (Format-BekciSure $x.SessizDk)
+    "  $basl  $(Soluk "pid $($x.Pid) · $($x.Oturum.Substring(0, [Math]::Min(8, $x.Oturum.Length)))$(if ($x.AltSurec -gt 0) { " · +$($x.AltSurec) alt süreç" })")"
+    "      $(Soluk 'neden:') $($x.Neden)"
+    if ($ayrinti -and $x.Son) { "      $(Soluk 'son:') $(Kes ([string]$x.Son) 100)" }
+    if ($ayrinti -and @($x.Kartlar).Count) { "      $(Soluk 'kart:') $(@($x.Kartlar) -join ', ')" }
+    if ($ayrinti -and $x.Takim) { "      $(Soluk 'takım:') $($x.Takim)" }
+    if ($ayrinti) { "      $(Soluk 'kapat:') $(if ($x.Nazik) { "$($x.Nazik)  ya da  " })$($x.Kapat)" }
+}
+
+"$(Kalin 'BEKÇİ')  $((Get-Date).ToString('yyyy-MM-dd HH:mm', $inv))  $(Soluk '· yalnız gösterir, hiçbir süreci kapatmaz')"
 ''
-"KAYNAK   commit %$($k.CommitYuzde) ($($k.CommitGB)/$($k.CommitTavanGB) GB)$(if ($k.CommitYuzde -ge $commitEsik) { "  << esik %$commitEsik ASILDI" })"
-$(if ($k.OnerilenAjan -gt 0) { "ONERI    es zamanli ajan: $($k.OnerilenAjan) ($($k.OneriNeden); kaba tahmin, kapi degil)" })
+$cm = "commit %$($k.CommitYuzde) ($($k.CommitGB)/$($k.CommitTavanGB) GB)"
+"$(Kalin 'BELLEK')   $(if ($k.CommitYuzde -ge $commitEsik) { Kirmizi "$cm ▲ eşik %$commitEsik aşıldı" } else { Yesil $cm })  $(Soluk "· boş RAM $($k.BosRamGB) GB · $($k.OnerilenAjan) ajana yer")"
+if ($rapor.bellek.Count) {
+    $grAd = @{ 'sahipsiz-node' = 'sahipsiz node (ebeveyni ölü)' }
+    $parca = @($rapor.bellek | Select-Object -First 6 | ForEach-Object { "$(if ($_.grup -like 'ajan:*') { ($_.grup -replace '^ajan:', '') + ' oturumları' } elseif ($grAd.ContainsKey($_.grup)) { $grAd[$_.grup] } else { $_.grup }) $(Format-BekciMB $_.mb)" })
+    "         $(Soluk 'en çok tutan:') $($parca -join ' · ')"
+}
 ''
-"OTURUMLAR (son 14 gun: $($otr.Count); $BostaDk+ dk sessiz: $($bosta.Count))"
-if ($otr.Count) {
-    $otr | Select-Object -First 25 | ForEach-Object { [pscustomobject]@{ oturum = $_.oturum; ajan = $_.ajan; proje = $_.proje; prompt = $_.prompt; sessiz_dk = $_.sonGorulmeDk; takim = $_.takim; pane = $_.pane; kapat = $_.kapat } } | Format-Table -AutoSize | Out-String -Width 200
-} else { '  (oturum dosyasi yok)' }
-if ($takimD -and @($takimD.Acik).Count) {
-    "TAKIM  $($takimD.Satir)"
-    foreach ($kr in $takimD.Acik) {
-        foreach ($w in @($kr.workers)) { if ($w) { "  $($kr.runId) $($w.taskId) $($w.role) [$($w.status)]$(if ($w.pid) { " pid $($w.pid)$(if (Get-Process -Id ([int]$w.pid) -ErrorAction SilentlyContinue) { ' canli' } else { ' olu' })" })" } }
-    }
-    "  isci durdurma yalniz motor uzerinden: beyin takim durdur <runId>  (taskkill/Stop-Process ASLA: kill guard reddeder)"
+"$(Kalin 'KARAR')    $(Yesil "$($kapat.Count) güvenle kapatılabilir") · $(Sari "$($bak.Count) bakman gerek") · $(Soluk "$($dokunma.Count) dokunma")$(if ($kazancMB -gt 0) { " · kapatırsan ~$(Format-BekciMB $kazancMB) boşalır" })"
+"         $(Soluk "eşik: turu bitmiş + $BostaDk dk sessiz + açık kartı yok · ayar: beyin bekci -BostaDk <dk>")"
+''
+if ($kapat.Count) {
+    (Yesil "✓ GÜVENLE KAPATILABİLİR ($($kapat.Count) · ~$(Format-BekciMB $kazancMB))")
+    foreach ($x in $kapat) { AdayYaz $x $true }
     ''
 }
-"YETIM DOKTOR ($($yetimler.Count))"
-if ($yd.Count) { $yd | ForEach-Object { [pscustomobject]$_ } | Format-Table pid, ebeveyn, ebeveynYasiyor, wsMB, baslangic -AutoSize | Out-String -Width 160 } else { '  (doktor sureci yok)' }
-"CODEX / MCP"
-if ($rapor.nodeRepl) { "  node_repl.exe: $($rapor.nodeRepl.Count), yetim aday $($rapor.nodeRepl.OrphanCount), asiri $($rapor.nodeRepl.Excess) (yalniz rapor)" }
+if ($bak.Count) {
+    (Sari "? BAK, SONRA KARAR VER ($($bak.Count))")
+    foreach ($x in $bak) { AdayYaz $x $true }
+    ''
+}
+if ($dokunma.Count) {
+    (Soluk "✕ DOKUNMA ($($dokunma.Count)) · çalışıyor ya da yakın zamanda etkin")
+    if ($Hepsi) { foreach ($x in $dokunma) { AdayYaz $x $false } }
+    else { "  $(Soluk ((@($dokunma | ForEach-Object { "$($_.Ajan)/$($_.Proje) $(Format-BekciMB $_.BellekMB)" }) -join ' · ') + ' · ayrıntı: beyin bekci -Hepsi'))" }
+    ''
+}
+if (-not $ad.Adaylar.Count) { "  $(Soluk '(canlı ajan süreci bulunamadı)')"; '' }
+"$(Soluk "kapanmış oturum kaydı: $($ad.Kapanmis) (süreci yok, işlem gerekmez)")"
+if ($takimD -and @($takimD.Acik).Count) {
+    "$(Soluk "takım: $(@($takimD.Acik).Count) açık koşu · canlı işçi $($takimCanli.Count) · kapanmış işçi $takimOlu (normal)")"
+    foreach ($t in $takimCanli) { "  $t" }
+}
+''
+if ($yd.Count) { "$(Kalin 'YETİM DOKTOR') ($($yetimler.Count))"; $yd | ForEach-Object { [pscustomobject]$_ } | Format-Table pid, ebeveyn, ebeveynYasiyor, wsMB, baslangic -AutoSize | Out-String -Width 160 }
 if ($hyg) {
-    "  codex sureci: $($hyg.codexSurec) · claude sureci: $($hyg.claudeSurec) · MCP ornek: $($hyg.mcpOrnek) (yetim aday $($hyg.mcpYetimAday)) · MCP yardimci surec: $($hyg.mcpYardimciSurec) · MCP RAM: $($hyg.mcpRamMB) MB"
-    $hyg.sunucular | Sort-Object { -[int]$_.ramMB } | Select-Object -First 8 | Format-Table -AutoSize | Out-String -Width 160
-    "  kaynak: $($hyg.kaynak)"
-} else { "  ATLANDI: $($rapor.codexMcp.neden)" }
+    "$(Kalin 'MCP')      codex $($hyg.codexSurec) · claude $($hyg.claudeSurec) süreç · MCP örnek $($hyg.mcpOrnek)$(if ($hyg.mcpYetimAday) { ' · ' + (Sari "yetim aday $($hyg.mcpYetimAday)") }) · yardımcı süreç $($hyg.mcpYardimciSurec) · $(Format-BekciMB $hyg.mcpRamMB)"
+    "         $(Soluk ((@($hyg.sunucular | Sort-Object { -[int]$_.ramMB } | Select-Object -First 5 | ForEach-Object { "$($_.sunucu) $($_.ornek)× $(Format-BekciMB $_.ramMB)" })) -join ' · '))"
+} else { "$(Kalin 'MCP')      $(Soluk "atlandı: $($rapor.codexMcp.neden)")" }
+if ($rapor.nodeRepl) { "         $(Soluk "node_repl $($rapor.nodeRepl.Count) süreç · yetim aday $($rapor.nodeRepl.OrphanCount)")" }
+"$(Kalin 'DİSK')     $(Soluk "Claude transkript $($rapor.disk.claudeTranskriptGB) GB · Codex oturum $($rapor.disk.codexOturumGB) GB · Codex sqlite $($rapor.disk.codexSqliteGB) GB (yalnız rapor)")"
 ''
-"DISK (yalniz rapor)  Claude transkript $($rapor.disk.claudeTranskriptGB) GB · Codex oturum $($rapor.disk.codexOturumGB) GB · Codex sqlite $($rapor.disk.codexSqliteGB) GB"
-''
-if ($rapor.uyarilar.Count) { 'UYARILAR'; $rapor.uyarilar | ForEach-Object { "  - $_" }; '' }
-"KAPATMA KOMUTLARI (pano: $($rapor.pano)) - calistirmak SENIN kararin:"
-if ($panoMetin) { $panoMetin -split "`r`n" | ForEach-Object { "  $_" } } else { '  (yok)' }
-''
-"($($rapor.sureMs) ms)"
+if ($rapor.uyarilar.Count) { (Sari 'UYARILAR'); $rapor.uyarilar | ForEach-Object { "  - $_" }; '' }
+"$(Kalin 'PANODA')   $(if ($panoMetin) { "$($rapor.pano): yalnız güvenle kapatılabilirler$(if ($yetimler.Count) { ' + yetim doktor' }) · çalıştırmak senin kararın" } else { 'kopyalanacak komut yok' })"
+if ($panoMetin) { $panoMetin -split "`r`n" | ForEach-Object { "  $_" } }
+"$(Soluk "kapatmadan önce: oturumu pencerede /exit ile kapatmak en temizidir (özet kaydı yazılır); taskkill son çare. ($($rapor.sureMs) ms)")"
 exit 0

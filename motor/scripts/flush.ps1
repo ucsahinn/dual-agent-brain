@@ -679,7 +679,9 @@ tags: ["gunluk-log", "makine-uretimi"]
         Remove-BeyinQueueItem -File (Join-Path $p.Queue ((Get-BeyinKey -Text $TranscriptPath) + '.json'))
         # DEVIR (BB3): yalniz canli kanca tetiklemesinde (sikistirma oncesi / oturum sonu)
         # ve SON parcada. Yetim toplama ya da eski gun isleme bayat devir uretmesin.
-        if ($Reason -match '(pre-compact|session-end)$') {
+        # Isci worktree'si ve gecici klasor oturumu devir YAZMAZ: o klasorde yeni oturum acilmaz,
+        # devir hic teslim edilmeden acik kaliyordu (2026-11-06: 78 acik aktarimin 26'si).
+        if ($Reason -match '(pre-compact|session-end)$' -and -not (Test-BeyinDevirsizKonum -Yol $ProjectPath -Proje $projLeaf)) {
             try {
                 $dvKey = Get-BeyinKey -Text $TranscriptPath
                 $dv = Add-BeyinDevir -Paths $p -Ozet $summary -Agent $Agent -Proje $projLeaf -SessionKey $dvKey

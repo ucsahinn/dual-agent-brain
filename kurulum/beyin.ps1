@@ -140,6 +140,7 @@ BAKIM
                    oturumunda ve oturum icinde bir kez [Hafiza: Aktarim] blogu); -Tur soru|devir; argumansiz liste;
                    -Tamam <id> kapatir; -Hepsi kapalilar; -Isci TASK-x yalniz o takim iscisine (sema v3)
                    -Bayat <gun> eski/acik adaylari kuru listeler; -Uygula ile kapatir
+                   -Topla teslim edilmis/sahipsiz/bayat olanlari kurallarla toplar (kuru); -Uygula kapatir
                    -Olay <anahtar> ayni olay tekrarlarini birlestirir; -Gor <id> OKUNDU makbuzu yazar
                    -Kayit <id> -Durum submitted|working|input-required|completed|failed|canceled (yalniz alici)
   topla [gun]      Pencereden dusmus oturumlari topla (varsayilan kuru calisma, 3 gun)
@@ -732,7 +733,7 @@ switch ($KomutN) {
         # beyin aktar "soru" -Kime claude|codex [-Kanit ..] [-Kapsam ..] [-Risk ..] [-Sonraki ..] [-Proje x]
         # beyin aktar [-Hepsi]  |  beyin aktar -Tamam <id>
         # niyet rotasiyla ayni kural: adli degerler disindaki TUM konumsal parcalar metindir.
-        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur', '-yanit', '-bekle', '-sure', '-hedef', '-isci', '-oturum', '-gor', '-durum', '-kayit', '-olay', '-bayat') -Bayrak @('-hepsi', '-vebekle', '-uygula') -SinirsizSlot
+        $a = Ayristir -KomutAdi $Komut -Parcalar $PA -Deger @('-vault', '-metin', '-kanit', '-kapsam', '-risk', '-sonraki', '-kime', '-proje', '-tamam', '-tur', '-yanit', '-bekle', '-sure', '-hedef', '-isci', '-oturum', '-gor', '-durum', '-kayit', '-olay', '-bayat') -Bayrak @('-hepsi', '-vebekle', '-uygula', '-topla') -SinirsizSlot
         $hArgs = @($a.Gecen)
         $hMetin = ((@($a.Konum)) -join ' ').Trim()
         $hMetinVar = $false

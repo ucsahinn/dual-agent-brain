@@ -205,6 +205,9 @@ function Get-BeyinAyarKayitlari {
         @{ Ad = 'BEYIN_PANO_KOORDINATOR'; Varsayilan = 'leadership_coordinator'; Secenekler = @('backend_coordinator', 'devops_coordinator', 'leadership_coordinator', 'product_coordinator', 'qa_coordinator', 'ui_coordinator', 'marketing_coordinator'); Aciklama = 'beyin pano create icin varsayilan --owner-coordinator (AgentChef katalog koordinatoru); -Koordinator ile ezilir' },
         @{ Ad = 'BEYIN_BILDIRIM';       Varsayilan = 'acik';                 Secenekler = @('acik', 'kapali');           Aciklama = 'Kosu paneli Windows bildirimi: onay bekliyor, isci bitti, kota siniri, dogrulama/kontrol dustu, gozetmen durdu. Yalniz kosu genel gorunumu acikken.' },
         @{ Ad = 'BEYIN_MERKEZ_SES';     Varsayilan = 'kapali';               Secenekler = @('kapali', 'ton', 'toast');   Aciklama = 'beyin merkez sesli bildirim (ISTEGE BAGLI): ton = hata/onay/kosu bitti icin uc ayri kisa ton, toast = Windows bildirimi sesiyle, kapali = sessiz. Ayni olay icin bir kez.' },
+        @{ Ad = 'BEYIN_MERKEZ_ONAY';    Varsayilan = 'tus';                  Secenekler = @('tus', 'kod', 'kapali');     Aciklama = 'beyin merkez eylem onayi (5 Isler): tus = onay penceresinde Y, kod = ekrandaki 4 haneli kod, kapali = merkezden insan onayi verilmez (yalniz sohbet satiri). ADR-014.' },
+        @{ Ad = 'BEYIN_MERKEZ_OTO';     Varsayilan = 'kapali';               Secenekler = @('kapali', 'acik');           Aciklama = 'beyin merkez oto-duzeltme baslangic durumu: acik = guvenli adimlar (maliyet taramasi, isci sonuclarini toplama) kendiliginden; onay ve durdurma ASLA oto degil. Panelde z ile degisir.' },
+        @{ Ad = 'BEYIN_MERKEZ_FARE';    Varsayilan = 'acik';                 Secenekler = @('acik', 'kapali');           Aciklama = 'beyin merkez fare: acik = sekme/satir/alt cubuk tiklanir, teker kaydirir (metin secmek icin Shift+surukle); kapali = yalniz klavye. Onay penceresi fareyle ONAYLANMAZ.' },
         @{ Ad = 'BEYIN_MERKEZ_SESSIZ';  Varsayilan = 'yok';                  Secenekler = @();                           Aciklama = 'beyin merkez sessiz saatleri SS-SS (or. 23-08: gece 23 ile sabah 08 arasi ses yok); yok = her zaman.' },
         @{ Ad = 'BEYIN_MERKEZ_ZEMIN';   Varsayilan = 'osc';                  Secenekler = @('osc', 'boya', 'kapali');    Aciklama = 'beyin merkez zemini: osc = Windows Terminal sekme zeminini Aurora laciverti yapar (cikista geri alir), boya = her satiri zeminle boyar (diger terminaller), kapali = terminal zemini.' },
         @{ Ad = 'BEYIN_BRAIN_CLI';   Varsayilan = '';                       Secenekler = @();                          Aciklama = 'brain-cli.mjs yolu (istege bagli, beyin yedek)' },
@@ -343,7 +346,7 @@ function Test-BeyinAyarDeger {
             $s.Ok = $false
             $s.Hata = "gecerli degerler: $($secenek -join ' | ')  (verilen: '$v')"
         } else { $s.Deger = $k }
-    } elseif ($Ad -eq 'BEYIN_BRIFING_KIME' -or $Ad -eq 'BEYIN_PANO_ONAY' -or $Ad -eq 'BEYIN_SONME' -or $Ad -eq 'BEYIN_KILL_GUARD' -or $Ad -eq 'BEYIN_BILDIRIM' -or $Ad -eq 'BEYIN_MERKEZ_ZEMIN' -or $Ad -eq 'BEYIN_MERKEZ_SES') {
+    } elseif ($Ad -eq 'BEYIN_BRIFING_KIME' -or $Ad -eq 'BEYIN_PANO_ONAY' -or $Ad -eq 'BEYIN_SONME' -or $Ad -eq 'BEYIN_KILL_GUARD' -or $Ad -eq 'BEYIN_BILDIRIM' -or $Ad -eq 'BEYIN_MERKEZ_ZEMIN' -or $Ad -eq 'BEYIN_MERKEZ_SES' -or $Ad -eq 'BEYIN_MERKEZ_ONAY' -or $Ad -eq 'BEYIN_MERKEZ_OTO' -or $Ad -eq 'BEYIN_MERKEZ_FARE') {
         $k = $v.Trim().ToLowerInvariant()
         $secenek = @((Get-BeyinAyarKayit -Ad $Ad).Secenekler)
         if ($secenek -notcontains $k) {
@@ -4868,6 +4871,105 @@ function Get-BeyinHandoffBayat {
         if ($target -and -not (Test-Path -LiteralPath $target -PathType Container)) { $reasons+='hedef klasoru yok' }
         if ($reasons.Count) { [pscustomobject]@{Id=[string]$h.id;To=[string]$h.to;Reason=($reasons -join '; ');Target=$target} }
     }
+}
+
+function Test-BeyinDevirsizKonum {
+    # DEVIR YETIMI (2026-11-06, 78 acik aktarimin 38'i): takim iscisi worktree'si
+    # (.agentchef-worktrees\R...\TASK-x, _integration) ve gecici klasor oturumlarinin devri,
+    # o klasorde bir daha oturum acilmadigi icin HIC teslim edilmiyor, sonsuza dek acik kaliyordu.
+    # $true: bu konumdan/proje adindan devir yazilmaz (ve triyajda yetim sayilir).
+    param([string]$Yol = '', [string]$Proje = '')
+    if ($Proje -cmatch '^(TASK-[A-Z0-9][A-Za-z0-9-]*|_integration)$') { return $true }
+    if ($Proje -match '^beyin-(?:[A-Za-z0-9]+-)*smoke[A-Za-z0-9_.-]*$') { return $true }
+    if (-not $Yol) { return $false }
+    try {
+        $tam = [IO.Path]::GetFullPath($Yol).TrimEnd('\') + '\'
+        if ($tam -match '\\\.agentchef-worktrees\\') { return $true }
+        $tmp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+        if ($tam.StartsWith($tmp, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    } catch { }
+    return $false
+}
+
+function Get-BeyinTeslimKumesi {
+    # Herhangi bir oturumda gosterilmis (teslim isareti olan) aktarim kimlikleri: id -> $true.
+    param([hashtable]$Paths)
+    $k = @{}
+    try {
+        $kok = Join-Path $Paths.ScrState 'handoff-teslim'
+        if (Test-Path -LiteralPath $kok) {
+            foreach ($d in @(Get-ChildItem -LiteralPath $kok -Directory -ErrorAction SilentlyContinue)) {
+                foreach ($f in @(Get-ChildItem -LiteralPath $d.FullName -File -ErrorAction SilentlyContinue)) { if ($f.Name -notlike '*.*') { $k[$f.Name] = $true } }
+            }
+        }
+    } catch { }
+    return $k
+}
+
+function Get-BeyinHandoffTriyaj {
+    # AKTARIM TOPLA (2026-11-06): acik aktarimlari tek tek '-Tamam' yazmadan siniflar.
+    # Yalniz SECIM yapar, yazmaz. Kapatma kurallari (en guvenliden):
+    #   devir  : isci/gecici klasor oturumundan            -> yetim (o klasorde yeni oturum acilmaz)
+    #            ayni ajan+projede daha yeni devir var     -> yerine yenisi geldi (gecerli olan son devirdir)
+    #            7 gunden eski                              -> bayat
+    #   yanit  : teslim edildi ya da okundu                -> tek atimlik yanit ulasti
+    #            7 gunden eski                              -> bayat
+    #   soru   : teslim edildi/okundu ve 3 gunden eski      -> karsi ajan gordu, yanitlamadi/kapatmadi
+    #            hic teslim edilmedi ve 14 gunden eski      -> bayat
+    # Digerleri KALIR (Karar='kalsin'): taze ya da henuz gorulmemis mesaj kapatilmaz.
+    param([hashtable]$Paths, [datetime]$Simdi = [datetime]::UtcNow)
+    $acik = @(Get-BeyinHandoffListe -Paths $Paths | Where-Object { [string]$_.status -eq 'acik' })
+    $teslim = Get-BeyinTeslimKumesi -Paths $Paths
+    $sonDevir = @{}
+    foreach ($h in $acik) {
+        if ([string]$h.kind -ne 'devir') { continue }
+        $k = "$($h.to)|$($h.from.project)"
+        if (-not $sonDevir.ContainsKey($k) -or [string]$h.ts -gt [string]$sonDevir[$k]) { $sonDevir[$k] = [string]$h.ts }
+    }
+    foreach ($h in $acik) {
+        $gun = 0.0
+        try { $gun = ($Simdi.ToUniversalTime() - [datetime]::Parse([string]$h.ts).ToUniversalTime()).TotalDays } catch { }
+        $gordu = [bool]($teslim.ContainsKey([string]$h.id) -or ($h.PSObject.Properties['readTs'] -and $h.readTs))
+        $tur = [string]$h.kind; $neden = ''
+        switch ($tur) {
+            'devir' {
+                if (Test-BeyinDevirsizKonum -Proje ([string]$h.from.project)) { $neden = 'yetim devir: isci/gecici klasor oturumu' }
+                elseif ([string]$h.ts -lt [string]$sonDevir["$($h.to)|$($h.from.project)"]) { $neden = 'yerine daha yeni devir geldi' }
+                elseif ($gun -gt 7) { $neden = 'bayat devir (7 gunden eski)' }
+            }
+            'yanit' {
+                if ($gordu) { $neden = 'yanit teslim edildi' }
+                elseif ($gun -gt 7) { $neden = 'bayat yanit (7 gunden eski)' }
+            }
+            default {
+                if ($gordu -and $gun -gt 3) { $neden = 'teslim edildi, 3 gundur kapatilmadi' }
+                elseif (-not $gordu -and $gun -gt 14) { $neden = 'bayat (14 gundur teslim edilemedi)' }
+            }
+        }
+        [pscustomobject]@{
+            Id = [string]$h.id; To = [string]$h.to; Tur = $tur; Proje = [string]$h.from.project
+            Gun = [math]::Round($gun, 1); Gordu = $gordu
+            Karar = $(if ($neden) { 'kapat' } else { 'kalsin' }); Neden = $neden
+            Ozet = (([string]$h.question) -replace '\s+', ' ')
+        }
+    }
+}
+
+function Invoke-BeyinHandoffTopla {
+    # Triyajin 'kapat' kararlarini uygular (alici adina, -Bayat ile ayni yetki sozlesmesi).
+    # Donus: @{ Aday; Kapandi; Hata; Kalan }.
+    param([hashtable]$Paths, [string]$Kapatan = 'beyin', [switch]$Uygula, [datetime]$Simdi = [datetime]::UtcNow)
+    $r = @{ Aday = 0; Kapandi = 0; Hata = 0; Kalan = 0; Liste = @() }
+    $t = @(Get-BeyinHandoffTriyaj -Paths $Paths -Simdi $Simdi)
+    $r.Liste = $t
+    foreach ($x in $t) {
+        if ($x.Karar -ne 'kapat') { $r.Kalan++; continue }
+        $r.Aday++
+        if (-not $Uygula) { continue }
+        if (Close-BeyinHandoff -Paths $Paths -Id $x.Id -Agent $x.To -DoneBy "$Kapatan (topla: $($x.Neden))") { $r.Kapandi++ } else { $r.Hata++ }
+    }
+    if ($Uygula) { Write-BeyinMakbuz -Paths $Paths -Script 'aktar' -Outcome 'AKTAR_TOPLA' -Agent $Kapatan -Note "kapandi=$($r.Kapandi) hata=$($r.Hata) kalan=$($r.Kalan)" }
+    return $r
 }
 
 function Get-BeyinHandoffAcik {

@@ -656,7 +656,8 @@ try {
             $parts.Add($akMetin)
             Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'GOSTERILDI' -Agent $akAjan -Key $st.key -Reason 'session-start' `
                 -Note "ids=$((@($akGosterilen | ForEach-Object { [string]$_.id })) -join ',')"
-            foreach ($h in @($akGosterilen | Where-Object { [string]$_.kind -eq 'devir' })) { $null = Close-BeyinHandoff -Paths $p -Id ([string]$h.id) -DoneBy 'gosterildi (tek atimlik devir)' -Agent $akAjan }
+            # devir ve yanit tek atimliktir: gosterilince kapanir (yanit eskiden -Bekle yoksa sonsuza dek acik kaliyordu).
+            foreach ($h in @($akGosterilen | Where-Object { [string]$_.kind -in @('devir', 'yanit') })) { $null = Close-BeyinHandoff -Paths $p -Id ([string]$h.id) -DoneBy "gosterildi (tek atimlik $([string]$h.kind))" -Agent $akAjan }
         }
         $ssSeen = @(@($st.seenHandoff) + @($akGosterilen | ForEach-Object { [string]$_.id }))
         $st.seenHandoff = $ssSeen

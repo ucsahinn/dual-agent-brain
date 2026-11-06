@@ -147,6 +147,30 @@ Describe 'merkez kosu ozeti ve siradaki adim' {
     }
 }
 
+Describe 'merkez fare (2026-11-06): tiklanabilir satir, sekme ve alt cubuk' {
+    It 'oz-denetim: her sekmede her secilebilir satirin isareti vurgulanan ekran satiriyla ayni; isaret ekrana sizmaz' {
+        $vault = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+        foreach ($g in @(@(90, 24), @(120, 30), @(170, 50))) {
+            $env:BEYIN_MERKEZ_FARE_HARITA = '1'; $env:BEYIN_MERKEZ_FARE_DOGRULA = '1'
+            try { $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'merkez.ps1') -Vault $vault -Tek -Genislik $g[0] -Yukseklik $g[1] 2>&1 | Out-String }
+            finally { Remove-Item Env:BEYIN_MERKEZ_FARE_HARITA, Env:BEYIN_MERKEZ_FARE_DOGRULA -ErrorAction SilentlyContinue }
+            $sat = @([regex]::Matches($out, 'FARE sekme=(\w+) secilebilir=(\d+) eslesen=(\d+) hata=(\d+) sekmeCip=(\d+)'))
+            $sat.Count | Should Be 5
+            foreach ($m in $sat) { "$($g[0])x$($g[1]) $($m.Groups[1].Value) hata=$($m.Groups[4].Value) cip=$($m.Groups[5].Value)" | Should Be "$($g[0])x$($g[1]) $($m.Groups[1].Value) hata=0 cip=5" }
+        }
+        $kare = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'merkez.ps1') -Vault $vault -Tek -Sekme Hepsi -Genislik 170 2>&1 | Out-String
+        $kare | Should Not Match "$([char]27)\[1\d{3,}m"
+    }
+    It 'onay penceresi acikken fare hicbir sey yapmaz; alt cubuk ipucu tusu taklit eder; teker kaydirir' {
+        $k = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'merkez-fare.ps1') -Raw -Encoding UTF8
+        $k | Should Match 'if \(\$script:EylemVar -and \$script:modal\) \{ Mesaj'
+        $k | Should Match 'FareTusTaklit \$t\.Tus'
+        $k | Should Match 'Bayrak -band 4'
+        $k | Should Match '~0x40u'   # QuickEdit kapanir, cikista geri yuklenir
+        (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'merkez.ps1') -Raw -Encoding UTF8) | Should Match '\[MerkezFare\]::Kapat\(\)'
+    }
+}
+
 Describe 'merkez tek kare boyut ve enjeksiyon regresyonu' {
     It '90, 120 ve 170 sutunda temiz gecici vault ile cizer' {
         $root = Join-Path ([IO.Path]::GetTempPath()) ('merkez-render-' + [guid]::NewGuid().ToString('N'))
@@ -404,7 +428,7 @@ Describe 'merkez 1.5.0: sekmeler, ayrinti, bugun verisi, satir komutu' {
             } finally { [Console]::OutputEncoding = $eskiKod }
             $LASTEXITCODE | Should Be 0
             $parcalar = @((Duz $out) -split '=== SEKME \w+ ===\r?\n' | Where-Object { $_.Trim() })
-            $parcalar.Count | Should Be 4
+            $parcalar.Count | Should Be 5   # 1.9.0: 5 Isler sekmesi
             $i = 0
             foreach ($p in $parcalar) {
                 $satirlar = @($p -split "`r?`n" | Where-Object { $_ })
@@ -412,7 +436,7 @@ Describe 'merkez 1.5.0: sekmeler, ayrinti, bugun verisi, satir komutu' {
                 foreach ($l in $satirlar) { "$($g.W)/$i`:$($l.Length)" | Should Be "$($g.W)/$i`:$($g.W)" }
                 $i++
             }
-            $parcalar[0] | Should Match 'SIRADA'; $parcalar[1] | Should Match 'KANATLAR'; $parcalar[2] | Should Match 'KOŞULAR'; $parcalar[3] | Should Match 'OLAYLAR'
+            $parcalar[0] | Should Match 'SIRADA'; $parcalar[1] | Should Match 'KANATLAR'; $parcalar[2] | Should Match 'KOŞULAR'; $parcalar[3] | Should Match 'OLAYLAR'; $parcalar[4] | Should Match 'ONAY BEKLİYOR'; $parcalar[4] | Should Match 'SON İŞLEMLER'
             $out | Should Not Match '[\u26A0\u2714\u2716\u25B6\u23F8\u2699]'
         }
     }
@@ -858,10 +882,12 @@ Describe 'merkez 1.6.1: canli korelasyon - onerilen komut, yenile, taze kaynak (
             ([datetime]$s.Son['aktar']).ToString('HH:mm') | Should Be (([datetime]'2026-10-19T12:10:00+03:00').ToString('HH:mm'))
         } finally { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
     }
-    It 'eski aktarim teshisi: c dogrudan beyaz listeli kapatma komutunu kopyalar (eskiden yalniz listeleme komutu)' {
+    It 'eski aktarim teshisi: c toplama onizlemesini kopyalar, d hepsini kurallarla toplar (2026-11-06; eskiden tek tek -Tamam)' {
         $t = Get-MerkezEskiAktarim @(@{ id = '20261011T125258-13ee'; ts = (Get-Date).AddDays(-8).ToString('o'); toProject = 'ornek.proje' }) (Get-Date)
-        $t.Metin | Should Match 'beyin aktar -Tamam 20261011T125258-13ee$'
-        (Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = $t }).Komut | Should Be 'beyin aktar -Tamam 20261011T125258-13ee'
+        $t.Metin | Should Match 'beyin aktar -Topla$'
+        (Get-MerkezSatirKomut @{ Tur = 'teshis'; Nesne = $t }).Komut | Should Be 'beyin aktar -Topla'
+        ($t.Duzelt.Argv -join ' ') | Should Be 'aktar -Topla -Uygula'
+        Test-MerkezGuvenliKomut 'beyin aktar -Topla -Uygula; beyin guncelle' | Should Be $false
     }
     It 'panel kaynagi en cok 1 dk eski olcumle ister; r (KaynakTaze) yeniden olcturur' {
         $script:istenenDk = 'yok'

@@ -134,6 +134,16 @@ function Test-Ebeveyn {
     exit 4
 }
 
+function Get-DoktorOncelik([string]$Kontrol) {
+    # 0 guvenlik, 1 veri kaybi riski, 2 calismayan motor parcasi, 3 kaynak, 4 bakim/hijyen
+    switch -Regex ($Kontrol) {
+        '^sir taramasi|izin|kill guard' { return 0 }
+        'yedek|kurtarma|commit edildi|makine bolgesi git|kayip|transkript' { return 1 }
+        'motor logu|kanca|is kuyrugu|derleme|ozetleyici|zamanlanmis|embedding|ajan esligi' { return 2 }
+        '^kaynak|disk' { return 3 }
+        default { return 4 }
+    }
+}
 function Add-Row {
     # UCUNCU DURUM (2026-10-06, AgentSpace firstRunDoctor dersi): 'olcemedim' ile
     # 'yok' ayni cevap degildir. -Durum 'OLCULEMEDI' verilen satir SORUN sayilmaz
@@ -814,8 +824,13 @@ foreach ($f in $sirHedef) {
     # EKSIK yapilmistir, 'temiz' demek FAIL-OPEN olurdu.
     $r = Protect-BeyinSecrets -Text $c -Vault $Vault
     $desenDusen += [int]$r.Failed
-    $already = ([regex]::Matches($c, '\[REDAKTE:[a-z\-]+\]', $script:BeyinRxCI)).Count
-    if ($r.Redactions -gt $already) { $leakFiles.Add($f.Name) }
+    # 2026-10-31: yalniz GERCEK sir kategorileri sayilir. 'kullanici' (C:\Users\<ad> yolundaki Windows kullanici adi) sir
+    # degildir, rotasyon gerektirmez; 'mutlak yol' kontrolu onu ayrica bildirir. Eskiden "maskelenmemis sir -> ROTASYONA al"
+    # diye yanlis alarm veriyordu.
+    $katOnce = @{}; foreach ($m in [regex]::Matches($c, '\[REDAKTE:([a-z\-]+)\]', $script:BeyinRxCI)) { $katOnce[$m.Groups[1].Value] = 1 + [int]$katOnce[$m.Groups[1].Value] }
+    $katSonra = @{}; foreach ($m in [regex]::Matches([string]$r.Text, '\[REDAKTE:([a-z\-]+)\]', $script:BeyinRxCI)) { $katSonra[$m.Groups[1].Value] = 1 + [int]$katSonra[$m.Groups[1].Value] }
+    $yeniKat = @($katSonra.Keys | Where-Object { $_ -ne 'kullanici' -and [int]$katSonra[$_] -gt [int]$katOnce[$_] })
+    if ($yeniKat.Count) { $leakFiles.Add("$($f.Name) ($($yeniKat -join ','))") }
 }
 if ($script:DoktorAtlanan -notcontains 'sir taramasi') {
 Add-Row 'sir taramasi' (($leakFiles.Count -eq 0) -and ($desenDusen -eq 0)) `
@@ -2654,6 +2669,18 @@ if ($Ozet) {
     "BEYIN DURUMU  ($((Get-Date).ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture)))  ·  motor v$(Get-BeyinVersion -Vault $Vault)"
     $olcNot = $(if ($olc.Count) { " · OLCULEMEDI $($olc.Count): " + (($olc | ForEach-Object { $_.Kontrol }) -join ', ') } else { '' })
     $atlNot = $olcNot + $(if ($script:DoktorAtlanan.Count) { " · ATLANDI $($script:DoktorAtlanan.Count): $($script:DoktorAtlanan -join ', ') (sure butcesi $($script:DoktorSure) sn; tam tarama kosar)" } else { '' })
+    if ($bad.Count) {
+        # ONCE BUNLAR (2026-10-31): sorunlar oncelik sirasiyla en ustte; her biri ne + tek adim. Ayrintili satirlar asagida.
+        ''
+        "ONCE BUNLAR ($($bad.Count) sorun, oncelik sirasiyla):"
+        foreach ($b in @($bad | Sort-Object { Get-DoktorOncelik $_.Kontrol }, Kontrol)) {
+            $op = Get-DoktorOncelik $b.Kontrol
+            $etk = @('GUVENLIK', 'VERI KAYBI', 'CALISMIYOR', 'KAYNAK', 'BAKIM')[[Math]::Min(4, $op)]
+            "  [$etk] $($b.Kontrol): $($b.Detay)"
+            if ($b.Duzeltme) { "         -> $($b.Duzeltme)" }
+        }
+        ''
+    }
     if ($bad.Count -eq 0) { "  Saglik      : temiz ($($rows.Count) kontrol, $([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn)$atlNot" }
     else { "  Saglik      : $($bad.Count) sorun / $($rows.Count) kontrol ($([int]$script:DoktorSaat.Elapsed.TotalSeconds) sn) -> " + (($bad | ForEach-Object { $_.Kontrol }) -join ', ') + $atlNot }
     "  Butce       : $(Detay 'gunluk butce')"
@@ -2693,20 +2720,20 @@ if ($Ozet) {
             } else { '  (son-durum.md eski bicimde - bir sonraki oturum acilisinda yenilenir)' }
         } else { '  (son-durum.md yok)' }
     } catch { '  (son-durum.md okunamadi)' }
-    if ($bad.Count -gt 0) {
-        ''
-        'SORUNLAR'
-        foreach ($b in $bad) { "  - $($b.Kontrol): $($b.Detay)$(if ($b.Duzeltme) { "  ->  $($b.Duzeltme)" })" }
-    }
     ''
     if ($script:DoktorOzetDisi.Count) { "Atlanan (-Ozet'te kosmaz): $($script:DoktorOzetDisi -join ', ')  (tam tarama: -Ozet'siz, hepsini kosar)" }
     'Tam tablo icin: -Ozet olmadan calistir.'
     exit 0
 }
 
+$bad = @($rows | Where-Object { $_.Durum -eq 'SORUN' })
+if ($bad.Count) {
+    "ONCE BUNLAR ($($bad.Count) sorun, oncelik sirasiyla; tam tablo asagida):"
+    foreach ($b in @($bad | Sort-Object { Get-DoktorOncelik $_.Kontrol }, Kontrol)) { "  [$(@('GUVENLIK', 'VERI KAYBI', 'CALISMIYOR', 'KAYNAK', 'BAKIM')[[Math]::Min(4, (Get-DoktorOncelik $b.Kontrol))])] $($b.Kontrol): $($b.Detay)$(if ($b.Duzeltme) { "  ->  $($b.Duzeltme)" })" }
+    ''
+}
 $rows | Format-Table -AutoSize -Wrap
 ''
-$bad = @($rows | Where-Object { $_.Durum -eq 'SORUN' })
 $olc = @($rows | Where-Object { $_.Durum -eq 'OLCULEMEDI' })
 $olcEk = $(if ($olc.Count) { " - OLCULEMEDI $($olc.Count): " + (($olc | ForEach-Object { $_.Kontrol }) -join ', ') } else { '' })
 if ($bad.Count -eq 0) {

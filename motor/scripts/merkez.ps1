@@ -4,7 +4,7 @@
     [int]$Genislik = 0,    # pencere genisligini ez (test: 90 / 120 / 170 / 210)
     [int]$Yukseklik = 0,
     [switch]$Aktifler,     # -Tek ile: Genel sekmesinde canli ekrandaki varsayilan gorunum (yalniz aktif kanatlar)
-    [ValidateSet('Genel', 'Ajanlar', 'Kosular', 'Olaylar', 'Hepsi')][string]$Sekme = 'Genel',   # Hepsi: -Tek ile dort sekme ard arda
+    [ValidateSet('Genel', 'Ajanlar', 'Kosular', 'Olaylar', 'Isler', 'Hepsi')][string]$Sekme = 'Genel',   # Hepsi: -Tek ile bes sekme ard arda
     [switch]$Ayrinti,      # -Tek ile: ilk secilebilir ajanin ayrintisi acik cizilir
     [ValidateSet('', 'osc', 'boya', 'kapali')][string]$Zemin = '',
     [switch]$Yardim,      # -Tek ile: ? yardim katmani acik cizilir
@@ -22,7 +22,7 @@ if (-not $Tek -and $Olcum -le 0 -and -not $env:BEYIN_MERKEZ_IC) {
         if ($Vault) { $arg += @('-Vault', $Vault) }; if ($Zemin) { $arg += @('-Zemin', $Zemin) }; if ($Genislik) { $arg += @('-Genislik', $Genislik) }; if ($Yukseklik) { $arg += @('-Yukseklik', $Yukseklik) }
         & powershell.exe @arg; $kod = $LASTEXITCODE
         try { if (Test-Path -LiteralPath $env:BEYIN_MERKEZ_SEKME_DOSYA) { $sk = ([IO.File]::ReadAllText($env:BEYIN_MERKEZ_SEKME_DOSYA)).Trim(); Remove-Item -LiteralPath $env:BEYIN_MERKEZ_SEKME_DOSYA -ErrorAction SilentlyContinue } } catch { }
-        if ($sk -notin @('Genel', 'Ajanlar', 'Kosular', 'Olaylar')) { $sk = 'Genel' }
+        if ($sk -notin @('Genel', 'Ajanlar', 'Kosular', 'Olaylar', 'Isler')) { $sk = 'Genel' }
     } while ($kod -eq 75)
     exit $kod
 }
@@ -46,6 +46,8 @@ $CizGerekli = 3
 if ($BeyinCizSurum -lt $CizGerekli) { Write-Host 'beyin merkez: beyin-ciz.ps1 eski; yayin yarim kalmis olabilir · birkac saniye sonra yeniden ac'; exit 2 }
 . (Join-Path $PSScriptRoot 'merkez-veri.ps1')
 $balonYol = Join-Path $PSScriptRoot 'merkez-balon.ps1'; if (Test-Path -LiteralPath $balonYol) { . $balonYol }
+$eylemYol = Join-Path $PSScriptRoot 'merkez-eylem.ps1'; $gelenYol = Join-Path $PSScriptRoot 'merkez-gelen.ps1'
+$script:EylemVar = [bool]((Test-Path -LiteralPath $eylemYol) -and (Test-Path -LiteralPath $gelenYol))
 $p = Get-BeyinPaths -Vault $Vault
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 if (-not $Tek -and $Olcum -le 0) { try { [Console]::CursorVisible = $false } catch { } }
@@ -63,8 +65,8 @@ $durumAd = @{ calisiyor = 'çalışıyor'; inceleme = 'incelemede'; engelli = 'e
 $durumSira = @{ engelli = 0; inceleme = 1; calisiyor = 2; duraklatildi = 3; bekliyor = 4; bitti = 5; bosta = 6; kapali = 7 }
 $kimlikRenk = @{ claude = $cPeach; codex = $cTeal }
 $panoAd = @{ todo = 'bekliyor'; in_progress = 'sürüyor'; review = 'incelemede'; blocked = 'engelli' }
-$sekmeler = @('Genel', 'Ajanlar', 'Kosular', 'Olaylar')
-$sekmeAd = @{ Genel = 'Genel'; Ajanlar = 'Ajanlar'; Kosular = 'Koşular'; Olaylar = 'Olaylar' }
+$sekmeler = @('Genel', 'Ajanlar', 'Kosular', 'Olaylar', 'Isler')
+$sekmeAd = @{ Genel = 'Genel'; Ajanlar = 'Ajanlar'; Kosular = 'Koşular'; Olaylar = 'Olaylar'; Isler = 'İşler' }
 function Fmt([double]$n) { if ($n -ge 1e9) { return ('{0:0.0} milyar' -f ($n / 1e9)) }; if ($n -ge 1e6) { return ('{0:0.0}M' -f ($n / 1e6)) }; if ($n -ge 1e3) { return ('{0:0.0}K' -f ($n / 1e3)) }; return "$([int64]$n)" }
 function EsikBar([double]$oran, [int]$gen) { $r = $(if ($oran -ge 0.9) { $cErr } elseif ($oran -ge 0.7) { $cWarn } else { $cOk }); return (Bar $oran $gen $r) }
 function Usd([double]$v) { if ($v -ge 100) { return ('${0:0}' -f $v) }; return ('${0:0.00}' -f $v) }
@@ -82,6 +84,27 @@ $script:sesKip = $(try { [string](Get-BeyinAyar 'BEYIN_MERKEZ_SES' 'kapali') } c
 $script:sessizSaat = $(try { [string](Get-BeyinAyar 'BEYIN_MERKEZ_SESSIZ' 'yok') } catch { 'yok' })
 $script:bildirimAcik = $(try { [string](Get-BeyinAyar 'BEYIN_BILDIRIM' (Get-BeyinAyarVars 'BEYIN_BILDIRIM')) -ne 'kapali' } catch { $true })
 $script:gecmis = @{ Cal = New-Object System.Collections.Generic.List[double]; Commit = New-Object System.Collections.Generic.List[double] }
+if ($script:EylemVar) { . $eylemYol; . $gelenYol }
+# FARE (2026-11-06): sekme/satir/alt cubuk tiklanir, teker kaydirir. Yalniz etkilesimli panelde; -Tek/-Olcum/yonlendirilmis girdi ya da
+# BEYIN_MERKEZ_FARE=kapali ise klavye yolu aynen kalir. Konsol kipi cikista (finally) geri yuklenir.
+$fareYol = Join-Path $PSScriptRoot 'merkez-fare.ps1'; $script:FareVar = $false; $script:altTuslar = @(); $script:secIsaret = ''
+$rxFareIsaret = [regex]"$([char]27)\[(1\d{3,})m"
+function FareIsaretleriAl($L) {
+    # Karedeki satir isaretlerini (SecKayit) okur, fare aciksa haritaya cevirir ve isaretleri satirlardan SILER.
+    if ($script:FareVar) { FareHaritaKur $L }
+    for ($i = 0; $i -lt $L.Count; $i++) { if ($L[$i].IndexOf("$([char]27)[1") -ge 0) { $L[$i] = $rxFareIsaret.Replace($L[$i], '') } }
+}
+if (Test-Path -LiteralPath $fareYol) {
+    . $fareYol
+    $fareIstek = $(try { [string](Get-BeyinAyar 'BEYIN_MERKEZ_FARE' 'acik') -ne 'kapali' } catch { $true })
+    $girdiYonlu = $false; try { $girdiYonlu = [Console]::IsInputRedirected } catch { }
+    if ($fareIstek -and -not $Tek -and $Olcum -le 0 -and -not $girdiYonlu) { try { $script:FareVar = [bool][MerkezFare]::Ac() } catch { $script:FareVar = $false } }
+    elseif ($Tek -or $Olcum -gt 0) { $script:FareVar = [bool]$env:BEYIN_MERKEZ_FARE_HARITA }   # testler haritayi kurdurur; konsol kipine dokunulmaz
+} else {
+    # fare dosyasi yoksa (eski kurulum) klavye yolu
+    function GirdiIsle { $o = $false; while ([Console]::KeyAvailable) { $o = $true; $s0 = $script:sekmeAktif; if (TusIsle ([Console]::ReadKey($true))) { return @{ Oldu = $true; Cik = $true } }; $script:lastFrame = ''; if ($script:sekmeAktif -ne $s0) { break } }; return @{ Oldu = $o; Cik = $false } }
+    function GirdiBekliyor { return [Console]::KeyAvailable }
+}
 $script:etkinlik = @{}; $script:hataBas = $null; $script:onayBas = $null; $script:veriSurum = 0; $script:bolumOnb = @{}; $script:CizCanli = $false
 
 function Mesaj([string]$m, [string]$renk = $cWarn) { $script:mesaj = $m; $script:mesajRenk = $renk; $script:mesajZaman = Get-Date }
@@ -93,6 +116,7 @@ function SesCal([string]$tur) {
     # Istege bagli ses (BEYIN_MERKEZ_SES): uc ayri kisa ton - hata inen, onay cikan, kosu bitti uclu arpej. toast kipinde Windows
     # bildirim sesi (Bildir). Sessiz saatte ve -Tek/-Olcum'da hic ses yok.
     if ($script:sesKip -ne 'ton' -or $Tek -or $Olcum -gt 0 -or (SessizMi (Get-Date))) { return }
+    if ($script:EylemVar -and (SessizAktif)) { return }
     # uyari: tek yumusak nota (uyariyla biten kosu); bos tur (iptal edilen kosu) ses vermez
     if (-not $tur) { return }
     $notalar = switch ($tur) { 'hata' { @(@(880, 140), @(587, 220)) } 'onay' { @(@(659, 110), @(988, 160)) } 'uyari' { @(, @(587, 160)) } default { @(@(523, 90), @(659, 90), @(784, 140)) } }
@@ -100,6 +124,7 @@ function SesCal([string]$tur) {
 }
 function Bildir([string]$baslik, [string]$metin, [string]$tur = '') {
     if (-not $script:bildirimAcik -or $Tek -or $Olcum -gt 0) { return }
+    if ($script:EylemVar -and (SessizAktif)) { return }
     try {
         [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
         [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
@@ -217,14 +242,20 @@ function EtkinlikSerit($ag, [int]$n = 6, [int]$kovaSn = 20) {
 }
 
 # ---------- secim ve vurgu ----------
-function SecKayit([string]$Tur, [string]$Anahtar, $Nesne, [bool]$Yetim = $false) {
+function SecKayit([string]$Tur, [string]$Anahtar, $Nesne, [bool]$Yetim = $false, [int]$Satir = -1) {
     # Cizim sirasinda secilebilir satiri kaydeder; secili ise $true doner (satir vurgulu cizilir).
+    # Satir: karedeki satir sirasi (fare tiklamasi icin). Cagiran satiri hemen ardindan ekler: o anki $L boyu.
     $ham = $Anahtar; $n = [int]$script:secSayac[$Anahtar]; $script:secSayac[$Anahtar] = $n + 1; if ($n) { $Anahtar = "$Anahtar#$n" }
-    $script:secilebilir.Add(@{ Tur = $Tur; Anahtar = $Anahtar; Ham = $ham; Nesne = $Nesne; Yetim = $Yetim })
+    if ($Satir -lt 0) { $Satir = $(if ($script:cizL) { $script:cizL.Count } else { -1 }) }
+    $script:secilebilir.Add(@{ Tur = $Tur; Anahtar = $Anahtar; Ham = $ham; Nesne = $Nesne; Yetim = $Yetim; Satir = $Satir })
+    # FARE ISARETI: sifir genislikli, terminalin tanimadigi SGR (ESC[1000+n m). Bu satiri cizen ilk Vurgu/AjanSatir basina ekler;
+    # CizSatirlar karenin sonunda isaretleri okuyup (satir + sutun araligi) SILER - ekrana hic yazilmaz. Iki sutunlu duzende de dogru.
+    $script:secIsaret = "$ESC[$(1000 + $script:secilebilir.Count - 1)m"
     return ($Anahtar -eq [string]$script:secAnahtar[$script:sekmeAktif])
 }
 function Zeminle([string]$icerik, [int]$gen, [string]$bg) { return "$bg" + ((Pad $icerik $gen) -replace [regex]::Escape($RS), "$RS$bg") + $RS }
-function Vurgu([string]$icerik, [int]$gen, [bool]$secili, [string]$flasAnahtar = '') {
+function Vurgu([string]$icerik, [int]$gen, [bool]$secili, [string]$flasAnahtar = '') { $m = $script:secIsaret; $script:secIsaret = ''; return $m + (VurguIc $icerik $gen $secili $flasAnahtar) }
+function VurguIc([string]$icerik, [int]$gen, [bool]$secili, [string]$flasAnahtar = '') {
     # secim (kalici zemin) once; secili degilse parlama (sonen zemin)
     if ($secili) { return (Zeminle $icerik $gen $bgSel) }
     if ($flasAnahtar) { $o = Get-CizFlasOran $script:flas $flasAnahtar (Get-Date); if ($o -gt 0) { return (Zeminle $icerik $gen (BgKaris $rgbZemin $rgbInfo (0.34 * $o))) } }
@@ -233,7 +264,8 @@ function Vurgu([string]$icerik, [int]$gen, [bool]$secili, [string]$flasAnahtar =
 
 # ---------- satir cizerleri ----------
 $script:ajanSatirOnb = @{}
-function AjanSatir($ag, [int]$gen, [bool]$secili, [bool]$idGoster, [int]$ekGen = 19) {
+function AjanSatir($ag, [int]$gen, [bool]$secili, [bool]$idGoster, [int]$ekGen = 19) { $m = $script:secIsaret; $script:secIsaret = ''; return $m + (AjanSatirOnb $ag $gen $secili $idGoster $ekGen) }
+function AjanSatirOnb($ag, [int]$gen, [bool]$secili, [bool]$idGoster, [int]$ekGen = 19) {
     # Satir saniyede bir (ya da ajan durumu/secim degisince) kurulur; her karede yalniz doner simge ve nabiz rengi yerlestirilir.
     # Parlama suruyorsa onbellek atlanir (zemin her karede soner).
     $an = AjanAnahtar $ag; $et = $script:etkinlik[$an]
@@ -392,8 +424,8 @@ function SekmeCipleri($a) {
     $parca = @()
     for ($i = 0; $i -lt $sekmeler.Count; $i++) {
         $s = $sekmeler[$i]
-        $sayi = switch ($s) { 'Ajanlar' { [int]$a.Sayac['calisiyor'] } 'Kosular' { @($a.Kosular | Where-Object { -not $_.Bitmis }).Count + @($a.ClaudeIsler | Where-Object { $_ -and $_.Durum -eq 'calisiyor' }).Count } 'Olaylar' { [Math]::Min(99, $script:yeniOlay) } default { 0 } }
-        $sayiS = $(if ($sayi -gt 0) { "$(if ($s -eq 'Olaylar') { $cInfo } else { $cFaint }) $sayi$RS" } else { '' })   # "Ajanlar 4": sayi soluk, tus numarasi parlak oldugu icin karismaz
+        $sayi = switch ($s) { 'Ajanlar' { [int]$a.Sayac['calisiyor'] } 'Kosular' { @($a.Kosular | Where-Object { -not $_.Bitmis }).Count + @($a.ClaudeIsler | Where-Object { $_ -and $_.Durum -eq 'calisiyor' }).Count } 'Olaylar' { [Math]::Min(99, $script:yeniOlay) } 'Isler' { $(if ($script:EylemVar) { GelenSayisi $a } else { 0 }) } default { 0 } }
+        $sayiS = $(if ($sayi -gt 0) { "$(if ($s -eq 'Olaylar') { $cInfo } elseif ($s -eq 'Isler') { $cWarn + $BOLD } else { $cFaint }) $sayi$RS" } else { '' })   # "Ajanlar 4": sayi soluk, tus numarasi parlak oldugu icin karismaz
         $parca += $(if ($s -eq $script:sekmeAktif) { "$bgSel$cAccent$BOLD $($i + 1) $($sekmeAd[$s])$RS$bgSel$sayiS$bgSel $RS" } else { "$cFaint$($i + 1)$RS $cMuted$($sekmeAd[$s])$RS$sayiS" })
     }
     return ($parca -join '  ')
@@ -419,6 +451,12 @@ function BolumBaslik($L, $a) {
         $L.Add(((HLine ($w - (VisLen $saat)) "$ad$cFrame · $RS${cMuted}tüm sistem$RS" '╭' '') -replace "^$([regex]::Escape($cFrame))╭", "$kose╭$cFrame") + $saat)
         $L.Add((Row $cip $w))
     }
+}
+function BolumIsSeridi($L, $a) {
+    # Genel/Ajanlar/Kosular: bekleyen insan isi varsa tek satir yonlendirme (5 Isler); yoksa hicbir sey cizilmez
+    if (-not $script:EylemVar -or $script:sekmeAktif -eq 'Isler') { return }
+    $n = GelenSayisi $a; if ($n -le 0) { return }
+    $L.Add((Row "$bgWait$BOLD ◐ $n iş seni bekliyor $RS $cText satırı seç → $RS$cAccent${BOLD}o$RS ${cText}onayla ·$RS $cAccent${BOLD}n$RS ${cText}sıradaki adım ·$RS $cAccent${BOLD}d$RS ${cText}düzelt ·$RS $cAccent${BOLD}e$RS ${cText}eylemler$RS$cFrame  ·  $RS${cFaint}hepsi tek ekranda:$RS $cAccent${BOLD}5 İşler$RS" $script:w))
 }
 function BolumRozet($L, $a) {
     $w = $script:w; $n = { param($k) $(if ($a.Sayac.ContainsKey($k)) { [int]$a.Sayac[$k] } else { 0 }) }
@@ -508,7 +546,7 @@ function BolumKartlar($L, $a) {
             $(if ($sonBiten.Count) { "$cMuted$(Protect-MerkezSatir ([string]$sonBiten[0].RunId) 16)$RS $cFaint· $(KosuRozetMetin ([string]$sonBiten[0].Rozet))$RS" } else { "${cFaint}son 6 saatte biten yok$RS" })) }
         @{ t = $(if ($a.Onaylar.Count) { '🔔 ONAYLAR' } else { '🔔 ONAYLAR ✓' }); r = $(if ($a.Onaylar.Count) { $cWarn } else { '' }); l = @($(if ($a.Onaylar.Count) { "$cWarn$BOLD$($a.Onaylar.Count)$RS$cWarn senden bekleniyor$RS" } else { "$cOk✓ bekleyen yok$RS" }),
             $(if ($a.Onaylar.Count) { "$cText$BOLD$(Protect-MerkezSatir ([string]$a.Onaylar[0].Satir) 30)$RS" } else { "${cFaint}onay gelince burada çıkar$RS" }),
-            $(if ($a.Onaylar.Count) { "${cFaint}sohbete tek başına bu satırı yaz$RS" } else { '' })) }
+            $(if ($a.Onaylar.Count) { "$(if ($script:EylemVar) { "${cAccent}${BOLD}5$RS ${cFaint}İşler → $RS${cAccent}${BOLD}o$RS ${cFaint}ile onayla$RS" } else { "${cFaint}sohbete tek başına bu satırı yaz$RS" })" } else { '' })) }
     )
     if ($a.Kaynak -and $a.Kaynak.Ok) {
         $cy = [int]$a.Kaynak.CommitYuzde; $cr = $(if ($cy -ge 85) { $cErr } elseif ($cy -ge 70) { $cWarn } else { $cOk })
@@ -571,10 +609,12 @@ function BolumOnay($L, $bolumBas, $a) {
     $w = $script:w; $ic = $w - 4; if (-not $a.Onaylar.Count) { return }
     Bolum $L $bolumBas 'ONAY BEKLİYOR' '🔔 ONAY BEKLİYOR' $cWarn
     foreach ($g in $a.Onaylar) {
-        $an = "onay:$($g.Satir)"; $sc = SecKayit 'onay' $an $g
+        $an = "onay:$($g.Satir)"
+        if ($script:EylemVar) { [void](GelenSatir $L 'onay' $an $g "$cWarn$BOLD◐ $(Protect-MerkezSatir $g.Satir 40)$RS   $cMuted$(Protect-MerkezSatir $g.Neden ($ic - 70))$RS"); continue }
+        $sc = SecKayit 'onay' $an $g
         $L.Add((Row (Vurgu "$cWarn$BOLD◐ $(Protect-MerkezSatir $g.Satir 40)$RS   $cMuted$(Protect-MerkezSatir $g.Neden ($ic - 50))$RS" $ic $sc $an) $w))
     }
-    $L.Add((Row "$cFaint  sohbete yalnız bu satırı yaz (baslat · birlestir · onayla) · onayla için önce bağımsız doğrulama (--verified-by) · c kopyalar$RS" $w))
+    $L.Add((Row "$cFaint  5 İşler sekmesinde o ile onayla (toplu: Boşluk ya da *) · ya da sohbete yalnız bu satırı yaz · c kopyalar$RS" $w))
     $L.Add((Blank $w))
 }
 function BolumTeshis($L, $bolumBas, $a, [int]$maks) {
@@ -873,9 +913,11 @@ function OnbBolum($L, $bolumBas, [string]$ad, [scriptblock]$kur) {
     $k = "$ad|$($script:veriSurum)|$($script:w)|$($script:h)|$($script:sekmeAktif)|$($script:secAnahtar[$script:sekmeAktif])|$($script:acik)|$($script:acikAktarim)|$($script:hepsi[$script:sekmeAktif])|$($script:olayKaydir)|$($script:filtre)|$([int64][Math]::Floor((Get-Date).Ticks / 300000000))"
     $e = $script:bolumOnb[$ad]
     if ($e -and $e.K -eq $k) {
-        $i0 = $L.Count; foreach ($s in $e.L) { $L.Add($s) }
+        $i0 = $L.Count; $kay = $script:secilebilir.Count - $e.S0
+        $yenile = { param($m) "$ESC[$([int]$m.Groups[1].Value + $kay)m" }.GetNewClosure()
+        foreach ($s in $e.L) { $L.Add($(if ($kay -and $s.IndexOf("$ESC[1") -ge 0) { $rxFareIsaret.Replace($s, [Text.RegularExpressions.MatchEvaluator]$yenile) } else { $s })) }
         foreach ($b in $e.B) { $bolumBas.Add(@{ Ad = $b.Ad; I = $i0 + $b.I }) }
-        foreach ($s in $e.S) { [void](SecKayit $s.Tur $s.Ham $s.Nesne $s.Yetim) }
+        foreach ($s in $e.S) { [void](SecKayit $s.Tur $s.Ham $s.Nesne $s.Yetim $(if ($s.G -ge 0) { $i0 + $s.G } else { -1 })) }
         $script:onbIsabet++; return
     }
     $i0 = $L.Count; $s0 = $script:secilebilir.Count; $b0 = $bolumBas.Count; $onceCanli = $script:CizCanli; $script:CizCanli = $false
@@ -883,20 +925,51 @@ function OnbBolum($L, $bolumBas, [string]$ad, [scriptblock]$kur) {
     $canli = $script:CizCanli; $script:CizCanli = $onceCanli -or $canli
     if ($canli) { $script:bolumOnb.Remove($ad); return }
     $kL = @(); for ($i = $i0; $i -lt $L.Count; $i++) { $kL += $L[$i] }
-    $kS = @(); for ($i = $s0; $i -lt $script:secilebilir.Count; $i++) { $kS += $script:secilebilir[$i] }
+    $kS = @(); for ($i = $s0; $i -lt $script:secilebilir.Count; $i++) { $x = $script:secilebilir[$i]; $kS += @{ Tur = $x.Tur; Ham = $x.Ham; Nesne = $x.Nesne; Yetim = $x.Yetim; G = $(if ($x.Satir -ge 0) { $x.Satir - $i0 } else { -1 }) } }
     $kB = @(); for ($i = $b0; $i -lt $bolumBas.Count; $i++) { $kB += @{ Ad = $bolumBas[$i].Ad; I = $bolumBas[$i].I - $i0 } }
-    $script:bolumOnb[$ad] = @{ K = $k; L = $kL; S = $kS; B = $kB }
+    $script:bolumOnb[$ad] = @{ K = $k; L = $kL; S = $kS; B = $kB; S0 = $s0 }
 }
 $script:yardimAcik = $false
+# KOMUT PALETI (2026-11-06, kullanici: "diger komutlar napar, ne ise yarar"): ? ekraninin basinda, tiklanir/Enter ile YENI SEKMEDE
+# calisir. Yalniz argumansiz cagrida gosteren (yazmayan) komutlar + aktarim toplama (Yazar etiketi). Beyaz liste: merkez-eylem.ps1.
+$script:komutPaleti = @(
+    @{ Argv = @('durum');                     Aciklama = 'kısa sağlık özeti (10 satır) · ilk bakılacak yer' }
+    @{ Argv = @('doktor');                    Aciklama = 'tam sağlık taraması · sorunları öncelik sırasıyla verir' }
+    @{ Argv = @('bekci');                     Aciklama = 'RAM/commit, boşta oturumlar · güvenle kapatılabilecekleri listeler (kapatmaz)' }
+    @{ Argv = @('canli');                     Aciklama = 'şu an ne oluyor: açık oturumlar, kuyruk, bütçe' }
+    @{ Argv = @('kapasite');                  Aciklama = 'şu an kaç paralel ajan güvenli (boş RAM + commit)' }
+    @{ Argv = @('maliyet');                   Aciklama = 'iki ajanın jeton kullanımı ve API eşdeğeri maliyet' }
+    @{ Argv = @('aktar');                     Aciklama = 'açık aktarımlar: Claude ↔ Codex arası mesaj ve devirler' }
+    @{ Argv = @('aktar', '-Topla');           Aciklama = 'toplanacak aktarımların önizlemesi (hiçbir şey değişmez)' }
+    @{ Argv = @('aktar', '-Topla', '-Uygula'); Aciklama = 'teslim edilmiş / sahipsiz / bayat aktarımları tek seferde kapatır'; Yazar = 'yazar' }
+    @{ Argv = @('copcu');                     Aciklama = 'disk raporu: silinebilir derleme çıktıları (silmez)' }
+    @{ Argv = @('makbuz');                    Aciklama = 'motor bugün neyi yazdı, kaç bütçe harcadı' }
+    @{ Argv = @('gecmis');                    Aciklama = 'oturum zinciri: açılış · devam · kapanış' }
+    @{ Argv = @('ayar');                      Aciklama = 'bütün ayarlar, etkin değer ve nereden geldiği' }
+)
 function YardimIcerik($L) {
-    # ? ile acilan rehber: tuslar, renkler, simgeler, ses. Hicbir sey yazmaz.
-    $w = $script:w
+    # ? ile acilan rehber: komut paleti, tuslar, fare, renkler, simgeler, ses. Paletten calistirma disinda hicbir sey yazmaz.
+    $w = $script:w; $ic = $w - 4
     $sat = { param($k, $e) "  $cAccent$BOLD$(Pad $k 14)$RS $cText$e$RS" }
-    $L.Add((HLine $w (Sec '📖 YARDIM · ? kapatır') '├' '┤'))
+    $L.Add((HLine $w (Sec '📖 KOMUTLAR VE YARDIM · ? ya da Esc kapatır') '├' '┤'))
+    $L.Add((Row "${cMuted}Komutlar$RS  ${cFaint}satıra tıkla ya da ↑↓ + Enter → yeni sekmede çalışır · c kopyalar · terminalde: beyin <komut>$RS" $w))
+    $kg = [Math]::Min(30, [Math]::Max(22, [int]($ic / 5)))
+    foreach ($k in $script:komutPaleti) {
+        $an = "komut:$(@($k.Argv) -join ' ')"; $sc = SecKayit 'komut' $an $k
+        $L.Add((Row (Vurgu "  $cAccent$BOLD$(Pad ('beyin ' + (@($k.Argv) -join ' ')) $kg)$RS $cText$(Cut $k.Aciklama ($ic - $kg - 12))$RS$(if ($k.Yazar) { "  $bgWait$BOLD $($k.Yazar) $RS" })" $ic $sc) $w))
+    }
+    $L.Add((Blank $w))
+    $L.Add((Row "${cMuted}Fare$RS  $(if ($script:FareVar) { "${cOk}açık$RS" } else { "${cFaint}kapalı$RS" })" $w))
+    foreach ($t in @(@('tık', 'sekme · satır seç · alt çubuktaki tuş ipucu = o tuş'), @('tekrar · çift', 'seçili satırda Enter (ayrıntı, panel, çalıştır)'), @('sağ tık', 'satırın eylemleri'), @('teker', 'listeyi kaydır'),
+            @('güvenlik', 'onay penceresi fareyle onaylanmaz (klavyeyle Y) · metin seçmek: Shift + sürükle'))) { $L.Add((Row (& $sat $t[0] $t[1]) $w)) }
+    $L.Add((Blank $w))
     $L.Add((Row "${cMuted}Tuşlar$RS" $w))
-    foreach ($t in @(@('Tab · 1-4', 'sekme: Genel, Ajanlar, Koşular, Olaylar'), @('↑ ↓ · j k', 'satır seç (Olaylar sekmesinde kaydır)'), @('Enter', 'ayrıntı · işçi paneli · koşu panosu · aktarımın tam metni'),
+    foreach ($t in @(@('Tab · 1-5', 'sekme: Genel, Ajanlar, Koşular, Olaylar, İşler'), @('↑ ↓ · j k', 'satır seç (Olaylar sekmesinde kaydır)'), @('Enter', 'ayrıntı · işçi paneli · koşu panosu · aktarımın tam metni'),
             @('Esc', 'ayrıntıyı kapat'), @('c', 'seçili satırın güvenli komutunu panoya kopyala (çalıştırmaz)'), @('g', 'ilk soruna atla'), @('f', 'kanat filtresi: hepsi → sorunlu → Claude → Codex'),
-            @('p', 'koşu panosu'), @('a', 'boştakileri / biten koşuları göster-gizle'), @('PgUp PgDn', 'olay listesini kaydır'), @('r', 'yenile: kaynağı yeniden ölçer, tüm verileri yeniden okur'), @('q', 'çık'))) { $L.Add((Row (& $sat $t[0] $t[1]) $w)) }
+            @('p', 'koşu panosu'), @('5', 'İşler: onay bekleyenler, koşu adımları, teşhis düzelt, aktarımlar'),
+            @('o n x d t O', 'eylem: onayla · sıradaki adım · durdur · düzelt · aktarımı kapat · koşunun kartları'), @('T', 'aktarımları topla: teslim edilmiş, sahipsiz, bayat olanların hepsi tek seferde'),
+            @('Boşluk * u', 'işaretle · aynı türden hepsini işaretle · temizle'), @('e', 'satırın bütün eylemleri'), @('z', 'oto-düzelt aç/kapa (yalnız güvenli adımlar)'), @('S', 'sessiz: 30 dk → oturum → kapalı (ses/bildirim; onaylar görünür kalır)'),
+            @('a', 'boştakileri / biten koşuları göster-gizle'), @('PgUp PgDn', 'olay listesini kaydır'), @('r', 'yenile: kaynağı yeniden ölçer, tüm verileri yeniden okur'), @('q', 'çık'))) { $L.Add((Row (& $sat $t[0] $t[1]) $w)) }
     $L.Add((Blank $w))
     $L.Add((Row "${cMuted}Renkler ve simgeler$RS" $w))
     # parcalar satira sigdigi kadar yan yana; sigmayan alt satira (dar pencerede metin kesilmez)
@@ -911,13 +984,13 @@ function YardimIcerik($L) {
     & $paket @("${cFaint}tonlar: hata (inen), onay bekliyor (çıkan), koşu bitti (üçlü),$RS", "${cFaint}uyarıyla biten koşu (tek nota); iptal sessiz$RS") ' '
     & $paket @("${cFaint}aynı olay bir kez çalar; eşikte gidip gelen alarm 30 dk susar.$RS", "${cFaint}Ayar değişince paneli yeniden aç (q, sonra beyin merkez).$RS") ' '
     $L.Add((Blank $w))
-    & $paket @("${cMuted}Panel salt okunurdur.$RS", "${cFaint}onayla / baslat / birlestir satırlarını sohbete sen yazarsın; panel onay vermez.$RS") ' '
+    & $paket @("${cMuted}Eylemler:$RS", "${cFaint}onay gerektiren adım önce pencerede listelenir; Y (BEYIN_MERKEZ_ONAY kod ise ekrandaki kod) ile onaylarsın. Komutlar sırayla çalışır, uzun takım adımları yeni sekmede. Sohbetteki onay satırları da geçerli.$RS") ' '
 }
 function SekmeIcerik($L, $bolumBas, $a, [int]$h) {
     $w = $script:w; $ic = $w - 4
     switch ($script:sekmeAktif) {
         'Genel' {
-            BolumRozet $L $a; OnbBolum $L $bolumBas 'bugun' { BolumBugun $L $a }; $L.Add((Blank $w))
+            BolumRozet $L $a; BolumIsSeridi $L $a; OnbBolum $L $bolumBas 'bugun' { BolumBugun $L $a }; $L.Add((Blank $w))
             OnbBolum $L $bolumBas 'kartlar' { BolumKartlar $L $a }; $L.Add((Blank $w))
             OnbBolum $L $bolumBas 'sirada' { BolumSirada $L $bolumBas $a; BolumOnay $L $bolumBas $a; BolumTeshis $L $bolumBas $a $(if ($w -ge 170) { 5 } else { 3 }) }
             OnbBolum $L $bolumBas 'kanatlar' { BolumKanatlar $L $bolumBas $a $script:hepsi.Genel $false }
@@ -928,14 +1001,18 @@ function SekmeIcerik($L, $bolumBas, $a, [int]$h) {
             OnbBolum $L $bolumBas "olaylar$bos" { BolumOlaylar $L $bolumBas $a ([Math]::Min(14, $bos)) }
         }
         'Ajanlar' {
-            BolumRozet $L $a; $L.Add((Blank $w))
+            BolumRozet $L $a; BolumIsSeridi $L $a; $L.Add((Blank $w))
             OnbBolum $L $bolumBas 'kanatlarA' { BolumKanatlar $L $bolumBas $a $script:hepsi.Ajanlar ($w -ge 170) }
             BolumTeshis $L $bolumBas $a 5
         }
         'Kosular' {
-            BolumRozet $L $a; $L.Add((Blank $w))
+            BolumRozet $L $a; BolumIsSeridi $L $a; $L.Add((Blank $w))
             BolumOnay $L $bolumBas $a
             BolumKosular $L $bolumBas $a $script:hepsi.Kosular $true
+        }
+        'Isler' {
+            BolumRozet $L $a; $L.Add((Blank $w))
+            if ($script:EylemVar) { BolumGelen $L $bolumBas $a } else { $L.Add((Row "${cErr}merkez-eylem.ps1 / merkez-gelen.ps1 yok: motor eksik kurulmus · beyin guncelle$RS" $w)) }
         }
         'Olaylar' {
             BolumRozet $L $a; if ($w -lt 120) { BolumBugun $L $a }; $L.Add((Blank $w))   # >=120: sagdaki BUGUN tablosu ayni bilgiyi tasir
@@ -972,7 +1049,8 @@ function BolumAlt($L, $a, [int]$h) {
     if ($script:sekmeAktif -in @('Genel', 'Ajanlar')) { $par += (& $tk 'f' $(if ($script:filtre -eq 'hepsi') { 'filtre' } else { "filtre: $($filtreAd[$script:filtre])" })) }
     if ($sec) {
         if ($sec.Tur -in @('lider', 'isci')) { $par += (& $tk '⏎' $(if ($script:acik -eq $sec.Anahtar) { 'kapat' } elseif ($sec.Tur -eq 'isci') { 'işçi paneli' } else { 'ayrıntı' })) }
-        elseif ($sec.Tur -eq 'kosu') { $par += (& $tk '⏎' 'koşu panosu') } elseif ($sec.Tur -eq 'aktarim') { $par += (& $tk '⏎' 'tam metin') }
+        elseif ($sec.Tur -eq 'kosu') { $par += (& $tk '⏎' 'koşu panosu') } elseif ($sec.Tur -eq 'aktarim') { $par += (& $tk '⏎' 'tam metin') } elseif ($sec.Tur -eq 'komut') { $par += (& $tk '⏎' 'çalıştır (yeni sekme)') }
+        if ($script:EylemVar) { foreach ($ey in @(OgeEylemleri $sec | Select-Object -First 2)) { $par += (& $tk $ey.Tus (Protect-MerkezSatir ([string]$ey.Ad) 24)) } }
         if (Get-MerkezSatirKomut $sec) { $par += (& $tk 'c' 'kopyala') }
         if ($sec.Nesne -and $sec.Nesne.Kosu -or $sec.Tur -eq 'kosu') { $par += (& $tk 'p' 'koşu panosu') }
     }
@@ -980,7 +1058,8 @@ function BolumAlt($L, $a, [int]$h) {
         $gizli = @($a.Ajanlar | Where-Object { $_.Durum -in @('bosta', 'kapali', 'bitti') }).Count
         $par += (& $tk 'a' $(if ($script:sekmeAktif -eq 'Kosular') { $(if ($script:hepsi.Kosular) { 'biten koşuları gizle' } else { 'biten koşuları göster' }) } elseif ($script:hepsi[$script:sekmeAktif]) { 'boştakileri gizle' } else { "boştakileri göster (+$gizli)" }))
     }
-    $par += (& $tk 'r' 'yenile'); $par += (& $tk '?' 'yardım'); $par += (& $tk 'q' 'çık')
+    $par += (& $tk 'r' 'yenile'); $par += (& $tk '?' $(if ($script:yardimAcik) { 'kapat' } else { 'komutlar · yardım' })); $par += (& $tk 'q' 'çık')
+    $script:altTuslar = $par   # fare: alt cubuktaki ipucu tiklaninca o tus (kisaltilmis cubukta bulunmayan ipucu atlanir)
     $tus = "$msj$($par -join $ay)$durumS"
     if ((VisLen $tus) -gt $w - 6) { $tus = "$msj$((@($par | Select-Object -First 3) + @((& $tk '?' 'yardım'), (& $tk 'q' 'çık'))) -join $ay)$durumS" }
     if ((VisLen $tus) -gt $w - 6) { $tus = Cut $tus ($w - 6) }
@@ -992,8 +1071,9 @@ function CizSatirlar([int]$w, [int]$h) {
     $script:w = $w; $script:h = $h; $script:CizCanli = $false
     $a = $script:anlik; $L = New-Object System.Collections.Generic.List[string]
     $script:secilebilir = New-Object System.Collections.Generic.List[object]; $bolumBas = New-Object System.Collections.Generic.List[object]; $script:secSayac = @{}
-    BolumBaslik $L $a
-    if ($script:yardimAcik) { YardimIcerik $L } else { SekmeIcerik $L $bolumBas $a $h }
+    $script:cizL = $L; $kayUst = 0; $kesik = -1
+    BolumBaslik $L $a; $script:baslikSatir = $L.Count   # dar pencerede (<120) sekme cipleri 2. satirda: secim aramasi bundan sonra baslar
+    if ($script:EylemVar -and $script:modal) { ModalCiz $L } elseif ($script:yardimAcik) { YardimIcerik $L } else { SekmeIcerik $L $bolumBas $a $h }
     if (-not $Tek -and -not $script:secAnahtar.ContainsKey($script:sekmeAktif) -and $script:secilebilir.Count) {
         $ilk = @($script:secilebilir | Where-Object { $_.Tur -eq 'teshis' -or ($_.Tur -in @('lider', 'isci') -and $_.Nesne.Durum -in @('engelli', 'inceleme')) } | Select-Object -First 1)
         if (-not $ilk.Count) { $ilk = @($script:secilebilir | Where-Object { $_.Tur -in @('lider', 'isci') -and $_.Nesne.Durum -eq 'calisiyor' } | Select-Object -First 1) }
@@ -1006,22 +1086,26 @@ function CizSatirlar([int]$w, [int]$h) {
     $maks = $(if ($Tek -and $Yukseklik -le 0) { 100000 } else { [Math]::Max(5, $h - 1) })
     if ($L.Count -gt $maks - 1) {
         $kes = $maks - 2
-        $selIdx = -1; for ($i = 1; $i -lt $L.Count; $i++) { if ($L[$i].Contains($bgSel)) { $selIdx = $i; break } }
+        $selIdx = -1; for ($i = $script:baslikSatir; $i -lt $L.Count; $i++) { if ($L[$i].Contains($bgSel)) { $selIdx = $i; break } }   # eskiden 1: dar pencerede etkin sekme cipini secim sanip kaydirmiyordu
         if ($selIdx -ge $kes - 1) {
             # secili satir gorunur kalacak kadar kaydir: baslik + "yukarida" satiri sabit, secimin altinda 2 satir pay
             $ust = [Math]::Min($L.Count - $kes + 1, $selIdx - $kes + 4)
-            $yeni = New-Object System.Collections.Generic.List[string]; $yeni.Add($L[0]); $yeni.Add((Row "$cFaint▲ $ust satır yukarıda · ↑ ile dön$RS" $w))
-            for ($i = 1 + $ust + 1; $i -lt $L.Count; $i++) { $yeni.Add($L[$i]) }
-            $bb = New-Object System.Collections.Generic.List[object]; foreach ($b in $bolumBas) { if ($b.I -gt $ust + 1) { $bb.Add(@{ Ad = $b.Ad; I = $b.I - $ust }) } }
-            $L = $yeni; $bolumBas = $bb
+            # baslik satirlari (dar pencerede sekme cipleri 2. satirda) sabit kalir; eskiden yalniz L[0] korunuyor, cipler kayboluyordu
+            $hb = [Math]::Max(1, [int]$script:baslikSatir)
+            $yeni = New-Object System.Collections.Generic.List[string]; for ($i = 0; $i -lt $hb; $i++) { $yeni.Add($L[$i]) }; $yeni.Add((Row "$cFaint▲ $ust satır yukarıda · ↑ ya da teker ile dön$RS" $w))
+            for ($i = $hb + $ust + 1; $i -lt $L.Count; $i++) { $yeni.Add($L[$i]) }
+            $bb = New-Object System.Collections.Generic.List[object]; foreach ($b in $bolumBas) { if ($b.I -gt $hb + $ust) { $bb.Add(@{ Ad = $b.Ad; I = $b.I - $ust }) } }
+            $L = $yeni; $bolumBas = $bb; $kayUst = $ust
         }
         $gizli = $L.Count - $kes
         $gizliBolum = @(); for ($i = 0; $i -lt $bolumBas.Count; $i++) { $son = $(if ($i + 1 -lt $bolumBas.Count) { $bolumBas[$i + 1].I } else { $L.Count }); if ($son -gt $kes) { $gizliBolum += $(if ($bolumBas[$i].I -ge $kes) { $bolumBas[$i].Ad } else { "$($bolumBas[$i].Ad) (kısmen)" }) } }
-        $L = [System.Collections.Generic.List[string]]@($L | Select-Object -First $kes)
+        $L = [System.Collections.Generic.List[string]]@($L | Select-Object -First $kes); $kesik = $kes
         $L.Add((Row "$cWarn▼ $gizli satır sığmadı$RS$(if ($gizliBolum.Count) { "$cMuted · gizlenen: $($gizliBolum -join ', ')$RS" })$cFaint · sekmelerde tam liste (2 Ajanlar · 3 Koşular · 4 Olaylar)$RS" $w))
     }
     if (-not ($Tek -and $Yukseklik -le 0)) { while ($L.Count -lt $maks - 1) { $L.Add((Blank $w)) } }
     $L.Add($alt)
+    $script:cizL = $null; $script:secIsaret = ''
+    FareIsaretleriAl $L   # haritayi kurar (fare aciksa) ve isaretleri HER durumda siler
     return ,$L
 }
 function PencereBoyu { $w = 160; $h = 50; try { $w = $Host.UI.RawUI.WindowSize.Width; $h = $Host.UI.RawUI.WindowSize.Height } catch { }; if ($Genislik -gt 0) { $w = $Genislik }; if ($Yukseklik -gt 0) { $h = $Yukseklik }; $ham = $w; if ($w -lt 90) { $w = 90 }; return @($w, $h, $ham) }
@@ -1052,7 +1136,7 @@ function SecimKaydir([int]$adim) {
     $i = $(if ($script:sec -lt 0) { $(if ($adim -lt 0) { $n - 1 } else { 0 }) } else { [Math]::Max(0, [Math]::Min($n - 1, $script:sec + $adim)) })
     $script:sec = $i; $script:secAnahtar[$script:sekmeAktif] = [string]$script:secilebilir[$i].Anahtar
 }
-function SekmeGec([string]$s) { if ($s -and $s -ne $script:sekmeAktif) { $script:sekmeAktif = $s; if ($s -eq 'Olaylar') { $script:yeniOlay = 0 } } }
+function SekmeGec([string]$s) { if ($s -and $s -ne $script:sekmeAktif) { $script:sekmeAktif = $s; if ($s -eq 'Olaylar') { $script:yeniOlay = 0 }; if ($script:EylemVar -and $script:isaret.Count) { $script:isaret.Clear() } } }
 function KosuPanosu($oge) {
     $run = $(if ($oge -and $oge.Tur -eq 'kosu') { [string]$oge.Nesne.RunId } elseif ($oge -and $oge.Nesne.Kosu) { [string]$oge.Nesne.Kosu } else { '' })
     if (-not $run) { Mesaj 'seçili satır bir koşuya ait değil'; return }
@@ -1080,6 +1164,12 @@ function Odak {
         'lider' { $script:acik = $(if ($script:acik -eq $oge.Anahtar) { '' } else { $oge.Anahtar }); Tazele $false }
         'kosu' { KosuPanosu $oge }
         'aktarim' { $id = [string]$oge.Nesne.id; $script:acikAktarim = $(if ($script:acikAktarim -eq $id) { '' } else { $id }) }
+        'komut' {
+            # paletten calistir: kuyruk + is calistirici (beyaz liste orada yeniden denetlenir), cikti yeni sekmede
+            if ($script:EylemVar -and $script:etkilesimli) { $script:kuyruk.Add(@{ Argv = @($oge.Nesne.Argv); Gorunur = $true; Oto = $false }); Mesaj "→ beyin $(@($oge.Nesne.Argv) -join ' ') · yeni sekmede" $cAccent; KuyrukIlerlet }
+            else { Kopyala $oge }
+        }
+        'kart' { $id = [string]$oge.Nesne.id; if ($script:sekmeAktif -eq 'Isler') { $script:acikKart = $(if ($script:acikKart -eq $id) { '' } else { $id }) } else { Kopyala $oge } }
         default { Kopyala $oge }
     }
 }
@@ -1099,12 +1189,14 @@ function IlkSoruBul {
 }
 function TusIsle($kk) {
     # tus -> eylem; donus $true: cik
+    if ($script:EylemVar -and $script:modal) { ModalTus $kk; return $false }   # onay penceresi acikken her tus ona gider
     switch ($kk.Key) {
         'UpArrow' { SecimKaydir -1; return $false } 'DownArrow' { SecimKaydir 1; return $false }
         'PageUp' { if ($script:sekmeAktif -eq 'Olaylar') { SecimKaydir -10 } else { SecimKaydir -10 }; return $false }
         'PageDown' { SecimKaydir 10; return $false }
         'Enter' { Odak; return $false }
-        'Escape' { $script:acik = ''; $script:acikAktarim = ''; $script:yardimAcik = $false; return $false }
+        'Escape' { $script:acik = ''; $script:acikAktarim = ''; $script:yardimAcik = $false; if ($script:EylemVar) { $script:acikKart = '' }; return $false }
+        'Spacebar' { if ($script:EylemVar) { IsaretDegistir }; return $false }
         'Tab' {
             $i = [Array]::IndexOf($sekmeler, $script:sekmeAktif); $yon = $(if ($kk.Modifiers -band [ConsoleModifiers]::Shift) { -1 } else { 1 })
             SekmeGec $sekmeler[($i + $yon + $sekmeler.Count) % $sekmeler.Count]; return $false
@@ -1112,7 +1204,7 @@ function TusIsle($kk) {
     }
     switch -CaseSensitive ([string]$kk.KeyChar) {
         'q' { return $true }
-        '1' { SekmeGec 'Genel' } '2' { SekmeGec 'Ajanlar' } '3' { SekmeGec 'Kosular' } '4' { SekmeGec 'Olaylar' }
+        '1' { SekmeGec 'Genel' } '2' { SekmeGec 'Ajanlar' } '3' { SekmeGec 'Kosular' } '4' { SekmeGec 'Olaylar' } '5' { SekmeGec 'Isler' }
         'j' { SecimKaydir 1 } 'k' { SecimKaydir -1 }
         'a' { $script:hepsi[$script:sekmeAktif] = -not $script:hepsi[$script:sekmeAktif] }
         'r' { foreach ($k in @('ts:Aktarimlar', 'ts:Kaynak', 'Maliyet', 'Bugun', 'ClaudeIsler', 'SonKosu')) { [void]$script:onb.Remove($k) }; $script:onb.KaynakTaze = $true; $script:bolumOnb = @{}; $script:lastFrame = ''; Tazele $true; Mesaj "yenilendi · $((Get-Date).ToString('HH:mm:ss')) · kaynak yeniden ölçüldü" $cOk }
@@ -1122,6 +1214,12 @@ function TusIsle($kk) {
         'f' { $sira = @('hepsi', 'sorun', 'claude', 'codex'); $script:filtre = $sira[([Array]::IndexOf($sira, $script:filtre) + 1) % 4]; Mesaj "filtre: $($filtreAd[$script:filtre])" $cAccent }
         'g' { IlkSoruna }
     }
+    if ($script:EylemVar) {
+        switch -CaseSensitive ([string]$kk.KeyChar) {
+            'o' { EylemTus 'o' } 'O' { EylemTus 'O' } 'n' { EylemTus 'n' } 'x' { EylemTus 'x' } 'd' { EylemTus 'd' } 't' { EylemTus 't' } 'T' { EylemTus 'T' }
+            'e' { EylemMenusu } 'z' { OtoDegistir } 'S' { SessizDegistir } '*' { HepsiniIsaretle } 'u' { $script:isaret.Clear(); Mesaj 'işaretler temizlendi' $cMuted }
+        }
+    }
     return $false
 }
 
@@ -1129,7 +1227,7 @@ function TusIsle($kk) {
 # Dosya basina damga. Yayin dosyalari SIRAYLA yazar: yeni bir beyin-ciz eski merkez ile karismasin diye yeniden yukleme
 # yalniz izlenen dosyalarin HEPSI en az 3 sn'dir degismemisken ve degisen dosya ayristirilabiliyorsa yapilir. Yeni surec
 # acik sekmeyi tasir (-Sekme).
-$izlenen = @($PSCommandPath, $cizYol, (Join-Path $PSScriptRoot 'merkez-veri.ps1'), $balonYol, (Join-Path $Vault 'motor\hooks\lib.ps1'))
+$izlenen = @($PSCommandPath, $cizYol, (Join-Path $PSScriptRoot 'merkez-veri.ps1'), $balonYol, $eylemYol, $gelenYol, $fareYol, (Join-Path $Vault 'motor\hooks\lib.ps1'))
 $damga = @{}; foreach ($f in $izlenen) { try { if (Test-Path -LiteralPath $f) { $damga[$f] = (Get-Item -LiteralPath $f).LastWriteTimeUtc } } catch { } }
 $selfAt = Get-Date
 function YeniSurumVar {
@@ -1161,6 +1259,23 @@ try {
         $sir = @($ms | Sort-Object); "merkez çizim · $($ms.Count) kare · ortalama $([Math]::Round(($ms | Measure-Object -Average).Average, 1)) ms · p95 $([Math]::Round($sir[[int][Math]::Floor($sir.Count * 0.95)], 1)) ms · en çok $([Math]::Round($sir[$sir.Count - 1], 1)) ms · bölüm önbelleği $([int]$script:onbIsabet) isabet"
         exit 0
     }
+    if ($Tek -and $env:BEYIN_MERKEZ_FARE_DOGRULA -and $script:FareVar) {
+        # FARE HARITASI OZ-DENETIMI (testler): her sekmede her secilebilir satir secilir; vurgulu ekran satiri haritadaki satirla
+        # ayni olmali. Sekme ve alt cubuk ipuclari da sayilir. Cikti: 'FARE sekme=.. secilebilir=.. eslesen=.. hata=..' satirlari.
+        foreach ($s in $sekmeler) {
+            $script:sekmeAktif = $s; $b = PencereBoyu; [void](CizSatirlar $b[0] $b[1]); $an = @($script:secilebilir | ForEach-Object { [string]$_.Anahtar })
+            $es = 0; $hata = @()
+            foreach ($k in $an) {
+                $script:secAnahtar[$s] = $k; $L = CizSatirlar $b[0] $b[1]
+                $sat = @(); for ($i = $script:baslikSatir; $i -lt $L.Count; $i++) { if ($L[$i].Contains($bgSel)) { $sat += $i } }   # baslik: etkin sekme cipi
+                $hy = @($script:fareHarita.Satir.Keys | Where-Object { @($script:fareHarita.Satir[$_] | Where-Object { $_.Anahtar -eq $k }).Count })
+                if (-not $sat.Count -and -not $hy.Count) { $es++; continue }   # sigmayan satir: ikisi de yok
+                if ($hy.Count -and $sat -contains $hy[0]) { $es++ } else { $hata += "$k(vurgu=$($sat -join ',') harita=$($hy -join ','))" }
+            }
+            [Console]::Write("FARE sekme=$s secilebilir=$($an.Count) eslesen=$es hata=$($hata.Count) sekmeCip=$($script:fareHarita.Sekme.Count) altIpucu=$($script:fareHarita.Alt.Count)$(if ($hata.Count) { ' ' + (($hata | Select-Object -First 3) -join ' ') })`n")
+        }
+        exit 0
+    }
     if ($Tek) {
         $script:hepsi.Genel = -not $Aktifler; $script:yardimAcik = [bool]$Yardim
         $liste = $(if ($Sekme -eq 'Hepsi') { $sekmeler } else { @($script:sekmeAktif) })
@@ -1187,18 +1302,12 @@ try {
         }
         $simdi = Get-Date
         $sakin = -not $script:oncekiCanli
-        if (($simdi - $script:sonTam).TotalSeconds -ge $(if ($sakin) { 15 } else { 6 })) { try { Tazele $true } catch { } }
+        if ($script:EylemVar) { IslerTazele; if ($script:aktifIs -or $script:kuyruk.Count) { $sakin = $false } }
+        if (($simdi - $script:sonTam).TotalSeconds -ge $(if ($sakin) { 15 } else { 6 })) { try { Tazele $true; if ($script:EylemVar) { OtoDuzelt $script:anlik } } catch { } }
         elseif (($simdi - $script:sonHizli).TotalSeconds -ge $(if ($sakin) { 5 } else { 1.5 })) { try { Tazele $false } catch { } }
         $script:tik++
         CizimSonuc
-        try {
-            while ([Console]::KeyAvailable) {
-                $once = $script:sekmeAktif
-                if (TusIsle ([Console]::ReadKey($true))) { $quit = $true }
-                $script:lastFrame = ''
-                if ($script:sekmeAktif -ne $once) { break }   # yeni sekme cizilmeden kalan tus eski secim listesine uygulanmasin
-            }
-        } catch { }
+        try { $gi = GirdiIsle; if ($gi.Cik) { $quit = $true } } catch { }   # tus + fare (merkez-fare.ps1); fare kapaliysa eski KeyAvailable yolu
         # Hareket (calisan ajan, parlama, yumusak gecis, nabiz) varsa 120 ms; yoksa saat saniyede bir degistigi icin 1 sn. Bekleme
         # dilimlenir: tus gelince hemen cizilir (bostaki panel cekirdegin ~%35'ini yiyordu, performans denetimi 2026-10-16).
         $script:oncekiCanli = $script:CizCanli
@@ -1209,10 +1318,12 @@ try {
             try { [System.Runtime.GCSettings]::LargeObjectHeapCompactionMode = 'CompactOnce'; [GC]::Collect(); [GC]::WaitForPendingFinalizers(); [GC]::Collect() } catch { }
         }
         $hedefMs = $(if ($script:CizCanli) { 120 } else { 1000 }); $bekle = [Diagnostics.Stopwatch]::StartNew()
-        while ($bekle.ElapsedMilliseconds -lt $hedefMs) { if ([Console]::KeyAvailable) { break }; Start-Sleep -Milliseconds 40 }
+        while ($bekle.ElapsedMilliseconds -lt $hedefMs -and -not $quit) { if (GirdiBekliyor) { break }; Start-Sleep -Milliseconds 40 }
     }
 } finally {
+    if ($script:EylemVar) { try { KuyrukIptal 'panel kapandı' } catch { } }   # kosmamis 'done' adimlarinin onayi 7 gun acik kalmasin
     try { [Console]::CursorVisible = $true } catch { }
+    if ($script:FareVar) { try { [MerkezFare]::Kapat() } catch { } }   # konsol kipini (QuickEdit, VT girdi) geri ver
     if ($oscAcik -and -not $yenidenYukle) { [Console]::Write((Get-CizOscKapat)) }   # yeniden yuklemede zemin yanip sonmesin
     if (-not $Tek -and $Olcum -le 0) { [Console]::Write("$ESC[0m$ESC[2J$ESC[H") } else { [Console]::Write("$ESC[0m") }
 }

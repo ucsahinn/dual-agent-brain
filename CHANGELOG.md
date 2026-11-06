@@ -21,6 +21,107 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.9.0 - 2026-11-06 - Merkez etkilesimli ve tiklanabilir, aktarim topla
+
+`beyin merkez` artik yalniz izlemiyor; bekleyen isi oradan bitirirsin.
+
+### Fare, komut paleti ve aktarim toplama (2026-11-06)
+
+- **Merkez tiklanabilir:** sekmeye tikla; satira tikla = sec, tekrar ya da cift
+  tikla = Enter; sag tik = satirin eylemleri; teker kaydirir; alt cubuktaki tus
+  ipucuna tiklamak o tusa basmakla ayni. Iki sutunlu Genel ekraninda tiklanan
+  sutun dogru secilir. Onay penceresi fareyle onaylanmaz; klavyeyle `Y` ya da
+  kod. Shift + surukle metin secer. Kapatmak: `beyin ayar BEYIN_MERKEZ_FARE kapali`.
+- **Komut paleti (`?`):** gunluk komutlar ne ise yaradiklariyla listelenir ve
+  tik ya da Enter ile yeni sekmede calisir (yalniz gosteren komutlar + aktarim
+  toplama).
+- **`beyin aktar -Topla [-Uygula]`:** acik aktarimlari tek tek `-Tamam` yazmadan
+  kurallarla toplar: isci/gecici klasor devri (hic teslim edilemiyordu), yerine
+  yenisi gelmis devir, 7 gunden eski devir, teslim edilmis yanit, teslim edilip
+  3 gundur kapatilmamis soru, 14 gundur teslim edilemeyen soru. Taze ya da
+  henuz gorulmemis mesaj KALIR; kayitlar silinmez (kapatan ve neden yazilir).
+  Varsayilan kuru. Merkezde `T` (aktarim satiri), teshiste `d`; oto-duzelt
+  aciksa kendiliginden.
+- **Kok neden duzeltmesi:** takim iscisi worktree'si (`TASK-*`, `_integration`)
+  ve gecici klasor oturumlari artik devir yazmiyor - o klasorde yeni oturum
+  acilmadigi icin hic teslim edilmiyor ve birikiyordu (olculen: 78 acik
+  aktarimin 26'si). Yanitlar gosterildigi anda kapanir (eskiden `-Bekle`
+  kullanilmadiysa sonsuza dek acik kaliyordu).
+- Duzeltme: dar pencerede (120 sutun alti) secili satir gorunur alana
+  kaydirilmiyordu (etkin sekme cipi secim saniliyordu); kaydirma olunca ikinci
+  satirdaki sekme cipleri kayboluyordu.
+
+- **Yeni sekme `5 Isler`** (gelen kutusu): onay bekleyen kartlar ve kosu kapilari,
+  kosularin siradaki adimi, teshis (neden, etki, duzeltme), acik aktarimlar ve
+  merkezden calisan son islemler tek ekranda.
+- **Eylem tuslari** secili ya da isaretli satira uygulanir: `o` onayla (kart:
+  insan onayi + `done`, dogrulayan olarak sen: `--verified-by user`; kosu:
+  `baslat`/`birlestir` onayi + start/merge), `O` kosunun incelemedeki butun
+  kartlari, `n` siradaki adim (topla, butunlestir, dogrula, sef incelemesi,
+  surdur), `x` durdur ya da yetim karti iptal, `d` teshisi duzelt, `t`
+  aktarimi kapat, `e` satirin butun eylemleri. `Bosluk` isaretler, `*` ayni
+  turden hepsini isaretler, `u` temizler.
+- **Insan onayi merkezde:** onay gerektiren her eylem once bir pencerede
+  listelenir; `Y` ile (ya da `BEYIN_MERKEZ_ONAY kod` ise ekrandaki 4 haneli
+  kodla) onaylarsin. Tek pencerede birden fazla onay varsa kod her zaman
+  istenir; butun onay kimlikleri pencerede listelenir. Onay kaydinin kanali `merkez`, ajani `insan`. Etkilesimsiz
+  pencerede (ajan kabugu, `-Tek`) eylem yoktur. `BEYIN_MERKEZ_ONAY kapali`
+  merkezden onayi kapatir; sohbet satirlari (`onayla`, `baslat`,
+  `birlestir`) eskisi gibi gecerlidir.
+- **Komutlar sirayla calisir:** kisa adimlar gizli, uzun takim adimlari yeni
+  Windows Terminal sekmesinde; sonuc `SON ISLEMLER`de ve mesaj seridinde.
+  Bir adim basarisiz olursa sirada kalanlar durur. Yalniz beyaz listedeki
+  `beyin` komutlari calisir; ajan metninden serbest komut calismaz.
+- **Teshis yeniden yazildi:** her teshis neden, etki ve tek tusluk duzeltme
+  tasir. Yeni teshis: "kosu N dk'dir sefi bekliyor" (isciler bitti, siradaki
+  adim senin). Yetim kartlarin hepsi tek eylemde iptal edilir (teyitli).
+- **Oto-duzelt (`z`, ayar `BEYIN_MERKEZ_OTO`):** yalniz guvenli adimlar
+  kendiliginden calisir (maliyet taramasi, biten iscilerin sonucunu toplama),
+  anahtar basina 30 dk'da bir. Onay, durdurma, birlestirme ve dogrulama asla
+  oto degil.
+- Duzeltme: `c` (kopyala) `TASK-DOC2-ZIMMET` gibi harfli kart kimliklerinde
+  calismiyordu (beyaz liste yalniz `TASK-<sayi>` kabul ediyordu).
+- **Genel'de gorunur:** bekleyen insan isi varsa ust seritte "N is seni
+  bekliyor" ve tuslar; onay satirlari Genel'de de `o` ile onaylanir.
+- **Sinif tablosu:** her calistirilabilir komut tek sinifa bagli: serbest
+  (oto olabilir), adim (kosuyu ilerletir, oto olmaz), onay, tehlike (her zaman
+  kod). Onay penceresi her adimin etkisini yazar (kalici, geri alinamaz).
+- **Yurutme aninda yeniden denetim:** onay yazilmadan hemen once kart hala
+  incelemede mi, kosu hala ayni kapida mi taze okunur; degistiyse o kart
+  atlanir ("atlandi: durum degisti"). Pano okunamazsa onay yazilmaz.
+- **Onay penceresi 60 sn** icinde onaylanmazsa reddedilmis sayilir; her ret
+  makbuza kodla duser (`EYLEM_RED`: beyaz-liste-disi, insan-teyidi-yok,
+  durum-degisti, iptal-edildi, zaman-asimi).
+- **TAKILI bolumu:** hata seviyesindeki teshisler Isler'de onaylarin hemen
+  altinda.
+- **Oto-duzelt geri cekilir:** basarisiz oto adim 1-2-4 dk bekler, 3 hatada
+  vazgecer ve "elle bak" satiri cikar; ayni anda tek oto isi.
+- **`S` sessiz mod:** 30 dk -> oturum -> kapali; yalniz ses ve Windows
+  bildirimi susar, onaylar ve sayaclar gorunur kalir.
+
+### Bekci 2.0 ve doktor ozeti
+
+- **`beyin bekci` artik karar veriyor.** Oturum dosyalari yerine CANLI ajan
+  surecleri listelenir; her biri icin bellek (surec agaci toplami), sessizlik,
+  son yaptigi is ve gerekceli karar:
+  - **GUVENLE KAPATILABILIR:** turu bitmis, esik (120 dk) ustu sessiz, panoda
+    acik karti yok.
+  - **BAK:** acik kart sahibi, uzun suredir ayni aracta (izin bekliyor
+    olabilir), esik alti ya da son durumu okunamadi.
+  - **DOKUNMA:** son 10 dk etkin, is suruyor ya da calisan takim iscisi.
+  Kapatirsan bosalacak bellek ve bellegi kimin tuttugu (ajan oturumlari,
+  sahipsiz node, diger uygulamalar) yazilir. Panoya YALNIZ guvenle
+  kapatilabilirlerin komutu gider. `-Hepsi` dokunma grubunu da acar.
+- Duzeltme: kapanmis oturum kayitlari ve bitmis kosularin olu iscileri artik
+  satir satir listelenmez; olu isciye `takim durdur` onerilmez.
+- Merkez bellek teshisi bekcinin son kararini gosterir ("6 oturum guvenle
+  kapatilabilir, ~5,6 GB"); `d` bekci raporunu acar.
+- **`beyin doktor` ozeti:** sorunlar en ustte, oncelik sirasiyla (GUVENLIK,
+  VERI KAYBI, CALISMIYOR, KAYNAK, BAKIM), her biri tek adimlik duzeltmesiyle.
+- Duzeltme: sir taramasi dosya yolundaki Windows kullanici adini "maskelenmemis
+  sir, rotasyona al" diye bildiriyordu; yol konusu `mutlak yol` kontrolunde
+  kalir, sir taramasi yalniz gercek sir kategorilerini sayar.
+
 ## 1.8.1 - 2026-10-29 - Saglik turu: butun komutlar denetlendi
 
 35 komutun tamami tek tek calistirildi ve olculdu; bulunan her sorun duzeltildi.

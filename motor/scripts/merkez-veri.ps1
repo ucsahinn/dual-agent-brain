@@ -350,7 +350,11 @@ function Get-MerkezEskiAktarim($Aktarimlar, [datetime]$Simdi = (Get-Date)) {
     if (-not $eski.Count) { return $null }
     $eh = @($eski | Sort-Object -Property @{ Expression = { $_.T } })[0].H
     $bas = $(if ($eski.Count -gt 1) { "$($eski.Count) aktarım 3 günden eski · en eskisi " } else { 'aktarım 3 günden eski · ' })
-    return @{ Seviye = 'warn'; Metin = "$bas$($eh.id)$(if ($eh.toProject) { " ($($eh.toProject))" }) · oku: beyin aktar · c kapatma komutunu kopyalar · beyin aktar -Tamam $($eh.id)" }
+    $ehId = [string]$eh.id
+    # Duzelt tek tek kapatma DEGIL, kurallara gore toplama (2026-11-06): teslim edilmis, yetim devir ve bayat olanlar
+    # kapanir; taze ya da henuz gorulmemis mesaj kalir. Oto: kayitlar silinmez (status=tamam, kapatan + neden yazilir).
+    $dz = @{ Ad = 'aktarımları topla (teslim edilmiş/yetim/bayat)'; Argv = @('aktar', '-Topla', '-Uygula'); Oto = $true }
+    return @{ Seviye = 'warn'; Anahtar = 'eski-aktarim'; Metin = "$bas$($eh.id)$(if ($eh.toProject) { " ($($eh.toProject))" }) · d hepsini topla · önizleme · beyin aktar -Topla"; Neden = 'aktarım teslim edildi ama kapatılmadı; ya da işçi/geçici klasör devri hiç teslim edilemiyor'; Etki = 'açık aktarım sayısı şişer'; Duzelt = $dz }
 }
 
 function ConvertTo-MerkezOlay($Kayit) {
@@ -690,14 +694,24 @@ function Get-MerkezAnlik {
                 Durum = $d.Durum; Kaynak = $d.Kaynak; Bayat = $d.Bayat; NabizSn = $nabiz; Balon = $balon; Basladi = $basla; Bitti = $son
                 Jeton = (Get-MerkezEffectiveTokens $w.usage); Verdict = [string]$w.verdict; Pid = $w.pid
                 Dosya = @($w.changedPaths | Where-Object { $_ }).Count; Commit = [bool]$w.commit })
-            if ($d.Durum -eq 'duraklatildi') { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "$($w.taskId) kota sınırında · beyin takim resume --run $($k.runId) --wait" }) }
-            elseif ($d.Bayat -and $d.Kaynak -eq 'surec') { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = "surec:$($w.taskId)"; Metin = "$($w.taskId) işçi süreci yok (koşu hâlâ çalışıyor görünüyor) · beyin takim resume --run $($k.runId)" }) }
+            if ($d.Durum -eq 'duraklatildi') { $a.Teshis.Add(@{ Seviye = 'warn'; Anahtar = "kota:$($k.runId):$($w.taskId)"; Metin = "$($w.taskId) kota sınırında · beyin takim resume --run $($k.runId) --wait"; Neden = 'sağlayıcı kotası doldu; işçi duraklatıldı'; Etki = 'kart ilerlemiyor'; Duzelt = @{ Ad = 'kotadan sürdür'; Argv = @('takim', 'resume', '--run', [string]$k.runId, '--wait') } }) }
+            elseif ($d.Bayat -and $d.Kaynak -eq 'surec') { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = "surec:$($w.taskId)"; Metin = "$($w.taskId) işçi süreci yok (koşu hâlâ çalışıyor görünüyor) · beyin takim resume --run $($k.runId)"; Neden = 'işçi süreci kapanmış ama kayıt çalışıyor diyor'; Etki = 'koşu sonsuza dek bekler'; Duzelt = @{ Ad = 'koşuyu sürdür'; Argv = @('takim', 'resume', '--run', [string]$k.runId) } }) }
             elseif ($d.Bayat -and $d.Kaynak -ne 'gozetmen' -and $nabiz -ge 0) { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "$($w.taskId) $([int]($nabiz / 60)) dk'dır olay üretmiyor" }) }
-            elseif ($d.Durum -eq 'engelli') { $a.Teshis.Add(@{ Seviye = 'warn'; Anahtar = "engelli:$($k.runId):$($w.taskId)"; Metin = "$($w.taskId) işçisi engelli ($(@([string]$w.status, [string]$w.verdict | Where-Object { $_ }) -join ' / ')) · beyin takim izle $($k.runId) $($w.taskId)" }) }
-            elseif ($d.Durum -eq 'engelli') { $a.Teshis.Add(@{ Seviye = 'warn'; Anahtar = "engelli:$($k.runId):$($w.taskId)"; Metin = "$($w.taskId) işçisi engelli ($(@([string]$w.status, [string]$w.verdict | Where-Object { $_ }) -join ' / ')) · beyin takim izle $($k.runId) $($w.taskId)" }) }
+            elseif ($d.Durum -eq 'engelli') { $a.Teshis.Add(@{ Seviye = 'warn'; Anahtar = "engelli:$($k.runId):$($w.taskId)"; Metin = "$($w.taskId) işçisi engelli ($(@([string]$w.status, [string]$w.verdict | Where-Object { $_ }) -join ' / ')) · beyin takim izle $($k.runId) $($w.taskId)"; Neden = 'işçi raporu kapsam/içerik denetiminden geçmedi ya da kararı fail/blocked'; Etki = 'bu kart bütünleştirmeye girmez'; Duzelt = @{ Ad = 'işçi panelini aç (rapora bak)'; Argv = @('takim', 'izle', [string]$k.runId, [string]$w.taskId) } }) }
         }
-        if ($sahipsiz) { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = "sahipsiz:$($k.runId)"; Metin = "koşu $($k.runId) sahipsiz (gözetmen durdu) · beyin takim resume --run $($k.runId)" }) }
-        if ($k.integration -and -not $k.integration.ok -and [string]$k.status -eq 'integrated') { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = "kontrol:$($k.runId)"; Metin = "koşu $($k.runId) bütünleştirme kontrolü düştü" }) }
+        if ($sahipsiz) { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = "sahipsiz:$($k.runId)"; Metin = "koşu $($k.runId) sahipsiz (gözetmen durdu) · beyin takim resume --run $($k.runId)"; Neden = 'gözetmen süreci durdu'; Etki = 'işçi bitse de toplanmaz'; Duzelt = @{ Ad = 'gözetmeni yeniden başlat'; Argv = @('takim', 'resume', '--run', [string]$k.runId) } }) }
+        if (-not $bitmis -and -not $sahipsiz -and -not $sonraki.Onay -and [string]$sonraki.Metin -match '(beyin takim [^·→]+?)\s*$') {
+            # SEF SIRASI BEKLIYOR (2026-10-31): isciler bitti, motor sefin adimini bekliyor (topla/butunlestir/dogrula/sef incelemesi).
+            # 10 dk'dan uzun bekleyen adim teshise duser; merkezden tek tusla (d) ya da oto-duzeltmeyle (yalniz topla) calisir.
+            $bekKmt = $Matches[1].Trim(); $bekDk = ($simdi - $f.LastWriteTime).TotalMinutes
+            if ($bekDk -ge 10) {
+                $bekArgv = @($bekKmt -replace '^beyin\s+', '' -split '\s+' | Where-Object { $_ })
+                $bekAlt = $(if ($bekArgv.Count -ge 2) { [string]$bekArgv[1] } else { '' })
+                $bekAd = switch ($bekAlt) { 'collect' { 'topla' } 'integrate' { 'bütünleştir' } 'verify' { 'doğrula' } 'lead-review' { 'şef incelemesi' } default { $bekAlt } }
+                $a.Teshis.Add(@{ Seviye = 'warn'; Anahtar = "sef:$($k.runId)"; Metin = "koşu $($k.runId) $([int]$bekDk) dk'dır şefi bekliyor ($bekAd) · $bekKmt"; Neden = 'işçiler bitti; sıradaki adım şefin'; Etki = 'kartlar incelemeye geçmez'; Duzelt = @{ Ad = "sıradaki adım: $bekAd"; Argv = $bekArgv; Oto = ($bekAlt -eq 'collect') } })
+            }
+        }
+        if ($k.integration -and -not $k.integration.ok -and [string]$k.status -eq 'integrated') { $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = "kontrol:$($k.runId)"; Metin = "koşu $($k.runId) bütünleştirme kontrolü düştü · beyin takim integrate --run $($k.runId) --recheck"; Neden = 'ara dalda kontrol (test/lint) geçmedi'; Etki = 'doğrulama ve birleştirme kapalı'; Duzelt = @{ Ad = 'onardıktan sonra yeniden kontrol'; Argv = @('takim', 'integrate', '--run', [string]$k.runId, '--recheck') } }) }
     }
 
     if (-not $Hizli -or -not $Onbellek.ContainsKey('SonKosu')) {
@@ -784,7 +798,8 @@ function Get-MerkezAnlik {
     if ($a.Yetim.Count) {
         $ids = @($a.Yetim.Keys | Sort-Object); $ilk = $a.Yetim[$ids[0]]
         $dAd = @{ aborted = 'iptal'; failed = 'başarısız'; merged = 'ana dalda'; kayip = 'kaydı yok' }[$ilk.Durum]
-        $a.Teshis.Add(@{ Seviye = 'warn'; Anahtar = 'yetim'; Metin = "$($ids.Count) kart kapanmış koşuya bağlı ($($ilk.Run) · $dAd) · beyin pano transition --task $($ids[0]) --status cancelled --reason 'koşu kapandı'" })
+        $a.Teshis.Add(@{ Seviye = 'warn'; Anahtar = 'yetim'; Metin = "$($ids.Count) kart kapanmış koşuya bağlı ($($ilk.Run) · $dAd) · beyin pano transition --task $($ids[0]) --status cancelled --reason 'koşu kapandı'"; Neden = 'koşu kapandı, kart açık kaldı'; Etki = 'pano şişer, açık iş sayısı yanıltır'
+            Duzelt = @{ Ad = "$($ids.Count) yetim kartı iptal et"; Coklu = @($ids | Select-Object -First 20 | ForEach-Object { , @('pano', 'transition', '--task', [string]$_, '--status', 'cancelled', '--reason', 'kosu-kapandi') }) } })
     }
     $a.Kartlar = @($kartlar | Sort-Object -Property @{ Expression = { switch ([string]$_.status) { 'blocked' { 0 } 'review' { 1 } 'in_progress' { 2 } default { 3 } } } }, @{ Expression = { [string]$_.id } })
     foreach ($k in $kartlar) { if ([string]$k.status -eq 'review') { $a.Onaylar.Add(@{ Satir = "onayla $($k.id)"; Neden = "kart incelemede$(if ([string]$k.title) { ' · ' + (Protect-MerkezSatir ([string]$k.title) 60) })" }) } }
@@ -824,9 +839,15 @@ function Get-MerkezAnlik {
     if ($a.Kaynak -and $a.Kaynak.Ok) {
         if ($a.Kaynak.CommitYuzde -ge 85) {
             $enCok = Get-MerkezBellekDokum $Onbellek $simdi
-            $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = 'commit'; Metin = "bellek (commit) %$($a.Kaynak.CommitYuzde)$(if ($enCok) { ' · en çok: ' + $enCok }) · bekçi listeler, kapatma kararı senin · beyin bekci" })
+            $bkS = ''
+            try {
+                $bkF = Join-Path $Paths.ScrState 'bekci-son.json'
+                if (Test-Path -LiteralPath $bkF) { $bk = (Read-MerkezPaylasimli $bkF) | ConvertFrom-Json; $bkYas = ($simdi - [datetime]::Parse([string]$bk.ts, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToLocalTime()).TotalMinutes
+                    if ($bkYas -le 30 -and [int]$bk.kapat -gt 0) { $bkS = " · bekçi: $([int]$bk.kapat) oturum güvenle kapatılabilir (~$([math]::Round([double]$bk.kazancMB / 1024, 1)) GB)" } }
+            } catch { }
+            $a.Teshis.Add(@{ Seviye = 'err'; Anahtar = 'commit'; Metin = "bellek (commit) %$($a.Kaynak.CommitYuzde)$(if ($enCok) { ' · en çok: ' + $enCok })$bkS · bekçi listeler, kapatma kararı senin · beyin bekci"; Neden = 'açık süreçler belleği dolduruyor'; Etki = 'yeni ajan ve işçi açılamaz, sistem yavaşlar'; Duzelt = @{ Ad = 'bekçi raporunu aç'; Argv = @('bekci') } })
         }
-        if ($a.Kaynak.BostaOturum -ge 5) { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "son 24 saatte açılmış $($a.Kaynak.BostaOturum) oturum 2+ saattir sessiz (kapanmış olabilir) · beyin bekci" }) }
+        if ($a.Kaynak.BostaOturum -ge 5) { $a.Teshis.Add(@{ Seviye = 'warn'; Metin = "son 24 saatte açılmış $($a.Kaynak.BostaOturum) oturum 2+ saattir sessiz (kapanmış olabilir) · beyin bekci"; Neden = 'açık bırakılmış oturumlar'; Etki = 'bellek tutar'; Duzelt = @{ Ad = 'bekçi raporunu aç'; Argv = @('bekci') } }) }
     }
 
     # --- son olaylar (yavas; makbuz kuyrugu) + oturum -> kanat eslemesi ---
@@ -860,7 +881,7 @@ function Get-MerkezAnlik {
 
     # eski maliyet taramasi: bugun rakami sabahtan kalmissa bilgi (panel taramayi kendisi baslatmaz, ~18 sn surer)
     if ($a.Bugun -and $a.Bugun.UsdZaman -and ($simdi - [datetime]$a.Bugun.UsdZaman).TotalHours -gt 6) {
-        $a.Teshis.Add(@{ Seviye = 'info'; Anahtar = 'maliyet-eski'; Metin = "bugünkü maliyet $([int]($simdi - [datetime]$a.Bugun.UsdZaman).TotalHours) saat önce tarandı · beyin maliyet" })
+        $a.Teshis.Add(@{ Seviye = 'info'; Anahtar = 'maliyet-eski'; Metin = "bugünkü maliyet $([int]($simdi - [datetime]$a.Bugun.UsdZaman).TotalHours) saat önce tarandı · beyin maliyet"; Neden = 'gece taraması sonrası yeni tarama yok'; Etki = 'BUGÜN maliyet rakamı eski'; Duzelt = @{ Ad = 'maliyeti yeniden tara'; Argv = @('maliyet'); Oto = $true } })
     }
 
     # --- acik ajanin ayrintisi ---
@@ -1082,12 +1103,13 @@ function Get-MerkezIsciAdimlar([string]$EventsYol, [int]$Adet = 5) {
 $script:MerkezKomutRxEski = [regex]"^(beyin [a-z][\w-]*|onayla TASK-[\w-]+|baslat R[\w-]+|birlestir R[\w-]+|claude --resume [\w-]+|codex resume [\w-]+)( [\w\-\.:/\\'=~ ışğüöçİŞĞÜÖÇ]*)?$"
 $script:MerkezKomutBicim = @(
     '^beyin aktar -Tamam [A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
-    "^beyin pano transition --task TASK-[0-9]{1,6} --status cancelled --reason 'koşu kapandı'$"
-    '^beyin pano show --task TASK-[0-9]{1,6}$'
+    "^beyin pano transition --task TASK-[A-Z0-9](?:[A-Z0-9-]{0,46}[A-Z0-9])? --status cancelled --reason 'koşu kapandı'$"
+    '^beyin pano show --task TASK-[A-Z0-9](?:[A-Z0-9-]{0,46}[A-Z0-9])?$'
     '^onayla TASK-[A-Z0-9](?:[A-Z0-9-]{0,46}[A-Z0-9])?$', '^baslat R[0-9A-Za-z-]{1,40}$', '^birlestir R[0-9A-Za-z-]{1,40}$'
     '^claude --resume [0-9A-Fa-f-]{8,64}$', '^codex resume [0-9A-Fa-f-]{8,64}$'
-    '^beyin takim (izle|durum|status|collect|integrate|lead-review|verify|resume|cleanup) (--run )?R[0-9A-Za-z-]{1,40}( TASK-[0-9]{1,6}| --wait| --recheck| --approved)?$'
-    '^beyin (bekci|maliyet|doktor|aktar)$'
+    '^beyin takim (izle|durum|status|collect|integrate|lead-review|verify|resume|cleanup) (--run )?R[0-9A-Za-z-]{1,40}( TASK-[A-Z0-9](?:[A-Z0-9-]{0,46}[A-Z0-9])?| --wait| --recheck| --approved)?$'
+    '^beyin (bekci|maliyet|doktor|aktar|durum|canli|kapasite|copcu|ayar|gecmis|makbuz)$'
+    '^beyin aktar -Topla( -Uygula)?$'
 )
 function Test-MerkezGuvenliKomut([string]$Komut) {
     # Beyaz liste TUR BASINA tam eslesme: kimlikler yalniz ASCII, serbest ek yok, alt komut sabit (ajan metninden '· beyin guncelle
@@ -1110,6 +1132,7 @@ function Get-MerkezSatirKomut($Oge) {
         'lider'   { $k = $(if ($n.Ajan -eq 'codex') { "codex resume $([string]$n.Ad)" } else { "claude --resume $([string]$n.Ad)" }); $ip = 'yeni terminalde oturumu sürdürür' }
         'isci'    { $k = "beyin takim izle $([string]$n.Kosu) $([string]$n.Ad)" }
         'bugun'   { $k = 'beyin maliyet' }
+        'komut'   { $k = "beyin $(@($n.Argv) -join ' ')" }
     }
     if (-not $k -or -not (Test-MerkezGuvenliKomut $k)) { return $null }
     return @{ Komut = $k; Ipucu = $ip }

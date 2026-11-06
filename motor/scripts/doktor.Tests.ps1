@@ -140,6 +140,6 @@ Describe 'doktor.ps1 ucuncu durum (OLCULEMEDI) ve yeni problar' {
         try { $r = Invoke-Doktor @('-Ozet', '-SureSiniri', '1') }
         finally { $env:BEYIN_CLAUDE_PROJECTS = $eski; Remove-Item -LiteralPath $kok -Recurse -Force -ErrorAction SilentlyContinue }
         $r.Exit | Should Be 0
-        $r.Out | Should Match '- auto-memory: [^\r\n]*1 listelenmemis \(iki\.md\)'
+        $r.Out | Should Match '] auto-memory: [^\r\n]*1 listelenmemis \(iki\.md\)'
     }
 }

@@ -620,6 +620,7 @@ soyler - "ayari degistirdim ama bir sey degismedi" durumunun tanisi budur
 | `BEYIN_BILDIRIM` | **Kosu paneli bildirimi** (2026-10-14): kosu genel gorunumu acikken onay bekleyen durum, biten isci, kota siniri, dusen dogrulama/butunlestirme ve duran gozetmen icin Windows bildirimi. Panel acilirken var olan durumlar bildirilmez. `acik` ya da `kapali`. | `acik` |
 | `BEYIN_MERKEZ_SES` | Merkez sesli bildirimi (1.6.0): `kapali`, `ton` (kisa konsol tonlari) ya da `toast` (Windows bildirim sesi). Ayrinti: 13.4. | `kapali` |
 | `BEYIN_MERKEZ_SESSIZ` | Merkez ve kosu panosu icin sessiz saat `SS-SS` (`23-08` gece yarisini asar) ya da `yok`. Ayrinti: 13.4. | `yok` |
+| `BEYIN_MERKEZ_FARE` | Merkez fare destegi (1.9.0): `acik` (tiklama, teker) ya da `kapali` (yalniz klavye). Onay penceresi fareyle onaylanmaz. Ayrinti: 13.4. | `acik` |
 | `BEYIN_MERKEZ_ZEMIN` | Merkez zemini: `osc`, `boya` ya da `kapali`. Ayrinti: 13.4. | `osc` |
 | `BEYIN_PANO_ONAY` | Pano karti `done` icin insan onayi: `zorunlu` ya da `kapali` (eski davranis). | `zorunlu` |
 | `BEYIN_BRIFING_KIME` | Sahipsiz pano kartinin brifingi kime gider (`claude` ya da `codex`). Sahipli kartta karsi ajan secilir. | `claude` |
@@ -1343,9 +1344,50 @@ beyin merkez          # bu terminalde
 beyin merkez -Sekme   # yeni Windows Terminal sekmesinde
 ```
 
-Merkez, tum sistemi tek ekranda izler. Ekran **salt okunurdur**: hicbir seyi
-calistirmaz ya da yazmaz. Onay satirlarini (`baslat`, `birlestir`, `onayla`)
-sohbete yine kendin yazarsin.
+Merkez, tum sistemi tek ekranda izler. Ilk dort sekme **salt okunurdur**.
+**`5 Isler`** sekmesi (1.9.0) bekleyen isi oradan bitirmeni saglar.
+
+**Fare (1.9.0):** sekmeye tikla; satira tikla = sec, ayni satira tekrar ya da
+cift tikla = Enter; sag tik = satirin eylemleri; teker kaydirir; alt cubuktaki
+tus ipucuna tiklamak o tusa basmakla aynidir. Onay penceresi fareyle
+ONAYLANMAZ (yanlislikla tik onay sayilmasin): klavyeyle `Y` ya da kod. Fare
+acikken metin secmek icin Shift + surukle. Kapatmak: `beyin ayar
+BEYIN_MERKEZ_FARE kapali`.
+
+**Komut paleti (`?`, 1.9.0):** yardim ekraninin basinda butun gunluk komutlar
+ne ise yaradiklariyla listelenir (`durum`, `doktor`, `bekci`, `canli`,
+`kapasite`, `maliyet`, `aktar`, `copcu`, `makbuz`, `gecmis`, `ayar`); satira
+tiklayinca ya da Enter ile yeni sekmede calisir. Hepsi yalniz gosterir;
+yazan tek satir `aktar -Topla -Uygula` (sari "yazar" etiketi).
+
+| Tus | Eylem |
+| --- | --- |
+| `o` | onayla: kart icin insan onayi + `done` (dogrulayan: sen, `--verified-by user`); kosu icin `baslat`/`birlestir` onayi + start/merge |
+| `O` | secili kosunun incelemedeki butun kartlarini onayla ve kapat |
+| `n` | kosunun siradaki adimi (topla, butunlestir, dogrula, sef incelemesi, surdur) |
+| `x` | kosuyu durdur ya da yetim karti iptal et (teyitli) |
+| `d` | teshisi duzelt |
+| `t` | aktarimi kapat (okundu) |
+| `T` | aktarimlari topla: teslim edilmis, sahipsiz (isci/gecici klasor) ve bayat olanlarin hepsi tek seferde (`beyin aktar -Topla -Uygula`) |
+| `?` | komut paleti ve yardim |
+| `e` | satirin butun eylemleri |
+| `Bosluk` / `*` / `u` | isaretle / ayni turden hepsini isaretle / temizle (toplu eylem) |
+| `z` | oto-duzelt ac/kapa |
+| `S` | sessiz mod: 30 dk -> oturum -> kapali (ses ve bildirim; onaylar gorunur kalir) |
+
+Onay gerektiren her eylem once bir pencerede listelenir; `Y` ile onaylarsin
+(`beyin ayar BEYIN_MERKEZ_ONAY kod`: ekrandaki 4 haneli kod; `kapali`:
+merkezden onay yok). Tek pencerede birden fazla onay varsa kod her zaman
+istenir ve butun onay kimlikleri listelenir. Kayit kanali `merkez`, ajani `insan`; etkilesimsiz pencerede (ajan
+kabugu, `-Tek`) eylem yoktur. Sohbet satirlari (`baslat`, `birlestir`,
+`onayla`) eskisi gibi gecerlidir.
+
+Komutlar sirayla calisir (kisa olanlar gizli, uzun takim adimlari yeni sekmede);
+sonuc `SON ISLEMLER` satirinda ve `.state\merkez-isler\<id>.json` dosyasinda.
+Yalniz beyaz listedeki `beyin` komutlari calisir. Oto-duzelt (`z`, ayar
+`BEYIN_MERKEZ_OTO`) yalniz maliyet taramasini ve biten iscilerin sonucunu
+toplamayi kendiliginden yapar; onay, durdurma, dogrulama ve birlestirme asla
+oto degildir.
 
 **Gorsel dil.** Aurora paleti (ortak cizim katmani `motor\scripts\beyin-ciz.ps1`,
 kosu panosu da ayni katmani kullanir). Renkler anlam tasir:

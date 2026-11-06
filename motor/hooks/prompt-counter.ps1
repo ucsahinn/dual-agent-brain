@@ -237,6 +237,8 @@ try {
                     $pcSeenYeni = @($pcGor + @($gosterilenId))
                     Write-BeyinMakbuz -Paths $p -Script 'aktar' -Outcome 'GOSTERILDI' -Agent $pcAjan -Key (Get-BeyinSessionKey -SessionId $hook.session_id) `
                         -Reason 'prompt' -Note "ids=$($gosterilenId -join ',')"
+                    # yanit tek atimliktir: gosterilince kapanir (2026-11-06; eskiden acik kaliyordu)
+                    foreach ($h in @($pcYeni | Where-Object { [string]$_.kind -eq 'yanit' -and $gosterilenId -contains [string]$_.id })) { $null = Close-BeyinHandoff -Paths $p -Id ([string]$h.id) -DoneBy 'gosterildi (tek atimlik yanit)' -Agent $pcAjan }
                 }
             }
         }

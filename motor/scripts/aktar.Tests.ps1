@@ -58,6 +58,58 @@ Describe 'stale handoff maintenance in a temporary vault' {
     }
 }
 
+Describe 'aktar -Topla (2026-11-06): teslim edilmis, yetim ve bayat aktarimlar tek seferde' {
+    It 'kurallar: yetim isci devri, yerine yenisi gelen devir, bayat devir, teslim edilmis soru/yanit kapanir; taze ya da gorulmemis kalir' {
+        . (Join-Path $vault 'motor/hooks/lib.ps1')
+        $tv = New-AktarVault; $tp = Get-BeyinPaths -Vault $tv
+        try {
+            $yap = {
+                param($ad, $kind, $kime, $kimden, $proje, [double]$gun, [bool]$teslim)
+                $r = Add-BeyinHandoff -Paths $tp -Metin "$ad metni" -Kime $kime -FromAgent $kimden -Proje $proje -Kind $kind -GorunumYok
+                $h = Get-BeyinHandoff $tp $r.Id; $h.ts = [datetime]::UtcNow.AddDays(-$gun).ToString('o'); $null = Set-BeyinHandoff $tp $h
+                if ($teslim) { $d = Join-Path $tp.ScrState "handoff-teslim\oturum-$ad"; New-Item -ItemType Directory -Force -Path $d | Out-Null; New-Item -ItemType File -Path (Join-Path $d $r.Id) | Out-Null }
+                return $r.Id
+            }
+            $id = [ordered]@{
+                yetim         = & $yap 'yetim' 'devir' 'codex' 'codex' 'TASK-ABC' 0.1 $false
+                eskiDevir     = & $yap 'eskiDevir' 'devir' 'codex' 'codex' 'p' 2 $false
+                yeniDevir     = & $yap 'yeniDevir' 'devir' 'codex' 'codex' 'p' 1 $false
+                bayatDevir    = & $yap 'bayatDevir' 'devir' 'claude' 'claude' 'q' 8 $false
+                gorulduEski   = & $yap 'gorulduEski' 'soru' 'claude' 'codex' 'p' 4 $true
+                gorulmediEski = & $yap 'gorulmediEski' 'soru' 'claude' 'codex' 'p' 4 $false
+                cokEski       = & $yap 'cokEski' 'soru' 'codex' 'claude' 'p' 15 $false
+                yanit         = & $yap 'yanit' 'yanit' 'codex' 'claude' 'p' 0.2 $true
+                taze          = & $yap 'taze' 'soru' 'codex' 'claude' 'p' 1 $true
+            }
+            $kuru = Invoke-Aktar $tv codex @('-Topla')
+            $kuru.Kod | Should Be 0
+            $kuru.Metin | Should Match '6 kapatilacak, 3 kalacak'
+            $kuru.Metin | Should Match 'KURU'
+            @(Get-BeyinHandoffListe $tp).Count | Should Be 9
+            $uy = Invoke-Aktar $tv codex @('-Topla', '-Uygula')
+            $uy.Kod | Should Be 0
+            $uy.Metin | Should Match 'kapandi: 6'
+            foreach ($k in @('yetim', 'eskiDevir', 'bayatDevir', 'gorulduEski', 'cokEski', 'yanit')) { (Get-BeyinHandoff $tp $id[$k]).status | Should Be 'tamam'; (Get-BeyinHandoff $tp $id[$k]).doneBy | Should Match 'topla' }
+            foreach ($k in @('yeniDevir', 'gorulmediEski', 'taze')) { (Get-BeyinHandoff $tp $id[$k]).status | Should Be 'acik' }
+            (Get-BeyinHandoff $tp $id.yetim).doneBy | Should Match 'yetim'
+            (Get-BeyinHandoff $tp $id.eskiDevir).doneBy | Should Match 'yeni devir'
+            @(Get-BeyinHandoffListe $tp -Hepsi).Count | Should Be 9   # gecmis silinmez
+            (Invoke-Aktar $tv codex @('-Topla', '-Kime', 'claude')).Kod | Should Be 2   # celisen bayrak reddedilir
+        } finally { Remove-Item -LiteralPath $tv -Recurse -Force }
+    }
+    It 'isci worktree''si ve gecici klasor devir yazmaz (kaynakta kesilir)' {
+        . (Join-Path $vault 'motor/hooks/lib.ps1')
+        Test-BeyinDevirsizKonum -Proje 'TASK-DOC2-IZIN' | Should Be $true
+        Test-BeyinDevirsizKonum -Proje '_integration' | Should Be $true
+        $kok = Join-Path ([IO.Path]::GetPathRoot([IO.Path]::GetTempPath())) 'ornek-kok'
+        Test-BeyinDevirsizKonum -Yol (Join-Path $kok '.agentchef-worktrees\R20261031-a71d\TASK-1') | Should Be $true
+        Test-BeyinDevirsizKonum -Yol (Join-Path ([IO.Path]::GetTempPath()) 'x20-https-www') | Should Be $true
+        Test-BeyinDevirsizKonum -Yol (Join-Path $kok 'ornek-proje') -Proje 'ornek-proje' | Should Be $false
+        Test-BeyinDevirsizKonum -Proje 'task-list' | Should Be $false
+        (Get-Content (Join-Path $vault 'motor\scripts\flush.ps1') -Raw) | Should Match 'Test-BeyinDevirsizKonum -Yol \$ProjectPath'
+    }
+}
+
 Describe 'ajan tespiti ve vault ici hedef suzgeci (2026-10-08)' {
     It 'Codex kabugundan (CODEX_SESSION_ID, BEYIN_AGENT yok) gonderen codex etiketlenir; CLAUDECODE claude' {
         . (Join-Path $vault 'motor\hooks\lib.ps1')

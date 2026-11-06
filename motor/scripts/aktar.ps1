@@ -12,6 +12,7 @@
 #   beyin aktar "soru/handoff" -Kime claude          kaydet (Kanit/Kapsam/Risk/Sonraki istege bagli)
 #   beyin aktar "..." -Kime codex -Proje x -Kanit "..." -Kapsam "..." -Risk "..." -Sonraki "..."
 #   beyin aktar -Tamam <id>                          kapat (kapatan ajan ve zaman yazilir)
+#   beyin aktar -Topla [-Uygula] [-Hepsi]            teslim edilmis/yetim/bayat olanlari toplu kapat (varsayilan kuru)
 #   beyin aktar "yanit" -Yanit <id>                  soruya yanit: soran ajana geri yazilir, soru kapanir
 #   beyin aktar -Bekle <id> [-Sure 100]              yanit gelene kadar bekle (ayni tur icinde soru-cevap)
 #   beyin aktar "soru" -Kime claude -VeBekle         gonder ve yanitini bekle
@@ -39,6 +40,8 @@ param(
     [string]$Tamam = '',
     [switch]$Hepsi,
     [ValidateRange(1,36500)][int]$Bayat=3,
+    # TOPLA (2026-11-06): teslim edilmis/yetim/bayat aktarimlari kurallara gore toplu kapatir (varsayilan KURU).
+    [switch]$Topla,
     [switch]$Uygula,
     # SORU-CEVAP (2026-10-07): -Yanit <id> yanit yazar; -Bekle <id> yanit bekler; -VeBekle gonder+bekle.
     [string]$Yanit = '',
@@ -127,6 +130,21 @@ function Bekle-Yanit([string]$SoruId, [int]$Saniye) {
 # fonksiyonun yazdigi satirlar o zaman cikis degerine karisir ve ekrana hic basilmaz (olculdu).
 $script:BekleKod = 0
 
+if ($Topla) {
+    if ($Metin -or $Tamam -or $Yanit -or $Bekle -or $VeBekle -or $Gor -or $Durum -or $Kime -or $Isci -or $Oturum -or $Kayit -or $Olay -or $PSBoundParameters.ContainsKey('Bayat')) { Hata '-Topla yalniz [-Uygula] [-Hepsi] ile kullanilir.' }
+    $r = Invoke-BeyinHandoffTopla -Paths $p -Kapatan $ajan -Uygula:$Uygula
+    $kip = $(if ($Uygula) { 'UYGULANDI' } else { 'KURU - hicbir kayit degismedi; uygulamak icin: beyin aktar -Topla -Uygula' })
+    Yaz "Aktarim topla: $($r.Aday) kapatilacak, $($r.Kalan) kalacak · $kip" 'Cyan'
+    foreach ($g in @($r.Liste | Where-Object Karar -eq 'kapat' | Group-Object Neden | Sort-Object Count -Descending)) { Yaz ("  {0,3}  {1}" -f $g.Count, $g.Name) }
+    $kalan = @($r.Liste | Where-Object Karar -eq 'kalsin')
+    if ($kalan.Count) {
+        Yaz "KALANLAR (taze ya da henuz gorulmedi; elle: beyin aktar -Gor <id> / -Tamam <id>):" 'Yellow'
+        foreach ($x in $kalan) { Yaz ("  {0} -> {1} [{2}] {3} gun · {4}" -f $x.Id, $x.To, $x.Tur, $x.Gun, $(if ($x.Ozet.Length -gt 90) { $x.Ozet.Substring(0, 89) + '…' } else { $x.Ozet })) }
+    }
+    if ($Hepsi) { foreach ($x in @($r.Liste | Where-Object Karar -eq 'kapat')) { Yaz ("  - {0} -> {1} [{2}] {3}" -f $x.Id, $x.To, $x.Tur, $x.Neden) } }
+    if ($Uygula) { Yaz "kapandi: $($r.Kapandi)$(if ($r.Hata) { " · KAPATILAMADI: $($r.Hata)" })" $(if ($r.Hata) { 'Red' } else { 'Green' }); if ($r.Hata) { exit 3 } }
+    exit 0
+}
 if ($PSBoundParameters.ContainsKey('Bayat')) {
     if ($Metin -or $Tamam -or $Yanit -or $Bekle -or $VeBekle -or $Gor -or $Durum -or $Hepsi -or $Kime -or $Isci -or $Oturum -or $Kayit -or $Olay) { Hata '-Bayat yalniz [-Uygula] ile kullanilir.' }
     $candidates=@(Get-BeyinHandoffBayat -Paths $p -Gun $Bayat)

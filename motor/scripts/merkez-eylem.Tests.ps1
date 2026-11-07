@@ -207,3 +207,26 @@ Describe 'merkez: derleme tavani teshisi (2026-11-07)' {
         Test-MerkezGuvenliKomut 'beyin derle-zorla' | Should Be $true
     }
 }
+
+Describe 'merkez: bakim turu B (2026-11-07)' {
+    BeforeAll { . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1'); . (Join-Path $PSScriptRoot 'merkez-veri.ps1'); . (Join-Path $PSScriptRoot 'merkez-eylem.ps1') }
+    It 'bakim gerekmiyorsa eylem yok' {
+        Get-MerkezBakimEylemi @{ Teshis = @(); Aktarimlar = @() } | Should Be $null
+        Get-MerkezBakimEylemi $null | Should Be $null
+    }
+    It 'gerekenleri sirayla toplar; hepsi serbest, oto ve beyaz listede' {
+        $an = @{ Aktarimlar = @(@{ id = 'x1' }); Teshis = @(@{ Anahtar = 'derleme-tavan' }, @{ Anahtar = 'maliyet-eski' }, @{ Anahtar = 'commit' }) }
+        $e = Get-MerkezBakimEylemi $an
+        (@($e.Adimlar | ForEach-Object { @($_.Argv) -join ' ' }) -join '|') | Should Be 'aktar -Topla -Uygula|derle-zorla|maliyet'
+        $e.Tus | Should Be 'B'
+        $e.Oto | Should Be $true
+        $e.Insan | Should Be $false
+        $e.Tehlike | Should Be $false
+        foreach ($s in $e.Adimlar) { Test-MerkezEylemArgv @($s.Argv) | Should Be $true }
+    }
+    It 'yalniz tavan varsa tek adim' {
+        $e = Get-MerkezBakimEylemi @{ Aktarimlar = @(); Teshis = @(@{ Anahtar = 'derleme-tavan' }) }
+        @($e.Adimlar).Count | Should Be 1
+        $e.Aciklama | Should Be 'beyin derle-zorla'
+    }
+}

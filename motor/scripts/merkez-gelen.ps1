@@ -251,6 +251,16 @@ function EylemTus([string]$tus) {
     Mesaj "→ beyin $(@($eylem.Adimlar[0].Argv) -join ' ')$(if ($eylem.Adimlar[0].Gorunur) { ' · yeni sekmede' })" $cAccent
     KuyrukIlerlet
 }
+function BakimTuru {
+    # B: secili satirdan bagimsiz; birden cok adim varsa ModalAc listeyi gosterip Y ister.
+    if (-not $script:etkilesimli -or -not $script:EylemVar) { Mesaj 'etkileşimsiz pencere: bakım turu yok' $cErr; return }
+    $e = Get-MerkezBakimEylemi $script:anlik
+    if (-not $e) { Mesaj '✓ bakım gerekmiyor: açık aktarım, takılı derleme ya da eski maliyet yok' $cOk; return }
+    if (@($e.Adimlar).Count -gt 1) { ModalAc $e; return }
+    foreach ($s in $e.Adimlar) { $script:kuyruk.Add(@{ Argv = $s.Argv; Gorunur = $false; Oto = $false }) }
+    Mesaj "→ $($e.Aciklama)" $cAccent
+    KuyrukIlerlet
+}
 function EylemMenusu {
     $o = Secili; if (-not $o) { Mesaj 'önce bir satır seç'; return }
     $e = @(OgeEylemleri $o)

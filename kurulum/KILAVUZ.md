@@ -1369,6 +1369,7 @@ yazan tek satir `aktar -Topla -Uygula` (sari "yazar" etiketi).
 | `d` | teshisi duzelt |
 | `t` | aktarimi kapat (okundu) |
 | `T` | aktarimlari topla: teslim edilmis, sahipsiz (isci/gecici klasor) ve bayat olanlarin hepsi tek seferde (`beyin aktar -Topla -Uygula`) |
+| `B` | bakim turu: gerekenleri tek onayla sirayla kosar - acik aktarim varsa `aktar -Topla -Uygula`, deneme tavanina carpan gun varsa `derle-zorla`, bugunku maliyet 6+ saat eskiyse `maliyet`. Gerek yoksa "bakim gerekmiyor" der |
 | `?` | komut paleti ve yardim |
 | `e` | satirin butun eylemleri |
 | `Bosluk` / `*` / `u` | isaretle / ayni turden hepsini isaretle / temizle (toplu eylem) |

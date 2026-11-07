@@ -195,6 +195,22 @@ function Get-MerkezEylemler($Oge, $Anlik = $null) {
 }
 
 # --- toplu eylem birlestirme: isaretli ogelerde ayni Kod'lu eylemlerin adimlari tek pencerede ---
+function Get-MerkezBakimEylemi($Anlik) {
+    # BAKIM TURU (2026-11-07, tus B): bekleyen guvenli bakim islerini tek onayla sirayla kosar.
+    # Yalniz beyaz listede 'serbest' komutlar; neyin gerektigi anlik teshisten okunur:
+    #   aktar -Topla -Uygula : acik aktarim varsa (kurallar yeni/gorulmemisi zaten birakir)
+    #   derle-zorla          : deneme tavanina carpmis gun varsa
+    #   maliyet              : bugunku maliyet 6+ saat eskiyse
+    $tes = @(); if ($Anlik -and $Anlik.Teshis) { $tes = @($Anlik.Teshis) }
+    $anahtar = @{}; foreach ($t in $tes) { if ($t.Anahtar) { $anahtar[[string]$t.Anahtar] = $true } }
+    $ad = @()
+    if ($Anlik -and @($Anlik.Aktarimlar | Where-Object { $_ }).Count) { $ad += , (New-MerkezKomutAdim @('aktar', '-Topla', '-Uygula')) }
+    if ($anahtar.ContainsKey('derleme-tavan')) { $ad += , (New-MerkezKomutAdim @('derle-zorla')) }
+    if ($anahtar.ContainsKey('maliyet-eski')) { $ad += , (New-MerkezKomutAdim @('maliyet')) }
+    if (-not $ad.Count) { return $null }
+    $ozet = @($ad | ForEach-Object { 'beyin ' + (@($_.Argv) -join ' ') }) -join ' → '
+    return (New-MerkezEylem 'bakim' 'B' "bakım turu ($($ad.Count) iş)" $ad -Oto -Aciklama $ozet)
+}
 function Join-MerkezEylemler([object[]]$Eylemler) {
     $E = @($Eylemler | Where-Object { $_ })
     if (-not $E.Count) { return $null }

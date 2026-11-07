@@ -968,7 +968,7 @@ function YardimIcerik($L) {
     foreach ($t in @(@('Tab · 1-5', 'sekme: Genel, Ajanlar, Koşular, Olaylar, İşler'), @('↑ ↓ · j k', 'satır seç (Olaylar sekmesinde kaydır)'), @('Enter', 'ayrıntı · işçi paneli · koşu panosu · aktarımın tam metni'),
             @('Esc', 'ayrıntıyı kapat'), @('c', 'seçili satırın güvenli komutunu panoya kopyala (çalıştırmaz)'), @('g', 'ilk soruna atla'), @('f', 'kanat filtresi: hepsi → sorunlu → Claude → Codex'),
             @('p', 'koşu panosu'), @('5', 'İşler: onay bekleyenler, koşu adımları, teşhis düzelt, aktarımlar'),
-            @('o n x d t O', 'eylem: onayla · sıradaki adım · durdur · düzelt · aktarımı kapat · koşunun kartları'), @('T', 'aktarımları topla: teslim edilmiş, sahipsiz, bayat olanların hepsi tek seferde'),
+            @('o n x d t O', 'eylem: onayla · sıradaki adım · durdur · düzelt · aktarımı kapat · koşunun kartları'), @('T', 'aktarımları topla: teslim edilmiş, sahipsiz, bayat olanların hepsi tek seferde'), @('B', 'bakım turu: aktarım topla + takılı derleme + eski maliyet, gerekenler tek onayla sırayla'),
             @('Boşluk * u', 'işaretle · aynı türden hepsini işaretle · temizle'), @('e', 'satırın bütün eylemleri'), @('z', 'oto-düzelt aç/kapa (yalnız güvenli adımlar)'), @('S', 'sessiz: 30 dk → oturum → kapalı (ses/bildirim; onaylar görünür kalır)'),
             @('a', 'boştakileri / biten koşuları göster-gizle'), @('PgUp PgDn', 'olay listesini kaydır'), @('r', 'yenile: kaynağı yeniden ölçer, tüm verileri yeniden okur'), @('q', 'çık'))) { $L.Add((Row (& $sat $t[0] $t[1]) $w)) }
     $L.Add((Blank $w))
@@ -1217,7 +1217,7 @@ function TusIsle($kk) {
     }
     if ($script:EylemVar) {
         switch -CaseSensitive ([string]$kk.KeyChar) {
-            'o' { EylemTus 'o' } 'O' { EylemTus 'O' } 'n' { EylemTus 'n' } 'x' { EylemTus 'x' } 'd' { EylemTus 'd' } 't' { EylemTus 't' } 'T' { EylemTus 'T' }
+            'o' { EylemTus 'o' } 'O' { EylemTus 'O' } 'n' { EylemTus 'n' } 'x' { EylemTus 'x' } 'd' { EylemTus 'd' } 't' { EylemTus 't' } 'T' { EylemTus 'T' } 'B' { BakimTuru }
             'e' { EylemMenusu } 'z' { OtoDegistir } 'S' { SessizDegistir } '*' { HepsiniIsaretle } 'u' { $script:isaret.Clear(); Mesaj 'işaretler temizlendi' $cMuted }
         }
     }

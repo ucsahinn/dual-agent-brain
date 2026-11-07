@@ -21,6 +21,13 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.9.3 - 2026-11-07 - Merkez bakim turu (B)
+
+- `beyin merkez` icinde `B`: bekleyen guvenli bakimi tek onayla sirayla kosar. Acik aktarim varsa
+  `aktar -Topla -Uygula`, deneme tavanina carpan gun varsa `derle-zorla`, bugunku maliyet 6+ saat
+  eskiyse `maliyet`. Yalniz beyaz listede 'serbest' komutlar; birden cok adimda liste gosterilip `Y` istenir.
+- Yardim (`?`) ve KILAVUZ tus tablosuna `B` eklendi.
+
 ## 1.9.2 - 2026-11-07 - Merkez takilan derlemeyi tek tusla cozer
 
 - `beyin merkez` teshis satiri artik deneme tavanina carpmis gunleri gosterir

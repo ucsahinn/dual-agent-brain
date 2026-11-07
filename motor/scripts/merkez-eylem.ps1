@@ -49,6 +49,7 @@ function Get-MerkezEylemSiniflari {
         @{ Rx = '^(durum|canli|kapasite|copcu|ayar|gecmis|makbuz)$'; Sinif = 'serbest' }
         @{ Rx = '^aktar( -Topla)?$'; Sinif = 'serbest' }
         @{ Rx = '^(maliyet|bekci|doktor)$'; Sinif = 'serbest' }
+        @{ Rx = '^derle-zorla$'; Sinif = 'serbest' }
         @{ Rx = "^takim (integrate|verify|lead-review) --run $R$"; Sinif = 'adim' }
         @{ Rx = "^takim integrate --run $R --recheck$"; Sinif = 'adim' }
         @{ Rx = "^takim resume --run $R( --wait)?$"; Sinif = 'adim' }

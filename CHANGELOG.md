@@ -21,6 +21,14 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.9.2 - 2026-11-07 - Merkez takilan derlemeyi tek tusla cozer
+
+- `beyin merkez` teshis satiri artik deneme tavanina carpmis gunleri gosterir
+  ("N gun derlenemiyor (deneme tavani)"); `d` ya da tiklama `beyin derle-zorla`
+  calistirir (beyaz listede serbest; butceden 1 cagri). Eskiden bunu yalniz
+  `beyin doktor` soyluyordu ve elle `compile.ps1 -Force` gerekiyordu.
+- `?` komut paletine `derle-zorla` eklendi.
+
 ## 1.9.1 - 2026-11-07 - Derleyici gunleri bosuna kaybetmiyor
 
 Hata duzeltme. Gece derleyicisi bir gunu 3 denemede tavana carpinca o gun bir

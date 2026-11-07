@@ -183,3 +183,27 @@ Describe 'merkez eylem: sinif tablosu ve yurutme aninda denetim (2026-10-31 tur 
         $r.Onay.Count | Should Be 0; $r.Atlanan.Count | Should Be 1
     }
 }
+
+Describe 'merkez: derleme tavani teshisi (2026-11-07)' {
+    BeforeAll { . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1'); . (Join-Path $PSScriptRoot 'merkez-veri.ps1'); . (Join-Path $PSScriptRoot 'merkez-eylem.ps1') }
+    It 'final olmayan ve tavana carpan gunu bulur, final olani ve tavan altini atlar' {
+        $f = Join-Path $env:TEMP ("tavan-" + [guid]::NewGuid().ToString('N') + '.txt')
+        try {
+            [IO.File]::WriteAllText($f, "2026-11-01.md|partial|3`n2026-11-02.md|partial|3`n2026-11-02.md|final|3|100`n2026-11-03.md|partial|2`n2026-11-04.md|partial|1`n2026-11-04.md|partial|4`n")
+            $g = @(Get-MerkezDerlemeTavani $f)
+            ($g -join ',') | Should Be '2026-11-01,2026-11-04'
+        } finally { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+        @(Get-MerkezDerlemeTavani (Join-Path $env:TEMP 'olmayan-dosya.txt')).Count | Should Be 0
+    }
+    It 'teshis tek tusla derle-zorla eylemi uretir (serbest, oto) ve kopyalanabilir' {
+        Get-MerkezTavanTeshis @() | Should Be $null
+        $t = Get-MerkezTavanTeshis @('2026-11-06')
+        $t.Metin | Should Match 'beyin derle-zorla$'
+        Test-MerkezEylemArgv @('derle-zorla') | Should Be $true
+        Get-MerkezEylemSinif @('derle-zorla') | Should Be 'serbest'
+        $e = Get-MerkezTeshisEylem $t
+        @($e.Adimlar)[0].Argv -join ' ' | Should Be 'derle-zorla'
+        $e.Oto | Should Be $true
+        Test-MerkezGuvenliKomut 'beyin derle-zorla' | Should Be $true
+    }
+}

@@ -344,6 +344,25 @@ function Get-MerkezBellekDokum([hashtable]$Onbellek, [datetime]$Simdi) {
     } catch { }
     $Onbellek.bellekDokum = @{ Zaman = $Simdi; Metin = $m }; return $m
 }
+function Get-MerkezDerlemeTavani([string]$Dosya, [int]$Tavan = 3) {
+    # compiled_daylogs.txt (ad|durum|deneme[|bayt]): final olmayip deneme tavanina carpmis gunler.
+    # Bu gunler bir daha kendiliginden derlenmez (doktor 'derleme deneme tavani'); merkez tek tusla -Force onerir.
+    $m = @{}
+    if (-not $Dosya -or -not (Test-Path -LiteralPath $Dosya)) { return @() }
+    foreach ($s in @(Get-Content -LiteralPath $Dosya -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        if (-not $s) { continue }; $p = $s.Split('|'); $ad = $p[0].Trim(); if (-not $ad) { continue }
+        $d = $(if ($p.Count -gt 1) { $p[1].Trim() } else { 'final' }); $n = 0; if ($p.Count -gt 2) { [void][int]::TryParse($p[2].Trim(), [ref]$n) }
+        if ($m.ContainsKey($ad)) { if ($m[$ad].D -eq 'final' -and $d -ne 'final') { continue }; if ($n -lt $m[$ad].N) { $n = $m[$ad].N } }
+        $m[$ad] = @{ D = $d; N = $n }
+    }
+    return @($m.Keys | Where-Object { $m[$_].D -ne 'final' -and $m[$_].N -ge $Tavan } | Sort-Object | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_) })
+}
+function Get-MerkezTavanTeshis($Gunler) {
+    $g = @($Gunler | Where-Object { $_ }); if (-not $g.Count) { return $null }
+    return @{ Seviye = 'warn'; Anahtar = 'derleme-tavan'; Metin = "$($g.Count) gün derlenemiyor (deneme tavanı): $(($g | Select-Object -First 3) -join ', ') · beyin derle-zorla"
+        Neden = 'derleyici bu günleri 3 denemede bitiremedi'; Etki = 'o günlerden kavram notu çıkmaz'
+        Duzelt = @{ Ad = 'tavandaki günleri yeniden derle'; Argv = @('derle-zorla'); Oto = $true } }
+}
 function Get-MerkezEskiAktarim($Aktarimlar, [datetime]$Simdi = (Get-Date)) {
     # 3 gunden eski acik aktarimlar: TEK teshis, sayi + EN ESKISI (eskiden siralamada ilk rastlanan yaziliyordu).
     $eski = @(); foreach ($h in @($Aktarimlar)) { try { $t = [datetime]::Parse([string]$h.ts); if (($Simdi - $t).TotalDays -gt 3) { $eski += @{ H = $h; T = $t } } } catch { } }
@@ -818,6 +837,13 @@ function Get-MerkezAnlik {
         } catch { if ($Onbellek.ContainsKey('Aktarimlar')) { $a.Aktarimlar = $Onbellek.Aktarimlar } }
     }
     $et = Get-MerkezEskiAktarim $a.Aktarimlar $simdi; if ($et) { $a.Teshis.Add($et) }
+    # derleme tavani: dosya imzasiyla onbellekli (her karede okunmaz)
+    try {
+        $cdF = Join-Path $Paths.ScrState 'compiled_daylogs.txt'; $cdImza = ''
+        if (Test-Path -LiteralPath $cdF) { $cdIt = Get-Item -LiteralPath $cdF; $cdImza = "$($cdIt.Length)|$($cdIt.LastWriteTimeUtc.Ticks)" }
+        if ($Onbellek['imza:Tavan'] -ne $cdImza) { $Onbellek.Tavan = Get-MerkezDerlemeTavani $cdF; $Onbellek['imza:Tavan'] = $cdImza }
+        $tv = Get-MerkezTavanTeshis $Onbellek.Tavan; if ($tv) { $a.Teshis.Add($tv) }
+    } catch { }
 
     # --- kaynak + maliyet (yavas) ---
     $tazeKay = $Onbellek.ContainsKey('ts:Kaynak') -and ($simdi - $Onbellek['ts:Kaynak']).TotalSeconds -lt 20
@@ -1110,6 +1136,7 @@ $script:MerkezKomutBicim = @(
     '^beyin takim (izle|durum|status|collect|integrate|lead-review|verify|resume|cleanup) (--run )?R[0-9A-Za-z-]{1,40}( TASK-[A-Z0-9](?:[A-Z0-9-]{0,46}[A-Z0-9])?| --wait| --recheck| --approved)?$'
     '^beyin (bekci|maliyet|doktor|aktar|durum|canli|kapasite|copcu|ayar|gecmis|makbuz)$'
     '^beyin aktar -Topla( -Uygula)?$'
+    '^beyin derle-zorla$'
 )
 function Test-MerkezGuvenliKomut([string]$Komut) {
     # Beyaz liste TUR BASINA tam eslesme: kimlikler yalniz ASCII, serbest ek yok, alt komut sabit (ajan metninden '· beyin guncelle

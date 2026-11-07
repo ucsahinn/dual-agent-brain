@@ -943,6 +943,7 @@ $script:komutPaleti = @(
     @{ Argv = @('aktar', '-Topla');           Aciklama = 'toplanacak aktarımların önizlemesi (hiçbir şey değişmez)' }
     @{ Argv = @('aktar', '-Topla', '-Uygula'); Aciklama = 'teslim edilmiş / sahipsiz / bayat aktarımları tek seferde kapatır'; Yazar = 'yazar' }
     @{ Argv = @('copcu');                     Aciklama = 'disk raporu: silinebilir derleme çıktıları (silmez)' }
+    @{ Argv = @('derle-zorla');               Aciklama = 'takılmış günleri yeniden derle (deneme tavanı; bütçeden 1 çağrı)' }
     @{ Argv = @('makbuz');                    Aciklama = 'motor bugün neyi yazdı, kaç bütçe harcadı' }
     @{ Argv = @('gecmis');                    Aciklama = 'oturum zinciri: açılış · devam · kapanış' }
     @{ Argv = @('ayar');                      Aciklama = 'bütün ayarlar, etkin değer ve nereden geldiği' }

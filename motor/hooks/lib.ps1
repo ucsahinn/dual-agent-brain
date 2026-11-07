@@ -999,6 +999,17 @@ function Add-BeyinCompileAttempt {
     if ($txt) { Add-BeyinText -Path $f -Text $txt }
 }
 
+function Test-BeyinCompileAltyapi {
+    # ALTYAPI HATASI DENEME SAYILMAZ (2026-11-07). Olculdu: gece 04:09 DNS
+    # kesintisi (ENOTFOUND) modeli hic calistirmadi ama gune deneme yazdi; gun
+    # 3 denemede tavana carpip 'artik derlenmeyecek' kumesine dustu. Deneme
+    # sayaci "model calisti, sonuc alinamadi" icin; ag/kota/kimlik hatasi
+    # gunun iceriginden bagimsizdir ve tekrar denemek dogrudur.
+    param([string]$Detay)
+    if ([string]::IsNullOrWhiteSpace($Detay)) { return $false }
+    return (Test-BeyinMatch -Text $Detay -Pattern 'KOTA/LIMIT|KIMLIK|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|reach the API|unable to connect|getaddrinfo|fetch failed|socket hang up|network error')
+}
+
 function Add-BeyinSeenDaylogs {
     # BASARI kaydi. Bicim: name|state|attempts
     #
@@ -3270,7 +3281,13 @@ function Start-BeyinScript {
     param(
         [Parameter(Mandatory = $true)][string]$ScriptPath,
         [Parameter(Mandatory = $true)][string]$Vault,
-        [hashtable]$Params = @{}
+        [hashtable]$Params = @{},
+        # KOPUK (2026-11-07): sureci kancanin surec agacinin DISINDA baslat.
+        # Olculdu: session-start'in baslattigi derleyicilerin 15'te 5'i hic sonuc
+        # yazmadan oldu (kanca zaman asiminda ajan TUM agaci oldurur; Codex
+        # JobObject/taskkill /T). Win32_Process.Create ile dogan surecin ebeveyni
+        # WMI hizmetidir, kancanin agacinda degildir. Basarisizsa Start-Process'e duser.
+        [switch]$Kopuk
     )
     if (-not (Test-Path -LiteralPath $ScriptPath)) { return $false }
 
@@ -3282,6 +3299,20 @@ function Start-BeyinScript {
         $argList.Add('-' + $k)
         # Sondaki ters-slash kapanis alintisini kacislar -> normalize et
         $argList.Add('"' + ($v -replace '\\+$', '') + '"')
+    }
+    if ($Kopuk) {
+        try {
+            $si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+            $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -OperationTimeoutSec 5 -ErrorAction Stop -Arguments @{
+                CommandLine               = ('powershell.exe ' + ($argList.ToArray() -join ' '))
+                CurrentDirectory          = $Vault
+                ProcessStartupInformation = $si
+            }
+            if ([int]$r.ReturnValue -eq 0) { return $true }
+            Write-BeyinLog -Vault $Vault -Message "kopuk baslatma basarisiz ($(Split-Path -Leaf $ScriptPath)): Win32_Process.Create=$($r.ReturnValue), Start-Process'e dusuldu"
+        } catch {
+            Write-BeyinLog -Vault $Vault -Message "kopuk baslatma basarisiz ($(Split-Path -Leaf $ScriptPath)): $($_.Exception.Message), Start-Process'e dusuldu"
+        }
     }
     try {
         Start-Process -FilePath 'powershell.exe' -ArgumentList $argList.ToArray() `

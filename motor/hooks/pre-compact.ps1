@@ -114,7 +114,7 @@ try {
                 }
             } | Out-Null
             if ($script:derleTetik) {
-                if (Start-BeyinScript -ScriptPath (Join-Path $p.Scripts 'compile.ps1') -Vault $vault -Params @{ Vault = $vault }) {
+                if (Start-BeyinScript -ScriptPath (Join-Path $p.Scripts 'compile.ps1') -Vault $vault -Params @{ Vault = $vault } -Kopuk) {
                     Write-BeyinLog -Vault $vault -Message 'pre-compact: derleyici baslatildi'
                 }
             }

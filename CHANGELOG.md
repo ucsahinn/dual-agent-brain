@@ -21,6 +21,22 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.9.1 - 2026-11-07 - Derleyici gunleri bosuna kaybetmiyor
+
+Hata duzeltme. Gece derleyicisi bir gunu 3 denemede tavana carpinca o gun bir
+daha derlenmiyordu; iki altyapi durumu yanlislikla deneme sayiliyordu:
+
+- **Ag/kota/giris hatasi artik deneme sayilmaz.** Olculdu: 2026-11-07 04:09 DNS
+  kesintisi (ENOTFOUND) modeli hic calistirmadan gune deneme yazdi.
+- **Derleyici kancanin surec agacindan kopuk baslar.** Kanca zaman asiminda ajan
+  tum agaci olduruyordu; olculdu: session-start'in baslattigi 15 derleyicinin 5'i
+  sonuc yazmadan oldu. Uc kanca (session-start, session-end, pre-compact) artik
+  derleyiciyi Win32_Process.Create ile baslatir; olmazsa eski yola duser.
+- Deneme model DONDUKTEN sonra sayilir. Surec model cagrisinda olurse geride
+  `compile-deneme-askida.txt` kalir ve bir sonraki kosu o denemeyi sayar: her
+  seferinde coken "zehirli gun" korumasi aynen surer.
+- Tavana carpmis gun varsa: `compile.ps1 -Force` (doktor bunu soyler).
+
 ## 1.9.0 - 2026-11-06 - Merkez etkilesimli ve tiklanabilir, aktarim topla
 
 `beyin merkez` artik yalniz izlemiyor; bekleyen isi oradan bitirirsin.

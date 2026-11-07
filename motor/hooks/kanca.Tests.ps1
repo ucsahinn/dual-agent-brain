@@ -745,3 +745,29 @@ Describe 'onay satiri ayristirici (2026-10-19): harfli kart kimligi, sondaki nok
         } finally { Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
+
+Describe 'derleyici deneme sayaci ve kopuk baslatma (2026-11-07)' {
+    It 'ag/kota/kimlik hatasi altyapi sayilir, deneme yazilmaz' {
+        Test-BeyinCompileAltyapi -Detay " | stdout: API Error: Can't reach the API server - check your internet or DNS (ENOTFOUND)" | Should Be $true
+        Test-BeyinCompileAltyapi -Detay ' [KOTA/LIMIT] stdout: rate limit' | Should Be $true
+        Test-BeyinCompileAltyapi -Detay ' [KIMLIK] oturum yok' | Should Be $true
+        Test-BeyinCompileAltyapi -Detay ' | stdout: connect ECONNRESET' | Should Be $true
+    }
+    It 'model hatasi altyapi sayilmaz (zehirli gun korumasi surer)' {
+        Test-BeyinCompileAltyapi -Detay ' | stdout: zaman asimi, cikti bozuk' | Should Be $false
+        Test-BeyinCompileAltyapi -Detay '' | Should Be $false
+    }
+    It 'compile denemeyi model dondukten sonra sayar, askida dosyasi birakir' {
+        $src = [IO.File]::ReadAllText((Join-Path $vault 'motor\scripts\compile.ps1'))
+        $src | Should Match 'compile-deneme-askida\.txt'
+        $iCagri = $src.IndexOf('Invoke-BeyinModel -Prompt $instr')
+        $iSay   = $src.IndexOf('if (-not $altyapi) { Add-BeyinCompileAttempt')
+        $iCagri | Should BeGreaterThan 0
+        $iSay | Should BeGreaterThan $iCagri
+    }
+    It 'uc kanca derleyiciyi kopuk baslatir' {
+        foreach ($k in 'session-start.ps1','session-end.ps1','pre-compact.ps1') {
+            [IO.File]::ReadAllText((Join-Path $here $k)) | Should Match "compile\.ps1'\) -Vault \`$vault -Params @\{ Vault = \`$vault \} -Kopuk"
+        }
+    }
+}

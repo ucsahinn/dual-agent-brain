@@ -829,7 +829,22 @@ if (-not (Test-BeyinBudget -Paths $p -MaxPerDay (Get-BeyinCompileBudget))) {
 #
 # Denemenin amaci "model calisti ama sonuc alinamadi" durumunu saymaktir;
 # "sira bize gelmedi" durumunu degil.
-Add-BeyinCompileAttempt -Paths $p -Names @($logs | Select-Object -ExpandProperty Name)
+#
+# ASKIDA DENEME (2026-11-07): deneme artik model DONDUKTEN sonra sayilir;
+# ag/kota/kimlik hatasi sayilmaz (Test-BeyinCompileAltyapi). Model cagrisi
+# sirasinda surec olurse (kanca agaci, uyku) geride 'askida' dosyasi kalir ve
+# bir sonraki kosu o denemeyi sayar: zehirli gun korumasi korunur.
+$denemeAdlari = @($logs | Select-Object -ExpandProperty Name)
+$askida = Join-Path $p.ScrState 'compile-deneme-askida.txt'
+if (Test-Path -LiteralPath $askida) {
+    $yarim = @(Get-Content -LiteralPath $askida -Encoding UTF8 -ErrorAction SilentlyContinue | Where-Object { $_ -and $_.Trim() })
+    if ($yarim.Count) {
+        Add-BeyinCompileAttempt -Paths $p -Names $yarim
+        Write-BeyinLog -Vault $Vault -Message "compile: onceki kosu model cagrisinda yarida kaldi, deneme sayildi: $($yarim -join ', ')"
+    }
+    Remove-Item -LiteralPath $askida -Force -ErrorAction SilentlyContinue
+}
+Write-BeyinText -Path $askida -Text ($denemeAdlari -join "`n")
 
 try {
     $existingFiles = @(Get-ChildItem -LiteralPath $conceptDir -Filter '*.md' -File -ErrorAction SilentlyContinue)
@@ -913,11 +928,15 @@ $corpus
     # IKI AJANLI OZETLEYICI (Faz 0.4)
     $res = Invoke-BeyinModel -Prompt $instr -Paths $p -Model 'sonnet' -TimeoutSeconds 420
     $script:mkBudget = 1; $script:mkModel = [string]$res.Backend
+    $errKisa = $(if (-not $res.Ok) { Get-BeyinFailDetail -Result $res } else { '' })
+    $altyapi = (-not $res.Ok) -and (Test-BeyinCompileAltyapi -Detay $errKisa)
+    if (-not $altyapi) { Add-BeyinCompileAttempt -Paths $p -Names $denemeAdlari }
+    Remove-Item -LiteralPath $askida -Force -ErrorAction SilentlyContinue
 
     if (-not $res.Ok) {
         # KRITIK AYRIM: model cevap vermedi. Gunleri ISARETLEMIYORUZ.
         # flush.ps1 ile ayni sebep: stderr bos olabilir, mesaj stdout'ta olur.
-        $errKisa = Get-BeyinFailDetail -Result $res
+        if ($altyapi) { $errKisa += ' - altyapi hatasi, deneme SAYILMADI' }
         # KOTA/KIMLIK: cagri hizmet almadi, derleyici butcesini iade et (Faz 5D).
         if ($errKisa -and (Test-BeyinMatch -Text $errKisa -Pattern 'KOTA/LIMIT|KIMLIK')) { Restore-BeyinBudget -Paths $p; $script:mkBudget = 0 }
         if ($errKisa -and (Test-BeyinMatch -Text $errKisa -Pattern 'KOTA/LIMIT')) {

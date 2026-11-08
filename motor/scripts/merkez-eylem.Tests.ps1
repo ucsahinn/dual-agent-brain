@@ -230,3 +230,53 @@ Describe 'merkez: bakim turu B (2026-11-07)' {
         $e.Aciklama | Should Be 'beyin derle-zorla'
     }
 }
+
+Describe 'merkez: Claude kota cubugu (2026-11-08)' {
+    BeforeAll { . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1'); . (Join-Path $PSScriptRoot 'merkez-veri.ps1') }
+    $simdi = [datetime]'2026-11-08T12:00:00'
+    $yanit = { [pscustomobject]@{ five_hour = [pscustomobject]@{ utilization = 33.6; resets_at = '2026-11-08T14:00:00Z' }; seven_day = [pscustomobject]@{ utilization = 92; resets_at = '2026-11-12T09:00:00Z' } } }
+    It 'yaniti ayristirir, disk onbellegine yalniz yuzde + sifirlama yazar' {
+        $onb = Join-Path $TestDrive 'kota1.json'
+        $k = Get-MerkezKota -OnbYol $onb -Onbellek @{} -Simdi $simdi -Getir $yanit
+        $k.Ok | Should Be $true
+        [Math]::Round($k.Oturum.Yuzde, 1) | Should Be 33.6
+        $k.Hafta.Yuzde | Should Be 92
+        $k.Oturum.Sifirlama | Should Not BeNullOrEmpty
+        $d = Get-Content -LiteralPath $onb -Raw | ConvertFrom-Json
+        @($d.PSObject.Properties.Name | Sort-Object) -join ',' | Should Be 'five_hour,seven_day,ts'
+        (Get-Content -LiteralPath $onb -Raw) | Should Not Match 'Bearer|accessToken|token'
+    }
+    It '120 sn icinde ikinci cagri ag cagrisi yapmaz; disk onbellegi baska pencereye yeter' {
+        $onb = Join-Path $TestDrive 'kota2.json'; $script:say = 0
+        $g = { $script:say++; & $yanit }
+        $o = @{}
+        [void](Get-MerkezKota -OnbYol $onb -Onbellek $o -Simdi $simdi -Getir $g)
+        [void](Get-MerkezKota -OnbYol $onb -Onbellek $o -Simdi $simdi.AddSeconds(60) -Getir $g)
+        $script:say | Should Be 1
+        $k2 = Get-MerkezKota -OnbYol $onb -Onbellek @{} -Simdi $simdi.AddSeconds(30) -Getir $g
+        $script:say | Should Be 1
+        $k2.Hafta.Yuzde | Should Be 92
+    }
+    It 'hata: son iyi olcum eski diye kalir; hic olcum yoksa Ok=false ve neden' {
+        $o = @{}
+        [void](Get-MerkezKota -OnbYol '' -Onbellek $o -Simdi $simdi -Getir $yanit)
+        $k = Get-MerkezKota -OnbYol '' -Onbellek $o -Simdi $simdi.AddSeconds(200) -Getir { throw 'bağlantı yok' }
+        $k.Ok | Should Be $true; $k.Hata | Should Be 'bağlantı yok'; $k.Hafta.Yuzde | Should Be 92
+        $k0 = Get-MerkezKota -OnbYol '' -Onbellek @{} -Simdi $simdi -Getir { throw 'HTTP 500' }
+        $k0.Ok | Should Be $false; $k0.Hata | Should Be 'HTTP 500'
+        $kb = Get-MerkezKota -OnbYol '' -Onbellek @{} -Simdi $simdi -Getir { [pscustomobject]@{ baska = 1 } }
+        $kb.Ok | Should Be $false
+    }
+    It 'giris bilgisi yoksa ag cagrisi denemeden neden doner; BEYIN_MERKEZ_KOTA=kapali kapatir' {
+        $k = Get-MerkezKota -KimlikYol (Join-Path $TestDrive 'yok.json') -OnbYol '' -Onbellek @{} -Simdi $simdi
+        $k.Ok | Should Be $false; $k.Hata | Should Match 'giriş bilgisi'
+        $eski = $env:BEYIN_MERKEZ_KOTA; $env:BEYIN_MERKEZ_KOTA = 'kapali'
+        try { Get-MerkezKota -OnbYol '' -Onbellek @{} -Simdi $simdi -Getir $yanit | Should BeNullOrEmpty } finally { $env:BEYIN_MERKEZ_KOTA = $eski }
+    }
+    It 'yuzde 90 ustu teshis uyarisi uretir, altinda uretmez' {
+        $k = Get-MerkezKota -OnbYol '' -Onbellek @{} -Simdi $simdi -Getir $yanit
+        $t = Get-MerkezKotaTeshis $k
+        $t.Anahtar | Should Be 'kota-hafta'; $t.Metin | Should Match '%92'
+        Get-MerkezKotaTeshis @{ Ok = $true; Oturum = @{ Yuzde = 40 }; Hafta = @{ Yuzde = 50 } } | Should BeNullOrEmpty
+    }
+}

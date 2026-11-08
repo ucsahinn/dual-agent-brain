@@ -21,6 +21,17 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.9.4 - 2026-11-08 - Merkez Claude kota karti
+
+- `beyin merkez` Genel sekmesine **KOTA** karti: Claude abonelik kotasinin 5 saatlik oturum
+  ve 7 gunluk pencere yuzdesi, sifirlanmaya kalan sure. %70 sari, %90 kirmizi; %90 ustunde
+  teshis satirina da duser. Dar ekranda ozet satirinda `kota %N`.
+- Veri Claude Code'un kendi girisiyle 2 dakikada bir okunur (birden cok merkez penceresi
+  `.state\kota.json` uzerinden tek cagri paylasir; hata sonrasi 10 dk bekler, zaman asimi 4 sn).
+  Jeton diske, loga ya da ekrana yazilmaz; onbellek yalniz yuzde + sifirlama zamani tutar.
+  Uc belgelenmemistir: duserse ya da giris suresi dolarsa kart son olcumu "eski olcum" diye gosterir.
+- Yeni ayar `BEYIN_MERKEZ_KOTA` (`acik` | `kapali`; kapali: ag cagrisi yok). `r` kotayi da tazeler.
+
 ## 1.9.3 - 2026-11-07 - Merkez bakim turu (B)
 
 - `beyin merkez` icinde `B`: bekleyen guvenli bakimi tek onayla sirayla kosar. Acik aktarim varsa

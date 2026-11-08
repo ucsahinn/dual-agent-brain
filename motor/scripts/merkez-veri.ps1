@@ -363,6 +363,88 @@ function Get-MerkezTavanTeshis($Gunler) {
         Neden = 'derleyici bu günleri 3 denemede bitiremedi'; Etki = 'o günlerden kavram notu çıkmaz'
         Duzelt = @{ Ad = 'tavandaki günleri yeniden derle'; Argv = @('derle-zorla'); Oto = $true } }
 }
+# Claude abonelik kotasi (5 saatlik oturum + 7 gunluk pencere), 2026-11-08 (kullanici onayi: "ntfy harici herseyi yap").
+# Belgelenmemis uc: api.anthropic.com/api/oauth/usage (cobanov/kota ile ayni; degisebilir, duserse kart sessizce gizlenir).
+# Jeton yalniz bu cagri boyunca bellekte durur: diske, loga, ekrana YAZILMAZ. Disk onbellegi (.state/kota.json)
+# yalniz yuzde + sifirlama zamani tasir. BEYIN_MERKEZ_KOTA=kapali (beyin ayar) kapatir. 120 sn'de bir (hata sonrasi 600 sn) tazelenir, zaman asimi 4 sn.
+function ConvertTo-MerkezKotaPencere($P) {
+    if (-not $P) { return $null }
+    $y = $null; try { if ($null -ne $P.utilization) { $y = [double]$P.utilization } } catch { $y = $null }
+    if ($null -eq $y -or [double]::IsNaN($y) -or $y -lt 0 -or $y -gt 1000) { return $null }
+    $s = $null
+    try { if ($P.resets_at) { $s = [datetime]::Parse([string]$P.resets_at, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToLocalTime() } } catch { $s = $null }
+    return @{ Yuzde = $y; Sifirlama = $s }
+}
+function ConvertTo-MerkezKotaJson($Pencere) {
+    if (-not $Pencere) { return $null }
+    return @{ utilization = $Pencere.Yuzde; resets_at = $(if ($Pencere.Sifirlama) { ([datetime]$Pencere.Sifirlama).ToUniversalTime().ToString('o') } else { $null }) }
+}
+function Get-MerkezKota {
+    param([string]$KimlikYol, [string]$OnbYol, [hashtable]$Onbellek, [datetime]$Simdi = (Get-Date), [scriptblock]$Getir = $null, [int]$TazeSn = 120, [int]$HataSn = 600)
+    $acik = 'acik'; try { $acik = [string](Get-BeyinAyar 'BEYIN_MERKEZ_KOTA' 'acik') } catch { $acik = 'acik' }
+    if ($acik -eq 'kapali') { return $null }
+    if (-not $Onbellek) { $Onbellek = @{} }
+    if ($Onbellek.ContainsKey('ts:Kota')) {
+        $bek = $(if ($Onbellek.Kota -and $Onbellek.Kota.Hata) { $HataSn } else { $TazeSn })
+        if (($Simdi - $Onbellek['ts:Kota']).TotalSeconds -lt $bek) { return $Onbellek.Kota }
+    }
+    $Onbellek['ts:Kota'] = $Simdi
+    $onceki = $Onbellek.Kota
+    # baska bir merkez penceresi az once cektiyse disk onbellegi yeter: makinede dakikada en fazla bir cagri
+    try {
+        if ($OnbYol -and (Test-Path -LiteralPath $OnbYol)) {
+            $d = (Read-MerkezPaylasimli $OnbYol) | ConvertFrom-Json
+            $dTs = [datetime]::Parse([string]$d.ts, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToLocalTime()
+            if (($Simdi - $dTs).TotalSeconds -lt $TazeSn -and ($Simdi - $dTs).TotalSeconds -ge -60) {
+                $o = ConvertTo-MerkezKotaPencere $d.five_hour; $h = ConvertTo-MerkezKotaPencere $d.seven_day
+                if ($o -or $h) { $k = @{ Ok = $true; Ts = $dTs; Oturum = $o; Hafta = $h; Hata = '' }; $Onbellek.Kota = $k; return $k }
+            }
+        }
+    } catch { }
+    $ham = $null; $hata = ''
+    try {
+        if ($Getir) { $ham = & $Getir }
+        else {
+            if (-not $KimlikYol -or -not (Test-Path -LiteralPath $KimlikYol)) { throw 'Claude giriş bilgisi yok' }
+            $tok = $null
+            try {
+                try { $tok = [string]((Get-Content -LiteralPath $KimlikYol -Raw -ErrorAction Stop | ConvertFrom-Json).claudeAiOauth.accessToken) } catch { throw 'Claude giriş bilgisi okunamadı' }
+                if ([string]::IsNullOrWhiteSpace($tok)) { throw 'Claude giriş bilgisi yok' }
+                try {
+                    $ham = Invoke-RestMethod -Uri 'https://api.anthropic.com/api/oauth/usage' -Method Get -TimeoutSec 4 -UseBasicParsing -ErrorAction Stop -Headers @{ Authorization = ('Bearer ' + $tok); 'anthropic-beta' = 'oauth-2025-04-20' }
+                } catch {
+                    # hata metni DISARI TASINMAZ (istek ayrintisi icerebilir): yalniz durum kodu
+                    $kod = 0; try { $kod = [int]$_.Exception.Response.StatusCode } catch { $kod = 0 }
+                    throw $(if ($kod -eq 401) { 'oturum süresi dolmuş, Claude Code açılınca yenilenir' } elseif ($kod -eq 429) { 'hız sınırı' } elseif ($kod) { "HTTP $kod" } else { 'bağlantı yok' })
+                }
+            } finally { $tok = $null }
+        }
+    } catch { $hata = [string]$_.Exception.Message }
+    if (-not $hata) {
+        $o = $null; $h = $null; try { $o = ConvertTo-MerkezKotaPencere $ham.five_hour; $h = ConvertTo-MerkezKotaPencere $ham.seven_day } catch { }
+        if (-not $o -and -not $h) { $hata = 'yanıt biçimi tanınmadı' }
+        else {
+            $k = @{ Ok = $true; Ts = $Simdi; Oturum = $o; Hafta = $h; Hata = '' }
+            try { if ($OnbYol) { Write-BeyinText -Path $OnbYol -Text (@{ ts = $Simdi.ToUniversalTime().ToString('o'); five_hour = (ConvertTo-MerkezKotaJson $o); seven_day = (ConvertTo-MerkezKotaJson $h) } | ConvertTo-Json -Depth 4 -Compress) } } catch { }
+            $Onbellek.Kota = $k; return $k
+        }
+    }
+    # hata: son iyi olcum kalir (eski diye isaretli), yoksa yalniz neden
+    if ($onceki -and $onceki.Ok) { $k = @{ Ok = $true; Ts = $onceki.Ts; Oturum = $onceki.Oturum; Hafta = $onceki.Hafta; Hata = $hata } }
+    else { $k = @{ Ok = $false; Ts = $Simdi; Oturum = $null; Hafta = $null; Hata = $hata } }
+    $Onbellek.Kota = $k; return $k
+}
+function Get-MerkezKotaTeshis($Kota, [int]$Esik = 90) {
+    if (-not $Kota -or -not $Kota.Ok) { return $null }
+    foreach ($p in @(@{ P = $Kota.Oturum; Ad = '5 saatlik oturum'; An = 'kota-oturum' }, @{ P = $Kota.Hafta; Ad = '7 günlük'; An = 'kota-hafta' })) {
+        if ($p.P -and [double]$p.P.Yuzde -ge $Esik) {
+            $sf = $(if ($p.P.Sifirlama) { ' · sıfırlanma ' + ([datetime]$p.P.Sifirlama).ToString('dd.MM HH:mm') } else { '' })
+            return @{ Seviye = 'warn'; Anahtar = $p.An; Metin = "Claude $($p.Ad) kotası %$([int][Math]::Round([double]$p.P.Yuzde))$sf"
+                Neden = 'abonelik kullanım penceresi doluyor'; Etki = 'dolunca Claude oturumları ve işçileri sıfırlanmaya kadar durur' }
+        }
+    }
+    return $null
+}
 function Get-MerkezEskiAktarim($Aktarimlar, [datetime]$Simdi = (Get-Date)) {
     # 3 gunden eski acik aktarimlar: TEK teshis, sayi + EN ESKISI (eskiden siralamada ilk rastlanan yaziliyordu).
     $eski = @(); foreach ($h in @($Aktarimlar)) { try { $t = [datetime]::Parse([string]$h.ts); if (($Simdi - $t).TotalDays -gt 3) { $eski += @{ H = $h; T = $t } } } catch { } }
@@ -862,6 +944,13 @@ function Get-MerkezAnlik {
         try { if (Test-Path -LiteralPath $mf) { $m = (Read-MerkezPaylasimli $mf) | ConvertFrom-Json } } catch { }
         $a.Maliyet = $m; $Onbellek.Maliyet = $m
     }
+    # abonelik kotasi: hizli turda yalniz onbellek (ag cagrisi yavas yolda, kendi 120 sn araligiyla)
+    if ($Hizli -and $Onbellek.ContainsKey('Kota')) { $a.Kota = $Onbellek.Kota } else {
+        $a.Kota = $null
+        try { $a.Kota = Get-MerkezKota -KimlikYol (Join-Path $env:USERPROFILE '.claude\.credentials.json') -OnbYol (Join-Path $Paths.ScrState 'kota.json') -Onbellek $Onbellek -Simdi $simdi } catch { $a.Kota = $null }
+        if (-not $Onbellek.ContainsKey('Kota')) { $Onbellek.Kota = $a.Kota }
+    }
+    $kt = Get-MerkezKotaTeshis $a.Kota; if ($kt) { $a.Teshis.Add($kt) }
     if ($a.Kaynak -and $a.Kaynak.Ok) {
         if ($a.Kaynak.CommitYuzde -ge 85) {
             $enCok = Get-MerkezBellekDokum $Onbellek $simdi

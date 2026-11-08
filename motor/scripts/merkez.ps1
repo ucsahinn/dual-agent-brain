@@ -562,6 +562,7 @@ function BolumKartlar($L, $a) {
             "$cTeal${BOLD}Codex$RS $cText$(Fmt ([double]$a.Maliyet.codexJeton))$RS$cMuted jeton$RS",
             "$(if ($a.Bugun -and @($a.Bugun.Gunluk).Count -eq 7) { (Spark ([double[]]$a.Bugun.Gunluk) 7 $rgbAcc $CizRgb.Claude) + " ${cFaint}7 gün$RS" })$(if ($bUsd -gt 0 -and $mUsd -gt 0) { "$cFaint · $RS$cWarn%$([int][Math]::Round(100 * $bUsd / $mUsd))$RS$cFaint'si 200K+ bağlamda$RS" })") }
     } catch { $kartlar += @{ t = '💰 MALİYET'; tr = $cWarn; l = @("${cWarn}maliyet dosyası okunamadı$RS", "${cFaint}yeniden taramak: beyin maliyet$RS", '') } } }
+    if ($a.Kota -and $a.Kota.Ok) { try { $kartlar += (KotaKart $a.Kota) } catch { } }
     $enEski = ''; foreach ($hd in $a.Aktarimlar) { try { $t = [datetime]::Parse([string]$hd.ts); if (-not $enEski -or $t -lt $enEski.T) { $enEski = @{ T = $t; P = [string]$hd.toProject } } } catch { } }
     $eskiAkt = ($enEski -and ((Get-Date) - $enEski.T).TotalDays -gt 3)
     $kartlar += @{ t = "📋 PANO · AKTARIM$(if ($eskiAkt) { ' ▲' })"; tr = $(if ($eskiAkt) { $cWarn } else { '' }); l = @("$cText$BOLD$($a.Kartlar.Count)$RS$cMuted açık kart$RS$(if (@($a.Kartlar | Where-Object { $_.status -eq 'review' }).Count) { "$cWarn · $(@($a.Kartlar | Where-Object { $_.status -eq 'review' }).Count) incelemede$RS" })",
@@ -578,9 +579,24 @@ function BolumKartlar($L, $a) {
         $oz1 = @("${cMuted}onay$RS $(if ($a.Onaylar.Count) { "$cWarn$BOLD$($a.Onaylar.Count)$RS" } else { "$cOk" + '0' + "$RS" })")
         if ($a.Kaynak -and $a.Kaynak.Ok) { $cy = [int]$a.Kaynak.CommitYuzde; $oz1 += "${cMuted}bellek$RS $(if ($cy -ge 85) { $cErr } elseif ($cy -ge 70) { $cWarn } else { $cText })%$cy$RS" }
         if ($a.Maliyet) { try { $oz1 += "${cMuted}maliyet $([int]$a.Maliyet.gun) gün$RS $cText$(Usd ([double]$a.Maliyet.claudeUsd))$RS" } catch { $oz1 += "${cWarn}maliyet okunamadı$RS" } }
+        if ($a.Kota -and $a.Kota.Ok -and $a.Kota.Oturum) { $ky = [int][Math]::Round([double]$a.Kota.Oturum.Yuzde); $oz1 += "${cMuted}kota$RS $(if ($ky -ge 90) { $cErr } elseif ($ky -ge 70) { $cWarn } else { $cText })%$ky$RS" }
         $oz2 = @("${cMuted}ajan$RS $cText$calisan/$toplam$RS", "${cMuted}koşu$RS $cText$($acikKosu.Count)$RS", "${cMuted}pano$RS $cText$($a.Kartlar.Count)$RS", "${cMuted}aktarım$RS $cText$($a.Aktarimlar.Count)$RS")
         $L.Add((Row ($oz1 -join "$cFrame  ·  $RS") $w)); $L.Add((Row ($oz2 -join "$cFrame  ·  $RS") $w))
     }
+}
+function KotaKart($k) {
+    # Claude abonelik kotasi karti: 5 saatlik oturum + 7 gunluk pencere, sifirlanmaya kalan sure
+    $satir = {
+        param($etiket, $p)
+        if (-not $p) { return "${cMuted}$etiket$RS ${cFaint}veri yok$RS" }
+        $y = [double]$p.Yuzde; $yi = [int][Math]::Round($y); $renk = $(if ($y -ge 90) { $cErr } elseif ($y -ge 70) { $cWarn } else { $cOk })
+        $kal = $(if ($p.Sifirlama) { $sn = ([datetime]$p.Sifirlama - (Get-Date)).TotalSeconds; if ($sn -gt 0) { "$cFaint · $(KisaYas $sn) sonra sıfır$RS" } else { "$cFaint · sıfırlandı$RS" } } else { '' })
+        return "${cMuted}$etiket$RS $(EsikBar ([Math]::Min(1.0, $y / 100.0)) 10) $renk$BOLD%$yi$RS$kal"
+    }
+    $mx = 0.0; foreach ($p in @($k.Oturum, $k.Hafta)) { if ($p -and [double]$p.Yuzde -gt $mx) { $mx = [double]$p.Yuzde } }
+    $alt = $(if ($k.Hata) { "${cWarn}eski ölçüm$RS$cFaint · $(Protect-MerkezSatir ([string]$k.Hata) 30)$RS" } else { "${cFaint}Claude abonelik · $(([datetime]$k.Ts).ToString('HH:mm')) itibarıyla$RS" })
+    return @{ t = "🔋 KOTA$(if ($mx -ge 90) { ' ✕' } elseif ($mx -ge 70) { ' ▲' })"; r = $(if ($mx -ge 90) { $cErr } else { '' }); tr = $(if ($mx -ge 70 -or $k.Hata) { $cWarn } else { '' })
+        l = @((& $satir '5 saat' $k.Oturum), (& $satir '7 gün ' $k.Hafta), $alt) }
 }
 function BolumSirada($L, $bolumBas, $a) {
     if ($a.Kuyruk -or $a.Sprint) {
@@ -1208,7 +1224,7 @@ function TusIsle($kk) {
         '1' { SekmeGec 'Genel' } '2' { SekmeGec 'Ajanlar' } '3' { SekmeGec 'Kosular' } '4' { SekmeGec 'Olaylar' } '5' { SekmeGec 'Isler' }
         'j' { SecimKaydir 1 } 'k' { SecimKaydir -1 }
         'a' { $script:hepsi[$script:sekmeAktif] = -not $script:hepsi[$script:sekmeAktif] }
-        'r' { foreach ($k in @('ts:Aktarimlar', 'ts:Kaynak', 'Maliyet', 'Bugun', 'ClaudeIsler', 'SonKosu')) { [void]$script:onb.Remove($k) }; $script:onb.KaynakTaze = $true; $script:bolumOnb = @{}; $script:lastFrame = ''; Tazele $true; Mesaj "yenilendi · $((Get-Date).ToString('HH:mm:ss')) · kaynak yeniden ölçüldü" $cOk }
+        'r' { foreach ($k in @('ts:Aktarimlar', 'ts:Kaynak', 'ts:Kota', 'Maliyet', 'Bugun', 'ClaudeIsler', 'SonKosu')) { [void]$script:onb.Remove($k) }; $script:onb.KaynakTaze = $true; $script:bolumOnb = @{}; $script:lastFrame = ''; Tazele $true; Mesaj "yenilendi · $((Get-Date).ToString('HH:mm:ss')) · kaynak yeniden ölçüldü" $cOk }
         'c' { $o = Secili; if ($o) { Kopyala $o } else { Mesaj 'önce ↑↓ ile bir satır seç' } }
         'p' { KosuPanosu (Secili) }
         '?' { $script:yardimAcik = -not $script:yardimAcik }

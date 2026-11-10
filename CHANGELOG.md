@@ -1,4 +1,4 @@
-﻿# Degisiklik gunlugu
+# Degisiklik gunlugu
 
 Bu dosya motorun surumler arasinda **kullanici icin ne degistigini** anlatir:
 hangi komut geldi, hangi davranis duzeldi, neyi bir daha eskisi gibi
@@ -20,6 +20,20 @@ Surum damgasi vault kokundeki `.beyin-version` dosyasindadir; `beyin durum`
 onu ve yayindaki surumu birlikte basar.
 
 ---
+
+## 1.9.7 - 2026-11-10 - Yedek budamasi
+
+- **brain-cli yedekleri artik sinirsiz birikmez.** `beyin yedek` brain-cli ile
+  alindiginda `.brain/backups/backup-*` klasorleri hic budanmiyordu (13 kopya,
+  ~600 MB, 100 binden fazla dosya; her biri `.git` ve `.state` dahil). Artik
+  basarili bir brain-cli yedeginden sonra ayni `-Tut` siniri (varsayilan 5,
+  `0` = budama yok) uygulanir: yalniz `manifest.json` tasiyan tam yedekler
+  sayilir ve en yenileri tutulur. `manifest.json`'siz (yarim) klasorlere
+  dokunulmaz, yalniz yolu bildirilir. **Ilk gece kosusu eski brain-cli
+  yedeklerinden 5'ten fazlasini siler.**
+- **Sef MCP testi gercek depoyu kirletmiyor.** `server.test.mjs` sunucuyu calisma
+  klasoru koku ile kuruyordu; `motor\` altindan kosunca satir ici brif
+  `motor\motor\scripts\.state\...` altina yaziliyordu. Test artik gecici kok kullanir.
 
 ## 1.9.6 - 2026-11-10 - Gece yedegi geri dusus
 

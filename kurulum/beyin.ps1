@@ -863,6 +863,27 @@ switch ($KomutN) {
             Write-Output "brain-cli yedegi basarisiz (kod=$cliKod) - motorun kendi yedegine (yedek.ps1) dusuluyor"
             Cagir 'yedek.ps1' @($a.Gecen)
         }
+        # 2026-11-10 BUDAMA: yedek.ps1 yalniz kendi 'beyin-*' klasorlerini budar; brain-cli'nin 'backup-*' yedekleri
+        # (.git ve .state dahil) HIC budanmiyordu - 13 kopya, ~600 MB, 100 binden fazla dosya. Ayni -Tut sozlesmesi
+        # (varsayilan 5, 0 = budama yok): yalniz manifest.json tasiyan TAM brain-cli yedekleri sayilir ve budanir;
+        # manifest'siz (yarim) klasorlere dokunulmaz, elle bakilsin diye yalniz bildirilir.
+        $tut = 5
+        $gecen = @($a.Gecen)
+        for ($gi = 0; $gi -lt $gecen.Count - 1; $gi++) { if ("$($gecen[$gi])" -ieq '-tut') { [int]::TryParse("$($gecen[$gi + 1])", [ref]$tut) | Out-Null } }
+        $yedekKok = Join-Path $vault '.brain\backups'
+        if ($tut -gt 0 -and (Test-Path -LiteralPath $yedekKok)) {
+            $cliYedek = @(Get-ChildItem -LiteralPath $yedekKok -Directory -Filter 'backup-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+            $tamlar = @($cliYedek | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'manifest.json') })
+            $budanan = 0
+            foreach ($eski in @($tamlar | Select-Object -Skip $tut)) {
+                if ($eski.FullName -notlike (Join-Path $yedekKok 'backup-*')) { continue }
+                Remove-Item -LiteralPath $eski.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                if (-not (Test-Path -LiteralPath $eski.FullName)) { $budanan++ }
+            }
+            if ($budanan) { Write-Output "brain-cli: $budanan eski yedek budandi (en yeni $tut tam yedek tutuldu)" }
+            $yarim = @($cliYedek | Where-Object { -not (Test-Path -LiteralPath (Join-Path $_.FullName 'manifest.json')) })
+            if ($yarim.Count) { Write-Output "brain-cli: manifest'siz (yarim) $($yarim.Count) yedek klasoru var, elle bak: $($yarim[0].FullName)" }
+        }
         exit $cliKod
     }
 

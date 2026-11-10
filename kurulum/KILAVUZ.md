@@ -422,7 +422,7 @@ BEYIN DURUMU  (2026-01-15 09:12)  ·  motor v1.0.0
 | `bagla-uygula` | Ayni, ama bolumleri gercekten yazar. `-MinCos` (0.55), `-EnFazla` (4), `-Json`. | **Evet** |
 | `zamanla` (`schedule`) | Gece gorevlerini Windows Gorev Zamanlayici'ya kaydeder. `-Liste`, `-Kaldir`, `-KuruCalisma`. | **Evet** (zamanlanmis gorev) |
 | `zamanli <komut>` | Zamanlayici sarmalayicisi: kimlik on kontrolu + `[zamanlayici]` logu + makbuz. Elle cagirman gerekmez; gorevler bunu kullanir. | Komuta gore |
-| `yedek` (`backup`) | Tam vault yedegi alir -> `.brain/backups/beyin-<damga>/`. **Gercekten yazar**; plani gormek icin `-KuruCalisma`, kac yedek tutulacagi icin `-Tut <n>` (5). Kopyaya girmeyenler: `.git`, `.obsidian`, `*/.state`, yedek klasorunun kendisi. Tamamlanma isareti `TAMAM.txt` tasimayan klasor **yarim** sayilir. | **Evet** |
+| `yedek` (`backup`) | Tam vault yedegi alir -> `.brain/backups/beyin-<damga>/`. **Gercekten yazar**; plani gormek icin `-KuruCalisma`, kac yedek tutulacagi icin `-Tut <n>` (5). Kopyaya girmeyenler: `.git`, `.obsidian`, `*/.state`, yedek klasorunun kendisi. Tamamlanma isareti `TAMAM.txt` tasimayan klasor **yarim** sayilir. brain-cli kuruluysa o tercih edilir (`backup-<damga>/`, `manifest.json`'li); basarisiz olursa motorun kendi yedegine duser, basarili olursa ayni `-Tut` siniriyla en yeni tam `backup-*` yedekleri tutulur, `manifest.json`'siz (yarim) klasorlere dokunulmaz. | **Evet** |
 
 > **`copcu-uygula` hakkinda.** Silmeden once yedi kapinin **hepsi** birden
 > saglanmak zorundadir: klasor git'te yok sayilan/izlenmeyen olacak, adi izin

@@ -21,6 +21,18 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.9.5 - 2026-11-10 - Merkez bellek duzeltmesi
+
+- **Uzun acik kalan `beyin merkez` artik bellegi biriktirmez.** Panel 10
+  dakikalik tam bellek toplamasini yalniz "ekranda hareket yokken" yapiyordu;
+  surekli calisan bir ajan oldugu surece (cok oturumlu makinede hep) hic
+  yapmiyordu. Canli olcum: 3,4 saat acik kalan panel 3,3 GB ozel bellege
+  cikmisti. Toplama artik hareketten bagimsiz 10 dakikada bir calisir.
+- **Emniyet supabi `BEYIN_MERKEZ_BELLEK_MB`** (varsayilan `1536`): toplamadan
+  sonra bile ozel bellek bu degeri asarsa panel, kosan ya da siradaki bir is
+  yokken, secili sekmesini koruyarak kendini yeniden yukler (yalniz
+  baslatici altinda; `0` kapatir). `engine.log`'a bir satir duser.
+
 ## 1.9.4 - 2026-11-08 - Merkez Claude kota karti
 
 - `beyin merkez` Genel sekmesine **KOTA** karti: Claude abonelik kotasinin 5 saatlik oturum

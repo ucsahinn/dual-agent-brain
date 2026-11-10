@@ -1330,9 +1330,22 @@ try {
         $script:oncekiCanli = $script:CizCanli
         # uzun omurlu bosta panel: CLR 2. kusak ve buyuk nesne yigini kendiliginden geri verilmiyordu (canli izde ~5,5 MB/sa
         # dogrusal buyume; sanal saatli 3 saatlik testte panelin kendi durumu sinirli). Hareket yokken 10 dk'da bir tam toplama.
-        if (-not $script:CizCanli -and ((Get-Date) - $script:sonGc).TotalMinutes -ge 10) {
+        # 2026-11-10: kosul "hareket yokken" idi; surekli canli ajan olan makinede (12 Claude oturumu) toplama HIC calismadi ve
+        # panel 3,4 saatte 3,3 GB ozel bellege cikti. Artik hareketten bagimsiz 10 dk'da bir; tam toplama birkac on ms surer.
+        if (((Get-Date) - $script:sonGc).TotalMinutes -ge 10) {
             $script:sonGc = Get-Date
             try { [System.Runtime.GCSettings]::LargeObjectHeapCompactionMode = 'CompactOnce'; [GC]::Collect(); [GC]::WaitForPendingFinalizers(); [GC]::Collect() } catch { }
+            # Emniyet supabi: toplamadan sonra bile ozel bellek BEYIN_MERKEZ_BELLEK_MB'yi (vars. 1536) asiyorsa ve baslatici altinda,
+            # kosan/siradaki is yokken panel kendini yeniden yukler (cikis 75, sekme korunur) - kaynagi ne olursa olsun sinirli kalir.
+            try {
+                $pm = [Diagnostics.Process]::GetCurrentProcess(); $ozelMb = [int]($pm.PrivateMemorySize64 / 1MB); $pm.Dispose()
+                $tavanMb = 1536; try { $tavanMb = [int](Get-BeyinAyar 'BEYIN_MERKEZ_BELLEK_MB' '1536') } catch { }
+                if ($tavanMb -gt 0 -and $ozelMb -gt $tavanMb -and $script:sekmeDosya -and -not $script:aktifIs -and -not ($script:kuyruk -and $script:kuyruk.Count)) {
+                    try { Write-BeyinLog "merkez: ozel bellek $ozelMb MB > $tavanMb MB, panel yeniden yukleniyor" } catch { }
+                    [Console]::Write("$ESC[H$ESC[J$cMuted merkez belleği tazeleniyor ($ozelMb MB)…$RS`n")
+                    $yenidenYukle = $true; $quit = $true; break
+                }
+            } catch { }
         }
         $hedefMs = $(if ($script:CizCanli) { 120 } else { 1000 }); $bekle = [Diagnostics.Stopwatch]::StartNew()
         while ($bekle.ElapsedMilliseconds -lt $hedefMs -and -not $quit) { if (GirdiBekliyor) { break }; Start-Sleep -Milliseconds 40 }

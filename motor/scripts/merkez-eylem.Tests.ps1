@@ -280,3 +280,22 @@ Describe 'merkez: Claude kota cubugu (2026-11-08)' {
         Get-MerkezKotaTeshis @{ Ok = $true; Oturum = @{ Yuzde = 40 }; Hafta = @{ Yuzde = 50 } } | Should BeNullOrEmpty
     }
 }
+
+Describe 'merkez: bellek toplama ve emniyet supabi (2026-11-10)' {
+    BeforeAll { $script:kaynak = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'merkez.ps1')); . (Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks\lib.ps1') }
+    It 'periyodik GC hareketten (CizCanli) bagimsiz calisir' {
+        $script:kaynak -match '-not \$script:CizCanli -and \(\(Get-Date\) - \$script:sonGc\)' | Should Be $false
+        $script:kaynak -match 'if \(\(\(Get-Date\) - \$script:sonGc\)\.TotalMinutes -ge 10\)' | Should Be $true
+    }
+    It 'tavan asilinca yalniz baslatici altinda ve is yokken yeniden yukler' {
+        $i = $script:kaynak.IndexOf('BEYIN_MERKEZ_BELLEK_MB'); $i | Should BeGreaterThan 0
+        $parca = $script:kaynak.Substring($i, 1100)
+        $parca | Should Match '\$script:sekmeDosya'
+        $parca | Should Match '-not \$script:aktifIs'
+        $parca | Should Match '\$yenidenYukle = \$true'
+    }
+    It 'ayar envanterde ve varsayilani 1536' {
+        Get-BeyinAyar 'BEYIN_MERKEZ_BELLEK_MB' '1536' | Should Be '1536'
+        (@(Get-BeyinAyarKayitlari | Where-Object { $_.Ad -eq 'BEYIN_MERKEZ_BELLEK_MB' })).Count | Should Be 1
+    }
+}

@@ -21,6 +21,16 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.9.6 - 2026-11-10 - Gece yedegi geri dusus
+
+- **`beyin yedek` brain-cli basarisiz olunca artik yedeksiz kalmaz.** brain-cli
+  kuruluysa yedek onunla alinir; ama o arac `.state` klasorlerini haric
+  tutmuyor ve kopyalama sirasinda silinen bir oturum dosyasinda
+  (`motor/hooks/.state/sessions/*.json`) kod=1 ile duser. 8 Kasim gece yedegi
+  boyle dustu ve o hafta hic yedek yoktu (`beyin doktor`: zamanlanmis gorevler
+  CALISMIYOR). Artik sifir olmayan kodda motorun kendi yedegine (`yedek.ps1`:
+  `.state` haric, `TAMAM.txt` isaretli) dusulur; cikis kodu onunki olur.
+
 ## 1.9.5 - 2026-11-10 - Merkez bellek duzeltmesi
 
 - **Uzun acik kalan `beyin merkez` artik bellegi biriktirmez.** Panel 10

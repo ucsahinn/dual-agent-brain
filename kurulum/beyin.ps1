@@ -855,7 +855,15 @@ switch ($KomutN) {
         # --apply SART: --apply olmadan brain-cli yalniz ONIZLEME plani uretir
         # ve hicbir sey yazmaz. Onizlemeyi yedek sanmak gercek bir tuzaktir.
         & node $cli backup --target $vault --apply
-        exit $LASTEXITCODE
+        $cliKod = $LASTEXITCODE
+        # 2026-11-10: brain-cli .state'i haric tutmuyor; kopyalama sirasinda silinen bir oturum dosyasinda (motor/hooks/.state/
+        # sessions/*.json) kod=1 ile dusuyordu ve o hafta YEDEK HIC YOKTU. Basarisizlikta motorun kendi yedegine dus (.state haric,
+        # TAMAM.txt isaretli); cikis kodu yerli yedeginki olur.
+        if ($cliKod -ne 0) {
+            Write-Output "brain-cli yedegi basarisiz (kod=$cliKod) - motorun kendi yedegine (yedek.ps1) dusuluyor"
+            Cagir 'yedek.ps1' @($a.Gecen)
+        }
+        exit $cliKod
     }
 
     { $_ -in @('guncelle', 'update') } {

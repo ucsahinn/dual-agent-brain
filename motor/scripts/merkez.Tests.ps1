@@ -436,7 +436,9 @@ Describe 'merkez 1.5.0: sekmeler, ayrinti, bugun verisi, satir komutu' {
                 foreach ($l in $satirlar) { "$($g.W)/$i`:$($l.Length)" | Should Be "$($g.W)/$i`:$($g.W)" }
                 $i++
             }
-            $parcalar[0] | Should Match 'SIRADA'; $parcalar[1] | Should Match 'KANATLAR'; $parcalar[2] | Should Match 'KOŞULAR'; $parcalar[3] | Should Match 'OLAYLAR'; $parcalar[4] | Should Match 'ONAY BEKLİYOR'; $parcalar[4] | Should Match 'SON İŞLEMLER'
+            # Gercek vault: -Ayrinti ilk ajani secer ve secim gorunur kalsin diye kaydirir. Pano kalabaliksa (2026-11-26:
+            # 25 onay bekleyen kart + kota karti) SIRADA basligi ustte kalir; o zaman kaydirma satiri gorunmek zorundadir.
+            $parcalar[0] | Should Match 'SIRADA|▲ \d+ satır yukarıda'; $parcalar[1] | Should Match 'KANATLAR'; $parcalar[2] | Should Match 'KOŞULAR'; $parcalar[3] | Should Match 'OLAYLAR'; $parcalar[4] | Should Match 'ONAY BEKLİYOR'; $parcalar[4] | Should Match 'SON İŞLEMLER'
             $out | Should Not Match '[\u26A0\u2714\u2716\u25B6\u23F8\u2699]'
         }
     }

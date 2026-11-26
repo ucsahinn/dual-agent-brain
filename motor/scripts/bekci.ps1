@@ -70,7 +70,7 @@ try { $takimD = Get-BeyinTakimDurum -Paths $p } catch { }
 $takimCanli = New-Object System.Collections.Generic.List[string]; $takimOlu = 0
 if ($takimD) {
     foreach ($kr in @($takimD.Acik)) { foreach ($w in @($kr.workers)) { if (-not $w) { continue }
-        $c = [bool]($w.pid -and (Get-Process -Id ([int]$w.pid) -ErrorAction SilentlyContinue))
+        $c = [bool]($w.pid -and (Test-BeyinPidSahibi -ProcessId ([int]$w.pid) -Baslangic $w.startedAt))
         if ($c) { $takimCanli.Add("$($kr.runId) $($w.taskId) [$($w.status)] pid $($w.pid)") } else { $takimOlu++ } } }
 }
 $rapor.takim = $(if ($takimD) { [ordered]@{ acikKosu = @($takimD.Acik).Count; calisanIsci = [int]$takimD.Isci; canliIsci = @($takimCanli); oluIsci = $takimOlu; onayBekleyen = @($takimD.OnayBekleyen | ForEach-Object { "$($_.Tur) $($_.RunId)" }); satir = [string]$takimD.Satir } } else { $null })

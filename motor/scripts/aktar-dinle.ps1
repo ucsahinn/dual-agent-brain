@@ -29,7 +29,7 @@ $w.NotifyFilter = [IO.NotifyFilters]'FileName, LastWrite'
 Yaz ("beyin aktar dinle: {0}{1} icin dinleniyor | yeni aktarim gelince tek satir | tam metin: beyin aktar" -f $Kime, $(if ($Proje) { " / $Proje" } else { '' }))
 $bitis = $(if ($Sure -gt 0) { (Get-Date).AddSeconds($Sure) } else { [datetime]::MaxValue })
 while ((Get-Date) -lt $bitis) {
-    $kalan = [int][Math]::Min(30000, [Math]::Max(100, ($bitis - (Get-Date)).TotalMilliseconds))
+    $kalan = [int][Math]::Min([double]30000, [Math]::Max([double]100, [double]($bitis - (Get-Date)).TotalMilliseconds))   # double'da kirp, sonra int: -Sure 0 (MaxValue) tasmasin
     $r = $w.WaitForChanged([IO.WatcherChangeTypes]'Created, Changed, Renamed', $kalan)
     if ($r.TimedOut -or -not $r.Name -or $r.Name -notlike '*.json') { continue }   # atomik yazimin .tmp- dosyasi da atlanir
     $id = [IO.Path]::GetFileNameWithoutExtension($r.Name)

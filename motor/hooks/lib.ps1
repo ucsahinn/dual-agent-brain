@@ -5906,6 +5906,27 @@ function Open-BeyinTakimPanel {
     return @{ Ok = $true; Acilan = $n; Neden = '' }
 }
 
+function Test-BeyinPidSahibi {
+    # PID YENIDEN KULLANIMI (2026-11-26): kayitta duran pid'li surec yasiyor diye isci canli SAYILMAZ.
+    # Windows PID'leri geri dagitir; 2026-11-10 kosusunun isci pid'i 2026-11-25'te esbuild'e verilmisti ve
+    # bekci/merkez onu "canli isci" gosterdi. Surec, kaydin baslangicindan (startedAt) Tolerans'tan daha
+    # GEC baslamissa baska bir surectir. Baslangic yoksa ya da surecin StartTime'i okunamiyorsa eski
+    # davranis (yalniz varlik) korunur: gosterim icin yeterli; oldurme yolu bu fonksiyona guvenmemeli.
+    param([int]$ProcessId, $Baslangic, [int]$ToleransDk = 10, [hashtable]$Onbellek = $null)
+    if ($ProcessId -le 0) { return $false }
+    $pr = $null
+    if ($Onbellek -and $Onbellek.ContainsKey('Surecler')) { $pr = $Onbellek.Surecler[[int]$ProcessId] }
+    else { $pr = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue }
+    if (-not $pr) { return $false }
+    if (-not $Baslangic) { return $true }
+    $bas = $null
+    try { $bas = ([datetimeoffset]::Parse([string]$Baslangic, [Globalization.CultureInfo]::InvariantCulture)).LocalDateTime } catch { return $true }
+    $st = $null
+    try { $st = $pr.StartTime } catch { return $true }
+    if (-not $st) { return $true }
+    return ($st -le $bas.AddMinutes($ToleransDk))
+}
+
 function Get-BeyinTakimDurum {
     # Donus: @{ Var; Kosular; Acik; Isci; OnayBekleyen=@(@{RunId;Tur}); Satir (<=200) }
     param([hashtable]$Paths)

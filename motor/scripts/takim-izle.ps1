@@ -807,7 +807,7 @@ function GozetmenDurmus($rr) {
     $yas = [double]::PositiveInfinity
     if ($sv.heartbeatAt) { try { $yas = ((Get-Date).ToUniversalTime() - ([datetime]::Parse([string]$sv.heartbeatAt)).ToUniversalTime()).TotalSeconds } catch { } }
     if ($yas -lt 60) { return $false }
-    $canli = $false; if ($sv.pid) { $canli = [bool](Get-Process -Id ([int]$sv.pid) -ErrorAction SilentlyContinue) }
+    $canli = $false; if ($sv.pid) { $canli = [bool](Test-BeyinPidSahibi -ProcessId ([int]$sv.pid) -Baslangic $(if ($sv.PSObject.Properties['createdAt']) { $sv.createdAt })) }
     return -not $canli
 }
 function RenderRun([int]$tick) {

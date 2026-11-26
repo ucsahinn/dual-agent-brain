@@ -190,7 +190,7 @@ function Test-MerkezGozetmenDurdu($Kosu, [hashtable]$Onbellek, [datetime]$Simdi 
     $yas = [double]::PositiveInfinity
     if ($sv.heartbeatAt) { try { $yas = ((Get-Date).ToUniversalTime() - ([datetime]::Parse([string]$sv.heartbeatAt)).ToUniversalTime()).TotalSeconds } catch { } }
     if ($yas -lt 60) { return $false }
-    $canli = $false; if ($sv.pid) { $canli = Test-MerkezPidCanli ([int]$sv.pid) $Onbellek $Simdi }
+    $canli = $false; if ($sv.pid) { $canli = Test-MerkezPidCanli ([int]$sv.pid) $Onbellek $Simdi $(if ($sv.PSObject.Properties['createdAt']) { $sv.createdAt }) }
     return -not $canli
 }
 
@@ -567,14 +567,16 @@ function Get-MerkezEtkinlikHisto([string]$MakbuzDizin, [int]$Kova = 12, [int]$Ko
     return ,$h
 }
 
-function Test-MerkezPidCanli([int]$ProcessId, [hashtable]$Onbellek, [datetime]$Simdi) {
+function Test-MerkezPidCanli([int]$ProcessId, [hashtable]$Onbellek, [datetime]$Simdi, $Baslangic = $null) {
     if ($ProcessId -le 0) { return $false }
     if (-not $Onbellek) { $Onbellek = @{} }
     if (-not $Onbellek.ContainsKey('PidZamani') -or (($Simdi - $Onbellek.PidZamani).TotalSeconds -ge 3)) {
-        $pids = @{}; try { foreach ($pr in @(Get-Process -ErrorAction SilentlyContinue)) { $pids[[int]$pr.Id] = $true } } catch { }
-        $Onbellek.Pidler = $pids; $Onbellek.PidZamani = $Simdi
+        $pids = @{}; $sur = @{}; try { foreach ($pr in @(Get-Process -ErrorAction SilentlyContinue)) { $pids[[int]$pr.Id] = $true; $sur[[int]$pr.Id] = $pr } } catch { }
+        $Onbellek.Pidler = $pids; $Onbellek.Surecler = $sur; $Onbellek.PidZamani = $Simdi
     }
-    return [bool]$Onbellek.Pidler[[int]$ProcessId]
+    if (-not $Baslangic) { return [bool]$Onbellek.Pidler[[int]$ProcessId] }
+    # PID yeniden kullanimi: kaydin baslangicindan sonra dogmus surec o isci degildir (lib.ps1 Test-BeyinPidSahibi).
+    return [bool](Test-BeyinPidSahibi -ProcessId $ProcessId -Baslangic $Baslangic -Onbellek $Onbellek)
 }
 
 # ---------------------------------------------------------------------------------------------------------
@@ -785,7 +787,7 @@ function Get-MerkezAnlik {
         foreach ($w in $ws) {
             $ev = $null; if ([string]$w.taskId -cmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z' -and [string]$k.runId -cmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z') { try { $ev = Join-Path (Join-Path (Join-Path $Paths.TeamRuns $k.runId) $w.taskId) 'events.jsonl' } catch { $ev = $null } }
             $nabiz = -1; if ($ev -and (Test-Path -LiteralPath $ev)) { $nabiz = ($simdi - (Get-Item -LiteralPath $ev).LastWriteTime).TotalSeconds }
-            $surec = $null; if ($w.pid) { $surec = Test-MerkezPidCanli ([int]$w.pid) $Onbellek $simdi }
+            $surec = $null; if ($w.pid) { $surec = Test-MerkezPidCanli ([int]$w.pid) $Onbellek $simdi $w.startedAt }
             $d = Get-MerkezDurum @{ Tur = 'isci'; IsciDurum = [string]$w.status; Verdict = [string]$w.verdict; NabizSn = $nabiz; SurecCanli = $surec; GozetmenDurdu = $sahipsiz; KartDurum = $kartHarita[[string]$w.taskId] }
             $balon = ''; if ($d.Durum -in @('calisiyor', 'engelli')) { $balon = Get-MerkezIsciEtkinlik $ev }
             elseif ($d.Durum -eq 'duraklatildi') { $balon = '‖ kota doldu' } elseif ($d.Durum -eq 'bitti') { $balon = '✓ teslim etti' }

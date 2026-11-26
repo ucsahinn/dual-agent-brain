@@ -21,6 +21,17 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.9.8 - 2026-11-26 - PID yeniden kullanimi
+
+- **Bitmis isci artik "canli" gorunmez.** Windows kapanan sureclerin PID'lerini
+  yeniden dagitir. `beyin bekci`, `beyin merkez` ve kosu panosu bir isciyi ya da
+  gozetmeni yalniz kayittaki PID ile bir surec yasiyor diye canli sayiyordu:
+  2026-11-10 kosusunun isci PID'i 2026-11-25'te `esbuild`'e verilmisti ve bekci
+  onu "canli isci" diye gosterdi - o PID'i kapatmak baska bir programi oldururdu.
+  Artik surec, kaydin baslangicindan (`startedAt`, gozetmende `createdAt`) 10
+  dakikadan daha gec baslamissa o isci sayilmaz. Baslangic okunamazsa eski
+  davranis surer; bu kontrol oldurme kararina tek basina dayanak degildir.
+
 ## 1.9.7 - 2026-11-10 - Yedek budamasi
 
 - **brain-cli yedekleri artik sinirsiz birikmez.** `beyin yedek` brain-cli ile

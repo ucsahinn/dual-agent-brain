@@ -21,6 +21,14 @@ onu ve yayindaki surumu birlikte basar.
 
 ---
 
+## 1.9.9 - 2026-11-26 - aktar dinle sure tasmasi
+
+- **`beyin aktar dinle` sure verilmeden cokmuyor.** `-Sure` verilmeyince (ya da
+  `0`) bitis zamani `[datetime]::MaxValue` oluyordu; kalan bekleme suresi
+  `[Math]::Min(int, double)` ile hesaplanirken PowerShell int asiri yuklemesini
+  secip `MethodException` firlatiyordu ve dinleyici ilk turda dusuyordu. Hesap
+  artik double'da kirpilip sonra int'e cevriliyor.
+
 ## 1.9.8 - 2026-11-26 - PID yeniden kullanimi
 
 - **Bitmis isci artik "canli" gorunmez.** Windows kapanan sureclerin PID'lerini
